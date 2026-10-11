@@ -1,30 +1,10 @@
 import { parseFrameRange, query, summarize } from '@solocut/core';
 import { compareStats, computeStats, getArchive, listArchive, registerProject, searchArchive, type ArchiveEntry } from '@solocut/archive';
 import { loadSettings } from '@solocut/settings';
-import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { deepMerge } from '@solocut/templates';
 import { CliError, emit, intOpt, opts, t, type Ctx } from '../ctx.js';
-import { applyEdit, openProject, readTimeline, writeAtomic, type Project } from '../project.js';
+import { applyEdit, openProject, readTimeline, writeAtomic, writeTemplateOverride } from '../project.js';
 import { REUSE_PARTS, planReuse, type ReusePart } from '../reuse.js';
-
-/** Merge a patch into <project>/templates/<id>/template.yaml (written as JSON, which is valid YAML). */
-function writeTemplateOverride(p: Project, patch: Record<string, unknown>): string {
-  const id = p.file.template.id;
-  const file = join(p.dir, 'templates', id, 'template.yaml');
-  let current: Record<string, unknown> = { id, extends: id };
-  if (existsSync(file)) {
-    const text = readFileSync(file, 'utf8').replace(/^#.*\n/gm, '');
-    try {
-      current = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new CliError('template-override', `${file} exists and is not machine-written; merge this by hand: ${JSON.stringify(patch)}`);
-    }
-  }
-  const next = deepMerge(current, patch);
-  writeAtomic(file, `# project-only template override (solocut past reuse). JSON is valid YAML.\n${JSON.stringify(next, null, 2)}\n`);
-  return `templates/${id}/template.yaml`;
-}
 
 function row(e: ArchiveEntry): string {
   const m = Math.floor(e.durationSec / 60);
@@ -125,7 +105,7 @@ export async function cmdPast(ctx: Ctx, args: string[]): Promise<void> {
     if (values.apply) {
       await applyEdit(p, plan.ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: `past reuse ${past.entry.id}` });
       applied = true;
-      if (Object.keys(plan.templatePatch).length) templateFile = writeTemplateOverride(p, plan.templatePatch);
+      if (Object.keys(plan.templatePatch).length) templateFile = writeTemplateOverride(join(p.dir, 'templates'), p.file.template.id, plan.templatePatch, 'solocut past reuse', { project: p.dir }).file;
     }
     emit(ctx, { archive: past.entry.id, what, ops: plan.ops, templatePatch: plan.templatePatch, notes: plan.notes, skipped: plan.skipped, applied, ...(templateFile ? { templateFile } : {}) }, () => [
       ...plan.notes,

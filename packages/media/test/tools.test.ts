@@ -162,3 +162,33 @@ describe.skipIf(!HAVE_FFMPEG)('ffmpeg tools', () => {
     expect(gy.spec!.note).toMatch(/1 audio channels/);
   });
 });
+
+describe.skipIf(!HAVE_FFMPEG)('detectHwEncoder', () => {
+  it('honours SOLOCUT_HWENC, probes once and caches on disk', async () => {
+    const { detectHwEncoder, resetHwEncoderCache } = await import('../src/index.js');
+    const saved = { enc: process.env.SOLOCUT_HWENC, home: process.env.SOLOCUT_HOME };
+    const { dir, cleanup } = tempDir('hwenc');
+    try {
+      process.env.SOLOCUT_HWENC = 'off';
+      expect(await detectHwEncoder()).toBeNull();
+      process.env.SOLOCUT_HWENC = 'h264_nvenc';
+      expect(await detectHwEncoder()).toBe('h264_nvenc');
+      delete process.env.SOLOCUT_HWENC;
+      process.env.SOLOCUT_HOME = dir;
+      resetHwEncoderCache();
+      const first = await detectHwEncoder({ refresh: true });
+      expect(first === null || ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv', 'h264_amf'].includes(first)).toBe(true);
+      if (process.platform === 'darwin') expect(first).toBe('h264_videotoolbox');
+      const { readFileSync } = await import('node:fs');
+      expect(Object.values(JSON.parse(readFileSync(join(dir, 'cache', 'hwenc.json'), 'utf8')))).toEqual([first]);
+      resetHwEncoderCache();
+      expect(await detectHwEncoder()).toBe(first); // from the disk cache
+      expect(await detectHwEncoder({ platform: 'aix' as NodeJS.Platform, refresh: true })).toBeNull(); // no candidates
+    } finally {
+      if (saved.enc === undefined) delete process.env.SOLOCUT_HWENC; else process.env.SOLOCUT_HWENC = saved.enc;
+      if (saved.home === undefined) delete process.env.SOLOCUT_HOME; else process.env.SOLOCUT_HOME = saved.home;
+      resetHwEncoderCache();
+      cleanup();
+    }
+  });
+});

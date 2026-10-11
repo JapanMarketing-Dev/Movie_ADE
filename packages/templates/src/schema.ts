@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 export const STEP_IDS = [
   'ingest', 'sync', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check', 'review',
-  'final', 'thumbnail', 'metadata',
+  'final', 'thumbnail', 'metadata', 'analyze', 'masks',
 ] as const;
 export type StepId = (typeof STEP_IDS)[number];
 
@@ -91,6 +91,33 @@ export const TemplateFileSchema = z.object({
     retakeChoice: Threshold.optional(),
   }),
   multicam: z.object({ maxShotSec: z.number().positive(), minShotSec: z.number().positive() }).optional(),
+  /** docs/09 sfx rules: where effects fire (core sfxFromRules). The cap falls back to audio.sfx.maxPerMinute. */
+  sfx: z.object({
+    rules: z.array(z.object({
+      on: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in']),
+      kind: z.string().min(1),
+      probability: z.number().min(0).max(1).optional(),
+      gainDb: z.number().optional(),
+    })),
+    maxPerMin: z.number().min(0).optional(),
+    gainDb: z.number().optional(),
+    minSpacingMs: z.number().int().min(0).optional(),
+  }).optional(),
+  /** Tracked zoom (core applyTracks): punch in toward clicks on screen segments. */
+  zoom: z.object({
+    followClicks: z.union([z.boolean(), z.object({
+      scale: z.number().min(1).max(3).optional(), holdSec: z.number().positive().optional(), rampSec: z.number().min(0).optional(),
+    })]).default(false),
+  }).optional(),
+  /** Caption look measured from a benchmark video (core profileToTemplatePatch). */
+  captionLook: z.object({
+    size: z.number().positive(),
+    fill: z.string().optional(),
+    stroke: z.object({ color: z.string(), widthRatio: z.number().min(0) }).optional(),
+    box: z.boolean(),
+    emphasisColor: z.string().optional(),
+    emphasisScale: z.number().positive().optional(),
+  }).optional(),
   /**
    * docs/18: the videos made from one take. The main timeline is the output without `derive`; derived outputs are
    * vertical variants (variants/<target>/timeline.json). `sameAs` reuses another variant's selection.

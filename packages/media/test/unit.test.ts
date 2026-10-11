@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  concatLine, crossCorrelateOffset, defaultFontsDir, killTree, withFontsDir, fft, inputsOf, loudnessFinding, measuredLoudnorm, nextPow2, onsetEnvelope, parseBlackLog, parseFreezeLog,
+  concatLine, crossCorrelateOffset, defaultFontsDir, hwEncodeArgs, killTree, parseEncoders, renderConcurrency, withEncoder, withFontsDir, fft, inputsOf, loudnessFinding, measuredLoudnorm, nextPow2, onsetEnvelope, parseBlackLog, parseFreezeLog,
   parseLoudnormLog, parseProbe, parseProgressLine, parseRational, parseSilenceLog, robustLine, specFinding, xcorr,
 } from '../src/index.js';
 import type { ProbeResult } from '../src/index.js';
@@ -326,5 +326,27 @@ describe('process and font helpers', () => {
       if (saved.home === undefined) delete process.env.SOLOCUT_HOME; else process.env.SOLOCUT_HOME = saved.home;
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('hardware encoders', () => {
+  it('parseEncoders reads `ffmpeg -encoders`', () => {
+    const text = 'Encoders:\n V..... = Video\n ------\n V....D libx264              libx264 H.264\n V....D h264_videotoolbox    VideoToolbox H.264 Encoder (codec h264)\n A....D aac                  AAC\n';
+    expect([...parseEncoders(text)]).toEqual(['libx264', 'h264_videotoolbox', 'aac']);
+  });
+  it('withEncoder swaps the x264 block and disables B-frames', () => {
+    const args = ['-i', 'a.mp4', '-map', '[v]', '-frames:v', '30', '-r', '30/1', '-c:v', 'libx264', '-preset', 'veryfast', '-profile:v', 'high', '-pix_fmt', 'yuv420p', '-crf', '28',
+      '-g', '30', '-keyint_min', '30', '-sc_threshold', '0', '-bf', '2', '-flags', '+cgop', '-an', '-f', 'mp4', '{out}'];
+    const out = withEncoder(args, 'h264_videotoolbox');
+    expect(out).toEqual(['-i', 'a.mp4', '-map', '[v]', '-frames:v', '30', '-r', '30/1', ...hwEncodeArgs('h264_videotoolbox'),
+      '-g', '30', '-keyint_min', '30', '-bf', '0', '-flags', '+cgop', '-an', '-f', 'mp4', '{out}']);
+    expect(withEncoder(['-c:v', 'copy'], 'h264_nvenc')).toEqual(['-c:v', 'copy']);
+    for (const e of ['h264_nvenc', 'h264_qsv', 'h264_amf'] as const) expect(hwEncodeArgs(e).slice(0, 2)).toEqual(['-c:v', e]);
+  });
+  it('renderConcurrency splits cores between chunks and threads', () => {
+    expect(renderConcurrency({ hardware: false, cpus: 14 })).toEqual({ chunks: 4, threads: 4 });
+    expect(renderConcurrency({ hardware: false, cpus: 32 })).toEqual({ chunks: 6, threads: 6 });
+    expect(renderConcurrency({ hardware: true, cpus: 14 })).toEqual({ chunks: 3, threads: 5 });
+    expect(renderConcurrency({ hardware: false, cpus: 1 })).toEqual({ chunks: 1, threads: 1 });
   });
 });

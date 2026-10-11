@@ -73,6 +73,8 @@ export interface CliResult<T = unknown> {
 }
 
 export type LaneName = 'segments' | 'captions' | 'scenes' | 'sfx' | 'markers';
+/** Review items can also point at masks (source-frame tracks, not drawn as a lane). */
+export type ReviewLane = LaneName | 'masks' | 'open';
 export interface LaneItem {
   id: string;
   start: number;
@@ -83,7 +85,7 @@ export interface LaneItem {
 }
 export interface ReviewItem {
   id: string;
-  lane: LaneName | 'open';
+  lane: ReviewLane;
   start?: number;
   label: string;
   reason?: string;

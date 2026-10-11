@@ -283,7 +283,7 @@ export async function generateGemini(req: GenRequest, ctx: GenContext): Promise<
   const key = ctx.env.SOLOCUT_GEMINI_API_KEY ?? ctx.env.GEMINI_API_KEY;
   if (!key) throw new ThumbError('gemini', 'no API key (SOLOCUT_GEMINI_API_KEY)');
   const f = ctx.fetch ?? fetch;
-  const model = ctx.model ?? 'gemini-3-pro-image-preview';
+  const model = ctx.model ?? 'gemini-nano-banana-2.1';
   const data = readFileSync(req.frame).toString('base64');
   const out: string[] = [];
   for (let i = 0; i < req.n; i++) {

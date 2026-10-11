@@ -16,6 +16,7 @@ import {
 import { DEFAULT_MANIFEST, ensureTool, resolveToolSync, solocutHome, toolStatus, whichSync, type ToolName } from '@solocut/toolchain';
 import { variantInfo } from './derive.js';
 import { CLI_VERSION, CliError, emit, info, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
+import { cameraCount } from '../analysis.js';
 import {
   listDirs, openProject, paths, projectTemplate, readStatus, readTimeline, readTimelineRaw, setStep, writeAtomic, writeStatus,
   writeTimeline, type Project, type ProjectFile,
@@ -98,6 +99,8 @@ export function nextContext(p: Project, tl: Timeline | null, o: { autopilot?: bo
     stopBefore: settings.autopilot.stopBefore,
     lang: o.lang,
     ...(o.variants ? { variants: o.variants } : {}),
+    // known once media is registered: one camera (or none) → nothing to switch, multicam passes
+    ...(tl && hasSources ? { cameras: cameraCount(tl) } : {}),
   };
 }
 

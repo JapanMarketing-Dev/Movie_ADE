@@ -45,19 +45,23 @@ export interface NextContext {
   lang?: 'ja' | 'en';
   /** Derived variants (docs/18): whether each exists, is stale against the main timeline, and its last check. */
   variants?: Record<string, { exists: boolean; stale: boolean; lastCheckFailed: number }>;
+  /** Camera sources in the project: with fewer than 2 there is nothing to switch, so multicam passes. */
+  cameras?: number;
 }
 
 /** Steps a step needs (only those present in the pipeline count). */
 export const STEP_DEPS: Record<StepId, StepId[]> = {
   ingest: [],
   sync: ['ingest'],
+  analyze: ['ingest', 'sync'],
   transcribe: ['ingest'],
   'rough-cut': ['transcribe', 'sync'],
-  multicam: ['rough-cut', 'sync'],
+  multicam: ['rough-cut', 'sync', 'analyze'],
   captions: ['transcribe'],
-  sfx: ['rough-cut'],
-  layout: ['rough-cut'],
-  preview: ['rough-cut', 'multicam', 'captions', 'sfx', 'layout'],
+  sfx: ['rough-cut', 'captions'],
+  layout: ['rough-cut', 'analyze'],
+  masks: ['rough-cut', 'analyze'],
+  preview: ['rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'masks'],
   check: ['preview'],
   review: ['check'],
   final: ['review', 'check'],
@@ -75,6 +79,20 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
     do: { ja: 'トラック間（カメラ・マイク・画面）の同期を取る', en: 'Sync the tracks (cameras, mic, screen)' },
     commands: ['solocut sync --json'],
   },
+  analyze: {
+    do: {
+      ja: '素材を解析する（無音・音量・黒画面・静止）。顔・カーソル・個人情報の解析ファイルはアプリが derived/analysis/ に書く',
+      en: 'Analyze the media (silence, loudness, black/frozen frames). The app writes face/cursor/PII analysis to derived/analysis/',
+    },
+    commands: ['solocut analyze --json'],
+  },
+  masks: {
+    do: {
+      ja: '画面に映った個人情報（メール・APIキーなど）にモザイクを入れ、残りは確認に回す',
+      en: 'Mask private text on screen (emails, API keys…) and leave the masks for review',
+    },
+    commands: ['solocut masks from-analysis --json', 'solocut step masks done'],
+  },
   transcribe: {
     do: { ja: 'マイクの音声を文字起こしする（単語単位の時刻つき）', en: 'Transcribe the mic track with word timestamps' },
     commands: ['solocut transcribe --json'],
@@ -88,7 +106,10 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
   },
   multicam: {
     do: { ja: 'prompts/multicam.md に沿って区間ごとのカメラを決める', en: 'Choose the camera per segment following prompts/multicam.md' },
-    commands: ['solocut analyze --json', 'solocut edit setCamera --id <segment> --camera <source> --reason "<why>"', 'solocut step multicam done'],
+    commands: [
+      'solocut multicam material --json', 'solocut edit split-for-switch --segment <segment> --at <sourceFrame,…> --reason "<why>"',
+      'solocut edit setCamera --id <segment> --camera <source> --reason "<why>"', 'solocut step multicam done',
+    ],
   },
   captions: {
     do: { ja: '字幕を作り、prompts/captions.md に沿って直す', en: 'Build captions and polish them following prompts/captions.md' },
@@ -96,11 +117,11 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
   },
   sfx: {
     do: { ja: 'prompts/sfx.md に沿って効果音・BGM を入れる', en: 'Add sound effects and BGM following prompts/sfx.md' },
-    commands: ['solocut edit addSfx --sfx \'{…}\' --reason "<why>"', 'solocut step sfx done'],
+    commands: ['solocut sfx apply --json', 'solocut edit addSfx --sfx \'{…}\' --reason "<why>"', 'solocut step sfx done'],
   },
   layout: {
     do: { ja: '区間ごとのレイアウト（ワイプ・全画面など）を決める', en: 'Set the layout of each segment (wipe, full screen…)' },
-    commands: ['solocut edit setVideo --id <segment> --video \'{"layout":"…"}\' --reason "<why>"', 'solocut step layout done'],
+    commands: ['solocut tracks apply --json', 'solocut edit setVideo --id <segment> --video \'{"layout":"…"}\' --reason "<why>"', 'solocut step layout done'],
   },
   preview: {
     do: { ja: 'プレビューを書き出す', en: 'Render the preview' },
@@ -214,7 +235,9 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
   const pipeline = expandPipeline(template);
   const variants = derivedTargets(template);
   const stateOf = (s: PipelineStep) => status.find((x) => x.step === s)?.state ?? 'todo';
-  const isPassed = (s: PipelineStep) => !pipeline.includes(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped';
+  /** multicam with one camera (or none) has nothing to decide. */
+  const notNeeded = (s: PipelineStep) => s === 'multicam' && ctx.cameras !== undefined && ctx.cameras < 2;
+  const isPassed = (s: PipelineStep) => !pipeline.includes(s) || notNeeded(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped';
 
   const make = (step: PipelineStep, state: NextStep['state'], why: string, extra: Partial<NextStep> = {}): NextStep => {
     const txt = stepText(step, lang, variants);
@@ -291,7 +314,7 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
         return waitFor(step, ja ? '3本の動画がそろいました。投稿は人の承認が必要です' : 'All videos are ready; publishing needs a human approval');
       }
     }
-    if (st === 'done' || st === 'skipped') continue;
+    if (st === 'done' || st === 'skipped' || notNeeded(step)) continue;
 
     if (st === 'needs-human') {
       // autopilot proceeds with the most likely answer, except sync (a wrong sync breaks everything) and review

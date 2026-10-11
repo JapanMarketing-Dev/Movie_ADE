@@ -67,6 +67,11 @@ export interface PiiHit {
   box: NBox;
 }
 
+/** NFKC (full-width → ASCII) and "の" / "＠" between ASCII word characters read as "@". */
+export function normalizeOcr(s: string): string {
+  return s.normalize('NFKC').replace(/([A-Za-z0-9._%+-])\s*[の@]\s*([A-Za-z0-9-])/g, '$1@$2');
+}
+
 export function redact(s: string): string {
   if (s.length <= 6) return '•'.repeat(s.length);
   return `${s.slice(0, 3)}${'•'.repeat(Math.min(12, s.length - 5))}${s.slice(-2)}`;
@@ -91,7 +96,7 @@ export function padBox(b: NBox, pad: number): NBox {
  * Finds PII in OCR output. Single words are tested against every pattern; consecutive words on a line are also
  * joined (with and without spaces) for phone numbers and tokens that OCR split up.
  */
-export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
+export function findPii(lines: OcrWord[][], minConfidence = 15): PiiHit[] {
   const hits: PiiHit[] = [];
   const overlaps = (a: NBox, b: NBox) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   const add = (kind: PiiKind, label: string, text: string, words: OcrWord[]) => {
@@ -105,7 +110,7 @@ export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
     for (const w of words) {
       for (const p of PII_PATTERNS) {
         if (p.kind === 'phone') continue;
-        const m = p.re.exec(w.text);
+        const m = p.re.exec(normalizeOcr(w.text));
         if (m) {
           add(p.kind, p.label, m[0], [w]);
           break;
@@ -116,7 +121,23 @@ export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
       const m = PII_PATTERNS.find((p) => p.kind === 'phone')!.re.exec(w.text);
       if (m && m[0].replace(/\D/g, '').length >= 10) add('phone', 'phone', m[0], [w]);
     }
-    // windows of 2..4 words for phone numbers / split tokens
+    // OCR splits long tokens and misreads "@" (jpn models read it as "の"): retry on 2..4 joined words
+    // narrowest windows first, so the box covers only the words that make up the match
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i + n <= words.length; i++) {
+        const win = words.slice(i, i + n);
+        const joined = normalizeOcr(win.map((w) => w.text).join(''));
+        for (const p of PII_PATTERNS) {
+          if (p.kind === 'phone') continue;
+          const m = p.re.exec(joined);
+          if (m) {
+            add(p.kind, p.label, m[0], win);
+            break;
+          }
+        }
+      }
+    }
+    // windows of 2..4 words for phone numbers
     for (let i = 0; i < words.length; i++) {
       for (let n = 2; n <= 4 && i + n <= words.length; n++) {
         const win = words.slice(i, i + n);

@@ -44,6 +44,16 @@ decisions:
 # 画面とカメラの切り替え（全画面・ワイプ・カメラのみ）の長さ
 multicam: { maxShotSec: 90, minShotSec: 3 }
 
+# 効果音のルール（solocut sfx apply）。章の頭と場面の切り替わりだけに控えめに入れる
+sfx:
+  rules:
+    - { on: section, kind: whoosh }
+    - { on: scene-in, kind: pop, probability: 0.5 }
+  maxPerMin: 3
+
+# クリックした場所へ寄るズーム（solocut tracks apply）
+zoom: { followClicks: true }
+
 features:
   autoZoom: true
   keystrokes: true
@@ -58,4 +68,4 @@ outputs:
   tiktok:         { derive: vertical, maxSec: 90, captions: tiktok-bold, layout: split-v }
   youtube-shorts: { derive: vertical, sameAs: tiktok, maxSec: 60, captions: tiktok-bold, layout: split-v, hook: shorts }
 
-pipeline: [ingest, sync, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, thumbnail, metadata, review, final]
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check, thumbnail, metadata, review, final]

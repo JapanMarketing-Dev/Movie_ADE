@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { appendFileSync, constants as fsc, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import {
+  checkCameraSwitches, checkCaptionFaceOverlap, checkCaptionSafeArea, checkMosaicTracking, type CheckFinding,
   compile, durationFrames, frameToSeconds, frameToTimecode, repackSegments, secondsToFrame, sourceRate,
   takeFps, takeFrameToTimeline, timecodeToFrame, type Caption, type Marker, type Op, type Rational, type Segment, type Source,
   type Target, type Timeline, type VideoChoice,
@@ -13,6 +14,7 @@ import { resolveTool } from '@solocut/toolchain';
 import { registerProject } from '@solocut/archive';
 import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
+import { cameraCount, loadAnalysis } from '../analysis.js';
 import { apiKeyFor } from '../keys.js';
 import { ensureFonts } from '../fonts.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
@@ -704,10 +706,6 @@ export async function cmdCaptions(ctx: Ctx, args: string[]): Promise<void> {
 
 // ---------- render / frame / check ----------
 
-function slugFile(s: string): string {
-  return s.normalize('NFKC').replace(/[\\/:*?"<>|\x00-\x1f]/g, '').replace(/\s+/g, '-').slice(0, 60) || 'video';
-}
-
 async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 'preview' | 'final'; target?: Target; output: string }): Promise<{ output: string; reused: number; rendered: number; warnings: string[] }> {
   const m = await media();
   const tpl = projectTemplate(p);
@@ -743,7 +741,7 @@ async function renderOne(ctx: Ctx, p: Project, o: { quality: 'preview' | 'final'
   // a variant renders for its own target (docs/18); the main video for the given or first target
   const target = (p.variant ?? o.target ?? (o.quality === 'final' ? tl.meta.targets[0] : undefined)) as Target | undefined;
   if (target && !['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels'].includes(target)) throw new CliError('usage', `unknown target: ${target}`);
-  const output = o.out ? resolve(ctx.io.cwd, o.out) : o.quality === 'preview' ? vpaths(p).preview : join(p.dir, 'renders', target!, `${slugFile(tl.meta.title)}.mp4`);
+  const output = o.out ? resolve(ctx.io.cwd, o.out) : o.quality === 'preview' ? vpaths(p).preview : join(p.dir, 'renders', target!, 'final.mp4');
   const started = Date.now();
   const r = await renderTimeline(ctx, p, tl, { quality: o.quality, ...(target ? { target } : {}), output });
   const out = rel(p, r.output);
@@ -763,7 +761,11 @@ async function renderOne(ctx: Ctx, p: Project, o: { quality: 'preview' | 'final'
         r.warnings.push(`archive: ${(e as Error).message}`);
       }
     }
-  } else if (!o.out && !p.variant) setStep(p, 'preview', 'done');
+  } else if (!o.out && !p.variant) {
+    // compatibility copy for readers of the old location
+    copyFileSync(r.output, join(p.dir, 'renders', 'preview.mp4'));
+    setStep(p, 'preview', 'done');
+  }
   return { variant: p.variant ?? 'main', output: out, quality: o.quality, ...(target ? { target } : {}), reused: r.reused, rendered: r.rendered, seconds: Math.round((Date.now() - started) / 100) / 10, warnings: r.warnings };
 }
 
@@ -821,12 +823,35 @@ export async function cmdFrame(ctx: Ctx, args: string[]): Promise<void> {
   emit(ctx, { frame, timecode: frameToTimecode(frame, tl.canvas.fps), path: out }, () => out);
 }
 
+/**
+ * Timeline-based checks the template asks for (core round 5), run when their inputs exist: caption safe area (always,
+ * per target), caption/face overlap (face tracks), mosaic tracking (PII analysis), camera switches (≥ 2 cameras).
+ */
+export function trackChecks(p: Project, tl: Timeline, target: Target | undefined): CheckFinding[] {
+  const tpl = projectTemplate(p);
+  const want = new Set<string>(tpl.checks);
+  const an = loadAnalysis(p.dir, tl);
+  const out: CheckFinding[] = [];
+  if (want.has('caption-safe-area') && target && tl.captions.length) out.push(checkCaptionSafeArea(tl, target));
+  if (want.has('caption-face-overlap') && an.tracks.faces && tl.captions.length) out.push(checkCaptionFaceOverlap(tl, an.tracks));
+  if (want.has('mosaic-tracking') && Object.keys(an.pii).length) out.push(checkMosaicTracking(tl, an.pii));
+  if (want.has('camera-switch') && cameraCount(tl) >= 2) {
+    const tr = readTranscript(p);
+    out.push(checkCameraSwitches(tl, {
+      ...(tr ? { words: { [tr.take]: tr.words } } : {}),
+      ...(tpl.multicam ? { maxShotSec: tpl.multicam.maxShotSec, minShotSec: tpl.multicam.minShotSec } : {}),
+    }));
+  }
+  return out;
+}
+
 async function checkOne(ctx: Ctx, p: Project, o: { input?: string; target?: string; only?: string }): Promise<{ variant: string; run: string; passed: number; failed: number; needsHuman: number; report: string; findings: unknown[] }> {
   const tl = readTimeline(p);
   const m = await media();
   const input = o.input ? resolve(ctx.io.cwd, o.input) : await freshPreview(ctx, p, tl);
   const target = (p.variant ?? o.target ?? tl.meta.targets[0]) as Target | undefined;
-  let findings = await m.runMachineChecks(input, target ? { target } : {});
+  let findings: CheckFinding[] = await m.runMachineChecks(input, target ? { target } : {});
+  findings.push(...trackChecks(p, tl, target));
   if (o.only === 'failed' && tl.review.lastCheck) {
     const prev = readJsonFile<{ findings: { check: string; status: string }[] }>(join(p.dir, 'checks', tl.review.lastCheck.run, 'report.json'));
     const failedSet = new Set(prev.findings.filter((f) => f.status !== 'pass').map((f) => f.check));

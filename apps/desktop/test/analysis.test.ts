@@ -4,6 +4,7 @@ import {
   findPii,
   frameDiff,
   normalizeCursor,
+  normalizeOcr,
   padBox,
   piiMaskOps,
   redact,
@@ -49,9 +50,22 @@ describe('PII detection', () => {
     const split = hits.find((h) => h.box.y < 0.61 && h.box.y > 0.55)!;
     expect(split.box.w).toBeGreaterThan(0.15); // union of the three words (+ padding)
   });
+  it('joins words OCR split, and reads "の" between ASCII as "@"', () => {
+    const hits = findPii([
+      [w('contact:', 0), w('taro.yamada', 0.1), w('の', 0.25, 0.5, 0.02), w('example.com', 0.28)],
+      [w('KEY=sk-proj-abcdefghij', 0, 0.6, 0.3), w('klmnopqrstuvwx123', 0.31, 0.6, 0.3)],
+      [w('ｍａｉｌ＠ｅｘａｍｐｌｅ．ｊｐ', 0, 0.8)],
+    ]);
+    expect(hits.map((h) => h.kind)).toEqual(['email', 'token', 'email']);
+    expect(hits[0]!.box.x).toBeGreaterThan(0.09); // starts at taro.yamada, not at contact:
+    expect(hits[0]!.box.x).toBeLessThan(0.11);
+    expect(hits[0]!.box.x + hits[0]!.box.w).toBeGreaterThan(0.37);
+    expect(normalizeOcr('a の b')).toBe('a@b');
+    expect(normalizeOcr('これの話')).toBe('これの話');
+  });
   it('ignores ordinary text, short numbers and low-confidence words', () => {
     expect(findPii([[w('version', 0), w('1.2.3', 0.1), w('2026-10-11', 0.2), w('sk-short', 0.3), w('12:30', 0.4)]])).toEqual([]);
-    expect(findPii([[w('a@b.co', 0, 0.5, 0.1, 10)]])).toEqual([]);
+    expect(findPii([[w('a@b.co', 0, 0.5, 0.1, 10)]])).toEqual([]); // below 15: OCR noise
   });
   it('redacts and boxes', () => {
     expect(redact('abc')).toBe('•••');

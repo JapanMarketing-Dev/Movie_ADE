@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { cpus, homedir } from 'node:os';
+import { homedir } from 'node:os';
+import type { HwEncoder } from './hwenc.js';
+import { cpuCount, detectHwEncoder, renderConcurrency, withEncoder } from './hwenc.js';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FramePlan, RenderPlan } from '@solocut/core';
 import { ffFilterValue, LOUDNORM_TOKEN } from '@solocut/core';
@@ -59,7 +61,13 @@ export interface ExecuteOptions {
   cacheDir: string;
   output: string;
   onProgress?: (p: { chunk: string; done: number; total: number }) => void;
+  /** Parallel chunks (default from the CPU count, see renderConcurrency). */
   concurrency?: number;
+  /**
+   * Video encoder for preview plans: 'auto' (default) = the detected hardware encoder when there is one, 'x264' =
+   * always software, or a specific hardware encoder. Final plans always use x264.
+   */
+  encoder?: 'auto' | 'x264' | HwEncoder;
   signal?: AbortSignal;
   /** Fonts folder for libass when the plan has none: default `defaultFontsDir()`; false = do not add. */
   fontsDir?: string | false;
@@ -110,7 +118,10 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>, si
   let failed: unknown = null;
   const worker = async () => {
     while (next < items.length && failed === null) {
-      if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      if (signal?.aborted) {
+        failed ??= Object.assign(new Error('aborted'), { name: 'AbortError' });
+        break;
+      }
       const item = items[next++]!;
       try {
         await fn(item);
@@ -119,7 +130,9 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>, si
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, worker));
+  // wait for every worker (their ffmpeg is killed by the signal and their temp files removed) before rejecting
+  await Promise.allSettled(Array.from({ length: Math.max(1, Math.min(n, items.length)) }, worker));
+  if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
   if (failed !== null) throw failed;
 }
 
@@ -132,7 +145,7 @@ export function concatLine(path: string): string {
  * Render a plan: chunks in parallel (cached by content in `cacheDir`), the audio mix (cached), then concat + mux.
  * ffmpeg runs with cwd = projectDir so plan paths stay relative.
  */
-export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Promise<{ output: string; reused: number; rendered: number }> {
+export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Promise<{ output: string; reused: number; rendered: number; encoder: string }> {
   const projectDir = resolve(o.projectDir);
   const cacheDir = resolve(projectDir, o.cacheDir);
   const output = resolve(projectDir, o.output);
@@ -149,7 +162,17 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
 
   const subs = [...(plan.subtitles ? [plan.subtitles.assPath] : []), ...(plan.writes ?? []).map((w) => w.path).filter((p) => p.endsWith('.ass'))];
   const fonts = o.fontsDir === false ? null : o.fontsDir ?? defaultFontsDir();
-  const chunks = fonts ? plan.chunks.map((c) => ({ ...c, args: withFontsDir(c.args, fonts) })) : plan.chunks;
+  const hw: HwEncoder | null = plan.quality !== 'preview' || o.encoder === 'x264' ? null
+    : o.encoder && o.encoder !== 'auto' ? o.encoder : await detectHwEncoder();
+  const par = renderConcurrency({ hardware: !!hw });
+  const conc = o.concurrency ?? par.chunks;
+  const threads = Math.max(1, Math.ceil(cpuCount() / conc));
+  const chunks = plan.chunks.map((c) => {
+    let args = fonts ? withFontsDir(c.args, fonts) : c.args;
+    if (hw) args = withEncoder(args, hw);
+    else if (args.includes('libx264') && !args.includes('-threads')) args = [...args.slice(0, -1), '-threads', String(threads), ...args.slice(-1)];
+    return { ...c, args, hash: hw ? `${c.hash}\0enc\0${hw}` : c.hash };
+  });
   const files = new Map<string, string>();
   const todo: RenderPlan['chunks'] = [];
   let reused = 0;
@@ -164,7 +187,6 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
   const total = plan.chunks.length;
   let done = reused;
   if (reused) o.onProgress?.({ chunk: '(cache)', done, total });
-  const conc = o.concurrency ?? Math.max(1, Math.min(4, Math.floor(cpus().length / 2)));
   const run = (args: string[]) => runFfmpeg(args, o.signal ? { cwd: projectDir, signal: o.signal } : { cwd: projectDir });
   const rendering = new Set<string>();
   await pool(todo, conc, async (c) => {
@@ -196,7 +218,7 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
   const listFile = join(cacheDir, `${createHash('sha256').update(list).digest('hex').slice(0, 16)}-${plan.concat.listFile}`);
   writeFileSync(listFile, list);
   await atomicOutput(output, (tmp) => run(sub(plan.final.args, { '{concat}': listFile, '{audio}': audioFile, '{out}': tmp })));
-  return { output, reused, rendered: rendering.size };
+  return { output, reused, rendered: rendering.size, encoder: hw ?? 'libx264' };
 }
 
 /**

@@ -53,8 +53,12 @@ const analysis = new AnalysisRunner({
   emit: (st) => emit(mainWc(), 'analysis:state', st),
   createWindow: () => {
     // hidden worker window: MediaPipe faces + tesseract.js OCR (docs: analysis producers)
-    const w = new BrowserWindow({ show: false, width: 640, height: 360, webPreferences: secureWebPreferences() });
+    const w = new BrowserWindow({ show: process.env.SOLOCUT_ANALYSIS_SHOW === '1', width: 640, height: 360, webPreferences: secureWebPreferences() });
     lockNavigation(w);
+    w.webContents.on('console-message', (e) => {
+      // tesseract prints "Parameter not found" for every unused config key; MediaPipe's telemetry is blocked by CSP
+      if ((e.level === 'warning' || e.level === 'error') && !/Parameter not found|odml\.pa\.googleapis/.test(e.message)) log(`[analysis] ${e.message}`);
+    });
     const r = rendererUrl();
     if (r.url) void w.loadURL(new URL('analysis.html', r.url.endsWith('/') ? r.url : `${r.url}/`).toString());
     else void w.loadFile(join(dirname(r.file!), 'analysis.html'));

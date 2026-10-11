@@ -16,6 +16,7 @@ import { cmdThumb } from './commands/thumb.js';
 import { cmdFeedback } from './commands/feedback.js';
 import { cmdDerive } from './commands/derive.js';
 import { cmdPublish } from './commands/publish.js';
+import { cmdBench, cmdMasks, cmdMulticam, cmdSfx, cmdTracks } from './commands/assist.js';
 
 export { CliError, CLI_VERSION } from './ctx.js';
 export type { IO } from './ctx.js';
@@ -65,6 +66,11 @@ const COMMANDS: Record<string, Handler> = {
   thumb: cmdThumb,
   feedback: cmdFeedback,
   derive: cmdDerive,
+  sfx: cmdSfx,
+  masks: cmdMasks,
+  multicam: cmdMulticam,
+  tracks: cmdTracks,
+  bench: cmdBench,
   publish: cmdPublish,
   config: cmdConfig,
   prompts: cmdPrompts,
@@ -91,6 +97,10 @@ const HELP: Record<Lang, string> = {
   edit <op> --<field> <v> --reason "<なぜ>" | edit --ops <file|json|->
   undo / redo / history / validate
   captions build                 字幕を作る
+  multicam material              カメラ切り替えの材料 → edit split-for-switch --segment <id> --at <素材フレーム,…>
+  sfx apply                      テンプレートの効果音ルールで効果音を入れる
+  tracks apply                   顔・カーソルを追うズーム、クリック・キー表示
+  masks from-analysis            画面の個人情報にモザイク（要確認）
   tl summary|show|range|query|why  timeline.json を必要な分だけ読む
 書き出しと確認
   render --preview | --final [--target youtube]
@@ -104,6 +114,7 @@ const HELP: Record<Lang, string> = {
   feedback import <dir> | list | show <id> | done <id>        動画フィードバック
 そのほか
   past list|search|show|timeline|compare|reuse|register   過去の動画
+  bench profile <samples.json> | bench apply <profile> --template <id>   参考動画の傾向をテンプレートへ
   mcp                            MCP サーバー（stdio）
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
@@ -123,6 +134,10 @@ Edit
   edit <op> --<field> <v> --reason "<why>" | edit --ops <file|json|->
   undo / redo / history / validate
   captions build
+  multicam material              camera-switch material → edit split-for-switch --segment <id> --at <sourceFrame,…>
+  sfx apply                      sound effects from the template rules
+  tracks apply                   face/cursor-following zoom, click and keystroke overlays
+  masks from-analysis            mask private text on screen (for review)
   tl summary|show|range|query|why  read only what you need of timeline.json
 Render and check
   render --preview | --final [--target youtube]
@@ -136,6 +151,7 @@ Render and check
   feedback import <dir> | list | show <id> | done <id>
 More
   past list|search|show|timeline|compare|reuse|register
+  bench profile <samples.json> | bench apply <profile> --template <id>
   mcp                            MCP server over stdio
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 

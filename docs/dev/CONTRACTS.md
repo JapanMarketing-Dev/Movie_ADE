@@ -214,6 +214,16 @@ export function overlaysFromInputLogs(t, { cursor?, keys? }, { shortcutsOnly? = 
 //   maxCharsPerLine, maxLines, position, emphasis }, cut.jumpZoom, audio { bgm.gainDb, sfx { maxPerMinute, gainDb } },
 //   sfx { rules, maxPerMin }, captionLook } — a structural subset of the templates Template (core does not import templates);
 //   the templates package deep-merges it.
+// Export to other editors (docs/12), pure; ExportOptions { projectDir? (absolute → file:// URLs), srtPath?, name? }:
+//   toOtio(t, o) → OpenTimelineIO JSON object (Timeline.1 → Stack.1 → Track.1 V1 main picture / V2 insets (wipe camera,
+//   split-v bottom) / A1 voice; Clip.2 + ExternalReference.1 (available_range when durationFrames is known) + Gap.1;
+//   chapters/markers as Marker.2 on the stack; metadata.solocut.captions = srtPath).
+//   toFcpxml(t, o) → FCPXML 1.11 string (format, assets with media-rep src + duration for Resolve, sequence/spine with
+//   asset-clips, insets as lane 1 and voice as lane −1 connected clips, scene segments as gaps, chapter-marker/marker).
+//   toEdl(t, o) → CMX3600 (V1 events, A events when the voice is another file, B when the same; BL for scenes;
+//   `* FROM CLIP NAME`, `* LOC:` for chapters/markers, `* CAPTIONS:` when srtPath). exportClips(t), fcpTime(frames, fps).
+// chaptersForDescription(t, { minSec = 10 }) → { ok, text: "0:00 Title" lines (h:mm:ss ≥ 1 h), chapters, notes }:
+//   outline (else chapter markers); first snapped to 0:00; chapters < 10 s merged; ok false when < 3 remain.
 // helpers: wipeGeometry, reanchor, sha256Hex (pure), ffFilterValue (filtergraph escaping), voiceSource, assTime, assEscape, assColor, assTagColor,
 // assHeader, assStyleLine, assDialogue, overlaysToAss
 ```
@@ -259,6 +269,13 @@ export function executeRenderPlan(plan: RenderPlan, o: { projectDir: string; cac
   // the burned ASS files. Outputs are written to a temp file and renamed (never half-written).
 export function renderFrame(plan: FramePlan /* from compileFrame */, o: { projectDir: string; output: string; signal?: AbortSignal }): Promise<{ output: string }>;
   // writes plan.writes, checks inputs exist (MediaError), atomic output
+// Speed: preview plans render with a hardware H.264 encoder when available (executeRenderPlan({ encoder: 'auto' (default)
+//   | 'x264' | HwEncoder })); final plans always x264. detectHwEncoder({ refresh?, platform? }) → 'h264_videotoolbox'
+//   (mac) | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' (win/linux) | null — listed in `ffmpeg -encoders` AND a 1-frame probe
+//   encode succeeds; cached per ffmpeg binary in memory + ~/.solocut/cache/hwenc.json; env SOLOCUT_HWENC=off|<encoder>.
+//   Hardware chunks have their own cache keys. Concurrency default renderConcurrency({ hardware }): ≈ cores/3 chunks
+//   (max 6; hardware max 3) with x264 `-threads` = cores/chunks. Result gains `encoder`. Abort: every worker's ffmpeg
+//   is killed, the promise rejects (AbortError) only after temp files are removed; only complete chunks are cached.
 export function runMachineChecks(rendered: string, o?: { target?: Target }): Promise<CheckFinding[]>;
   // black-frames (≥0.5 s) and freeze (≥2 s): needs-human when found; loudness: fail outside ±1 LU or true peak > target+0.5;
   // spec: h264 / yuv420p / CFR / aac 48 kHz stereo / preset size / max duration

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  CLAUDE_MD, STEP_IDS, TemplateError, builtinTemplatesDir, deepMerge, derivedTargets, expandPipeline, generateAgentsMd, initialStatus, listTemplates,
-  listTemplatesWithErrors, loadTemplate, nextStep, toRational, type NextContext, type PipelineStep, type StepId, type StepState, type Template,
+  CLAUDE_MD, STEP_DEPS, STEP_IDS, TemplateError, TemplateFileSchema, builtinTemplatesDir, deepMerge, derivedTargets, expandPipeline, generateAgentsMd, initialStatus, listTemplates,
+  listTemplatesWithErrors, loadTemplate, nextStep, stepText, toRational, type NextContext, type PipelineStep, type StepId, type StepState, type Template,
 } from '../src/index.js';
 
 let home: string;
@@ -87,9 +87,32 @@ describe('built-in templates', () => {
     expect(loadTemplate('talk').outputs!.tiktok!.layout).toBe('camera-full');
   });
 
+  it('sfx rules, zoom.followClicks and captionLook validate; bad values are rejected', () => {
+    const tech = loadTemplate('tech');
+    expect(tech.sfx?.rules.map((r) => r.on)).toEqual(['section', 'scene-in']);
+    expect(tech.zoom?.followClicks).toBe(true);
+    expect(loadTemplate('talk').zoom).toBeUndefined();
+    const base = { id: 'x', version: 1, name: { ja: 'x', en: 'x' }, kind: 'talk', targets: ['youtube'], canvas: { width: 1920, height: 1080, fps: 30 },
+      record: { tracks: ['camera'] }, layouts: { default: 'camera-full', allowed: ['camera-full'] },
+      cut: { silence: { minMs: 400, padMs: 100 }, fillers: [], retakes: 'keep-last', ngMarkers: 'cut' },
+      captions: { style: 's', highlight: 'word', maxCharsPerLine: 20, maxLines: 2, emphasis: 'auto', position: { anchor: 'bottom', y: 0.9 }, burnIn: true },
+      audio: { loudness: -14, truePeak: -1, denoise: 'light', bgm: { duckDb: -10 } },
+      decisions: { cutKeep: { autoAbove: 0.8, autoBelow: 0.2 }, frameCheck: { passAbove: 0.5 } }, checks: [], pipeline: ['ingest', 'analyze', 'masks'] };
+    expect(TemplateFileSchema.safeParse(base).success).toBe(true);
+    expect(TemplateFileSchema.safeParse({ ...base, sfx: { rules: [{ on: 'cut', kind: 'pop', probability: 0.3 }], maxPerMin: 2 } }).success).toBe(true);
+    expect(TemplateFileSchema.safeParse({ ...base, sfx: { rules: [{ on: 'explosion', kind: 'pop' }] } }).success).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, sfx: { rules: [{ on: 'cut', kind: '' }] } }).success).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, sfx: { rules: [{ on: 'cut', kind: 'pop', probability: 1.5 }] } }).success).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, zoom: { followClicks: { scale: 1.4 } } }).success).toBe(true);
+    expect(TemplateFileSchema.safeParse({ ...base, zoom: { followClicks: { scale: 9 } } }).success).toBe(false);
+    expect(TemplateFileSchema.parse({ ...base, zoom: {} }).zoom?.followClicks).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, captionLook: { size: 0.05, box: false, stroke: { color: '#000', widthRatio: 0.1 } } }).success).toBe(true);
+    expect(TemplateFileSchema.safeParse({ ...base, captionLook: { size: -1, box: false } }).success).toBe(false);
+  });
+
   it('expands the pipeline per docs/18', () => {
     expect(expandPipeline(loadTemplate('talk'))).toEqual([
-      'ingest', 'sync', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check',
+      'ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check',
       'derive:tiktok', 'check:tiktok', 'derive:youtube-shorts', 'check:youtube-shorts',
       'thumbnail', 'metadata', 'review', 'final', 'final:tiktok', 'final:youtube-shorts', 'publish',
     ]);
@@ -365,7 +388,33 @@ describe('nextStep', () => {
 
   it('missing status entries count as todo; unknown steps are ignored', () => {
     expect(nextStep(tpl(), [{ step: 'ingest', state: 'done' }], ctx()).step).toBe('sync');
-    expect(STEP_IDS.length).toBe(14);
+    expect(STEP_IDS.length).toBe(16);
+  });
+
+  it('multicam passes by itself with fewer than two cameras', () => {
+    const t = loadTemplate('talk');
+    const upToMulticam = status(t, ['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut']);
+    expect(nextStep(t, upToMulticam, ctx({ cameras: 2 })).step).toBe('multicam');
+    expect(nextStep(t, upToMulticam, ctx({ cameras: 1 })).step).toBe('captions');
+    expect(nextStep(t, upToMulticam, ctx({ cameras: 0 })).step).toBe('captions');
+    expect(nextStep(t, upToMulticam, ctx()).step).toBe('multicam');   // unknown → ask
+  });
+
+  it('round-5 steps: analyze after sync, masks before preview (tech), commands name the new CLI', () => {
+    const tech = loadTemplate('tech');
+    const p = expandPipeline(tech);
+    expect(p.indexOf('analyze')).toBe(p.indexOf('sync') + 1);
+    expect(p.indexOf('masks')).toBeLessThan(p.indexOf('preview'));
+    expect(p.indexOf('masks')).toBeGreaterThan(p.indexOf('layout'));
+    expect(expandPipeline(loadTemplate('talk'))).not.toContain('masks');
+    expect(stepText('masks', 'ja').commands[0]).toBe('solocut masks from-analysis --json');
+    expect(stepText('sfx', 'en').commands[0]).toBe('solocut sfx apply --json');
+    expect(stepText('layout', 'en').commands[0]).toBe('solocut tracks apply --json');
+    expect(stepText('multicam', 'en').commands[0]).toBe('solocut multicam material --json');
+    expect(stepText('analyze', 'ja').commands).toEqual(['solocut analyze --json']);
+    // masks waits for analyze and rough-cut
+    expect(STEP_DEPS.masks).toEqual(['rough-cut', 'analyze']);
+    expect(STEP_DEPS.preview).toContain('masks');
   });
 
   describe('variants (docs/18)', () => {

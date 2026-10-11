@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  OP_NAMES, frameToTimecode, parseFrameRange, query, summarize, type Decided, type Op, type QueryResult, type Timeline,
+  OP_NAMES, frameToTimecode, parseFrameRange, query, splitForSwitch, summarize, type Decided, type Op, type QueryResult, type Timeline,
 } from '@solocut/core';
 import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
-import { applyEdit, historyStacks, openProject, readHistory, readTimeline, type HistoryEntry } from '../project.js';
+import { applyEdit, historyStacks, openProject, readHistory, readTimeline, type HistoryEntry, type Project } from '../project.js';
 
 /** Ops that carry a `decided` record (the CLI fills it from --reason). */
 const DECIDED_OPS = new Set(['removeSegment', 'trimSegment', 'setVideo', 'setCamera', 'cutText', 'setDecided']);
@@ -113,6 +113,24 @@ function normalizeOps(ctx: Ctx, raw: unknown, flags: Record<string, unknown>): O
   });
 }
 
+const SPLIT = Symbol('split-for-switch');
+
+/** `edit split-for-switch --segment <id> --at <sourceFrame,…>`: core splitForSwitch → chained splitSegment ops. */
+function splitOps(ctx: Ctx, p: Project, flags: Record<string, unknown>): Op[] {
+  const seg = flags.segment ?? flags.id;
+  if (typeof seg !== 'string') throw new CliError('usage', 'usage: solocut edit split-for-switch --segment <id> --at <sourceFrame,…> --reason "<why>"');
+  const raw = flags.at;
+  const at = (Array.isArray(raw) ? raw : typeof raw === 'number' ? [raw] : typeof raw === 'string' ? raw.split(',') : []).map((x) => Number(String(x).trim()));
+  if (!at.length || at.some((x) => !Number.isInteger(x) || x < 0)) throw new CliError('usage', '--at needs source frames (integers ≥ 0), e.g. --at 1200,1530');
+  const tl = readTimeline(p);
+  if (!tl.segments.some((s) => s.id === seg)) throw new CliError('not-found', t(ctx, `区間がありません: ${seg}`, `no such segment: ${seg}`));
+  try {
+    return splitForSwitch(tl, seg, at);
+  } catch (e) {
+    throw new CliError('invalid-op', (e as Error).message);
+  }
+}
+
 export async function cmdEdit(ctx: Ctx, args: string[]): Promise<void> {
   const { flags, positionals } = parseFlags(args);
   const p = openProject(ctx);
@@ -122,6 +140,8 @@ export async function cmdEdit(ctx: Ctx, args: string[]): Promise<void> {
     raw = await readOpsArg(ctx, flags.ops);
   } else if (positionals.length === 1 && /^\s*[[{]/.test(positionals[0]!)) {
     raw = parseJsonArg(positionals[0]!, 'argument');
+  } else if (positionals.length === 1 && positionals[0] === 'split-for-switch') {
+    raw = SPLIT;
   } else if (positionals.length === 1) {
     const op: Record<string, unknown> = { op: positionals[0] };
     for (const [k, v] of Object.entries(flags)) if (!EDIT_FLAGS.has(k)) op[k] = v;
@@ -129,7 +149,7 @@ export async function cmdEdit(ctx: Ctx, args: string[]): Promise<void> {
   } else {
     throw new CliError('usage', 'usage: solocut edit <op> --<field> <value> … --reason "<why>" | solocut edit --ops <file|json|->');
   }
-  const ops = normalizeOps(ctx, raw, flags);
+  const ops = raw === SPLIT ? splitOps(ctx, p, flags) : normalizeOps(ctx, raw, flags);
   const r = await applyEdit(p, ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), dryRun: flags['dry-run'] === true });
   const s = summarize(r.timeline);
   emit(ctx, { applied: ops.length, changed: r.changed, dryRun: flags['dry-run'] === true, warnings: r.issues, summary: { duration: s.duration, segments: s.counts.segments, captions: s.counts.captions } }, () => [

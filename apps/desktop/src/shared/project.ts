@@ -160,6 +160,20 @@ export function timelineOverview(t: unknown): TimelineOverview {
   for (const m of Array.isArray(tl.markers) ? tl.markers : [])
     push('markers', m, (o) => str(o.label) ?? str(o.text) ?? str(o.kind) ?? '');
 
+  // masks (e.g. PII found by OCR) that need review: no timeline range, listed for accept / reject
+  for (const m of Array.isArray(tl.masks) ? tl.masks : []) {
+    if (!isObj(m) || typeof m.id !== 'string') continue;
+    const d = decidedOf(m);
+    if (d?.needsReview !== true) continue;
+    const ri: ReviewItem = { id: m.id, lane: 'masks', label: short(`${str(m.reason) ?? 'mask'} · ${str(m.source) ?? ''}`, 80) };
+    const reason = str(d.reason);
+    const conf = num(d.confidence);
+    if (reason) ri.reason = reason;
+    if (conf !== undefined) ri.confidence = conf;
+    if (str(d.by)) ri.by = str(d.by)!;
+    review.push(ri);
+  }
+
   const rv = isObj(tl.review) ? tl.review : {};
   for (const oi of Array.isArray(rv.openItems) ? rv.openItems : []) {
     if (!isObj(oi)) continue;
@@ -212,6 +226,7 @@ export function reviewOps(t: unknown, item: ReviewItem, decision: ReviewDecision
     : item.lane === 'captions' ? find(tl.captions)
     : item.lane === 'scenes' ? find(tl.scenes)
     : item.lane === 'sfx' ? find(audio.sfx)
+    : item.lane === 'masks' ? find(tl.masks)
     : undefined;
   if (item.lane !== 'open' && item.lane !== 'markers' && !el) return [];
   const merged = el ? { ...(decidedOf(el) ?? {}), ...decided } : decided;
@@ -234,6 +249,10 @@ export function reviewOps(t: unknown, item: ReviewItem, decision: ReviewDecision
       case 'sfx':
         ops.push({ op: 'removeSfx', id: item.id });
         if (decision === 'accept') ops.push({ op: 'addSfx', sfx: { ...el, decided: merged } });
+        break;
+      case 'masks':
+        ops.push({ op: 'removeMask', id: item.id });
+        if (decision === 'accept') ops.push({ op: 'addMask', mask: { ...el, decided: merged } });
         break;
       default:
         break;

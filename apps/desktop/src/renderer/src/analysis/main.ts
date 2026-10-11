@@ -147,7 +147,9 @@ async function loop(): Promise<void> {
       const result = job.kind === 'faces' ? await faces(job) : await ocr(job);
       await api.invoke('analysis:result', job.id, result);
     } catch (e) {
-      await api.invoke('analysis:fail', job.id, e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : e instanceof Event ? `${e.type} on ${(e.target as { src?: string } | null)?.src ?? 'resource'}` : String(e);
+      console.error(`analysis ${job.id}:`, msg);
+      await api.invoke('analysis:fail', job.id, msg);
     }
   }
   await tess?.terminate().catch(() => undefined);

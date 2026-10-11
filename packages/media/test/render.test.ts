@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Decided, Segment, Timeline } from '@solocut/core';
 import { applyOp, applyOps, applyTracks, compile, compileFrame, deriveVariant, emptyTimeline, overlaysFromInputLogs, pickHighlights, validateTimeline } from '@solocut/core';
-import { executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
+import { detectHwEncoder, executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
+import { readdirSync as listDir } from 'node:fs';
 import { countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
 
 const D: Decided = { by: 'agent', reason: 'test' };
@@ -54,7 +55,8 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     const progress: number[] = [];
     const plan = compile(base, { quality: 'preview', projectDir: dir });
     const r = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache', output: 'out/a.mp4', onProgress: (x) => progress.push(x.done) });
-    expect(r).toEqual({ output: p('out/a.mp4'), reused: 0, rendered: 2 });
+    expect(r).toMatchObject({ output: p('out/a.mp4'), reused: 0, rendered: 2 });
+    expect(typeof r.encoder).toBe('string');
     expect(progress.at(-1)).toBe(2);
     const pr = await probe(r.output);
     expect(pr.durationSec).toBeCloseTo(2, 1);
@@ -244,6 +246,43 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     await expect(renderFrame(compileFrame(applyOp(base, { op: 'updateSource', id: 'cam', patch: { path: 'gone.mp4' } }).timeline, 0, { projectDir: dir }), { projectDir: dir, output: 'frames/x.png' }))
       .rejects.toThrow(/input not found: gone\.mp4/);
     expect(existsSync(p('frames/x.png'))).toBe(false);
+  });
+
+  it('preview uses the hardware encoder when available, cached separately from x264 chunks', async () => {
+    const hw = await detectHwEncoder();
+    const t = applyOp(base, { op: 'trimSegment', id: 'seg_a', to: 50, decided: D }).timeline;
+    const plan = compile(t, { quality: 'preview', projectDir: dir });
+    const sw = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache-enc', output: 'out/sw.mp4', encoder: 'x264' });
+    expect(sw.encoder).toBe('libx264');
+    const auto = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache-enc', output: 'out/auto.mp4' });
+    expect(auto.encoder).toBe(hw ?? 'libx264');
+    if (hw) expect(auto.reused).toBe(0); // different encoder → different cache entries (concat copy needs one codec setup)
+    expect(countFrames(auto.output)).toBe(countFrames(sw.output));
+    const fin = await executeRenderPlan(compile(t, { quality: 'final', target: 'youtube', projectDir: dir }), { projectDir: dir, cacheDir: 'cache-enc', output: 'out/fin.mp4' });
+    expect(fin.encoder).toBe('libx264'); // final always x264
+  });
+
+  it('cancel mid-render rejects, leaves no temp files and only complete chunks, and a re-render reuses them', async () => {
+    // 12 segments of 1 s → 12 chunks
+    const segs = Array.from({ length: 12 }, (_, i) => seg(`seg_${i}`, i * 10, i * 10 + 30, { layout: 'camera-full', camera: 'cam' }));
+    const t = applyOp(base, { op: 'setSegments', segments: segs }).timeline;
+    const plan = compile(t, { quality: 'final', target: 'youtube', projectDir: dir }); // x264 medium: slow enough to cancel
+    const ac = new AbortController();
+    const err = await executeRenderPlan(plan, {
+      projectDir: dir, cacheDir: 'cache-cancel', output: 'out/cancel.mp4', concurrency: 2, signal: ac.signal,
+      onProgress: (x) => { if (x.done >= 1) ac.abort(); },
+    }).catch((e: unknown) => e);
+    expect((err as Error).name).toBe('AbortError');
+    const files = listDir(p('cache-cancel/chunks'));
+    expect(files.filter((f) => f.includes('.tmp-'))).toEqual([]);
+    expect(files.length).toBeGreaterThanOrEqual(1);
+    expect(files.length).toBeLessThan(12);
+    for (const f of files) expect(countFrames(p(`cache-cancel/chunks/${f}`))).toBe(30); // complete chunks only
+    expect(existsSync(p('out/cancel.mp4'))).toBe(false);
+    const again = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache-cancel', output: 'out/cancel.mp4', concurrency: 2 });
+    expect(again.reused).toBe(files.length);
+    expect(again.rendered).toBe(12 - files.length);
+    expect(countFrames(again.output)).toBe(360);
   });
 
   it('fails clearly on a missing input', async () => {

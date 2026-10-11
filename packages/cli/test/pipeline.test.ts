@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { whichSync } from '@solocut/toolchain';
@@ -69,8 +69,9 @@ describe.skipIf(!hasFfmpeg)('media pipeline (ffmpeg)', () => {
     expect(st.find((s: { step: string }) => s.step === 'rough-cut').state).toBe('running');
 
     const rp = await run(['render', '--preview']);
-    expect(rp.json, rp.stdout + rp.stderr).toMatchObject({ ok: true, output: 'renders/preview.mp4', quality: 'preview' });
-    expect(existsSync(join(dir, 'renders', 'preview.mp4'))).toBe(true);
+    expect(rp.json, rp.stdout + rp.stderr).toMatchObject({ ok: true, output: 'renders/youtube/preview.mp4', quality: 'preview' });
+    expect(existsSync(join(dir, 'renders', 'youtube', 'preview.mp4'))).toBe(true);
+    expect(existsSync(join(dir, 'renders', 'preview.mp4'))).toBe(true);   // compatibility copy
     const again = await run(['render', '--preview']);
     expect(again.json.rendered).toBe(0); // all chunks reused
 
@@ -86,6 +87,7 @@ describe.skipIf(!hasFfmpeg)('media pipeline (ffmpeg)', () => {
 
     const fin = await run(['render', '--final', '--target', 'youtube']);
     expect(fin.json, fin.stdout + fin.stderr).toMatchObject({ ok: true, target: 'youtube' });
+    expect(fin.json.output).toBe('renders/youtube/final.mp4');
     expect(existsSync(join(dir, fin.json.output))).toBe(true);
     expect(timeline().outputs[0]).toMatchObject({ target: 'youtube', render: { path: fin.json.output } });
     const past = await sb.run(['past', 'list', '--json']);
@@ -277,7 +279,7 @@ console.log('done');
     expect(d.json, d.stdout + d.stderr).toMatchObject({ ok: true, target: 'tiktok' });
     const r = await run(['render', '--preview', '--all']);
     expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
-    expect(r.json.results.map((x: { variant: string; output: string }) => [x.variant, x.output])).toEqual([['main', 'renders/preview.mp4'], ['tiktok', 'renders/tiktok/preview.mp4']]);
+    expect(r.json.results.map((x: { variant: string; output: string }) => [x.variant, x.output])).toEqual([['main', 'renders/youtube/preview.mp4'], ['tiktok', 'renders/tiktok/preview.mp4']]);
     expect(probeSize(join(dir, 'renders', 'tiktok', 'preview.mp4'))).toMatch(/^\d+,\d+$/);
     const [w, h] = probeSize(join(dir, 'renders', 'tiktok', 'preview.mp4')).split(',').map(Number);
     expect(h!).toBeGreaterThan(w!); // 9:16
@@ -289,7 +291,7 @@ console.log('done');
     expect(st.find((s: { step: string }) => s.step === 'check:tiktok').state).toBe('done');
     const fin = await sb.run(['render', '--final', '--variant', 'tiktok', '--json'], { cwd: dir, env });
     expect(fin.json, fin.stdout + fin.stderr).toMatchObject({ ok: true, target: 'tiktok', variant: 'tiktok' });
-    expect(fin.json.output).toMatch(/^renders\/tiktok\//);
+    expect(fin.json.output).toBe('renders/tiktok/final.mp4');
     expect((await run(['render', '--all', '--out', 'x.mp4'])).code).toBe(2);
   }, 300_000);
 
@@ -355,6 +357,13 @@ console.log('done');
     expect((await run(['feedback', 'import', s])).json.error.code).toBe('invalid-session');
     writeFileSync(join(s, 'session.json'), JSON.stringify({ schema: 1 }));
     expect((await run(['feedback', 'import', s])).json.error.code).toBe('empty');
+    // a failure while transcribing (here: broken audio / no whisper) leaves no feedback folder and no work folder
+    writeFileSync(join(s, 'session.json'), JSON.stringify({ schema: 1, audio: 'mic.wav', notes: [{ atMs: 0, text: 'x', frame: 0 }] }));
+    writeFileSync(join(s, 'mic.wav'), 'not audio');
+    const bad = await run(['feedback', 'import', s, '--id', 'fb_broken']);
+    expect(bad.code).toBe(1);
+    expect(existsSync(join(dir, 'feedback', 'fb_broken'))).toBe(false);
+    expect(readdirSync(join(dir, 'feedback')).filter((d) => d.startsWith('.tmp-'))).toEqual([]);
     expect((await run(['feedback', 'show', 'fb_none'])).json.error.code).toBe('not-found');
   }, 120_000);
 });

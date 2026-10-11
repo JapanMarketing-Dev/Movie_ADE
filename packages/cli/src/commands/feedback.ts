@@ -145,7 +145,20 @@ async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
   if (!/^fb_[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(id)) throw new CliError('usage', `invalid feedback id: ${id}`);
   const dir = join(p.dir, 'feedback', id);
   if (existsSync(join(dir, 'items.json'))) throw new CliError('exists', t(ctx, `すでにあります: feedback/${id}`, `feedback/${id} already exists`));
-  mkdirSync(dir, { recursive: true });
+  // everything is built in a work folder and renamed into place at the end, so a failed transcription (or any
+  // other failure) leaves no feedback/<id>/ behind
+  const work = join(p.dir, 'feedback', `.tmp-${id}-${process.pid}`);
+  rmSync(work, { recursive: true, force: true });
+  mkdirSync(work, { recursive: true });
+  try {
+    await importInto(ctx, p, tl, { src, session, id, work, dir, organize: values['no-organize'] ? undefined : values.organize });
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
+async function importInto(ctx: Ctx, p: Project, tl: Timeline, o: { src: string; session: FeedbackSession; id: string; work: string; dir: string; organize: string | undefined }): Promise<void> {
+  const { src, session, id, work } = o;
   // 1. speech
   let words = session.words ?? [];
   const audio = session.audio ? join(src, session.audio) : null;
@@ -160,7 +173,6 @@ async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
     return { ...it, index: i + 1, frame, targets: targetsAt(tl, frame, it.strokes, p.file.language) };
   });
   if (!items.length) {
-    rmSync(dir, { recursive: true, force: true });
     throw new CliError('empty', t(ctx, 'フィードバックに発話もペンもメモもありません', 'the session has no speech, strokes or notes'));
   }
   // 3. frame images
@@ -169,21 +181,23 @@ async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
     const m = await media();
     const ffmpeg = await m.toolPath('ffmpeg');
     const preview = await freshPreview(ctx, p, tl);
-    for (const it of items) await frameImage(ffmpeg, preview, frameToSeconds(it.frame, tl.canvas.fps), it, tl, dir, String(it.index).padStart(2, '0'));
+    for (const it of items) await frameImage(ffmpeg, preview, frameToSeconds(it.frame, tl.canvas.fps), it, tl, work, String(it.index).padStart(2, '0'));
   } else warnings.push(t(ctx, '区間がないため画像を作れませんでした', 'no segments: no images'));
   // 4. optional organizing by an agent
   let organizedBy: string | undefined;
-  if (values.organize && !values['no-organize']) {
+  if (o.organize) {
     try {
-      organizedBy = (await organize(ctx, dir, items, p.file.language, values.organize === 'auto' ? true : values.organize)).agent;
+      organizedBy = (await organize(ctx, work, items, p.file.language, o.organize === 'auto' ? true : o.organize)).agent;
     } catch (e) {
       warnings.push((e as Error).message);
     }
   }
-  copyFileSync(join(src, 'session.json'), join(dir, 'session.json'));
-  if (audio && existsSync(audio)) copyFileSync(audio, join(dir, 'voice.wav'));
-  writeAtomic(join(dir, 'items.json'), JSON.stringify({ id, createdAt: session.createdAt ?? new Date().toISOString(), organizedBy, variant: p.variant ?? 'main', items }, null, 2));
-  writeAtomic(join(dir, 'feedback.md'), feedbackMarkdown(id, items, tl, p.file.language));
+  copyFileSync(join(src, 'session.json'), join(work, 'session.json'));
+  if (audio && existsSync(audio)) copyFileSync(audio, join(work, 'voice.wav'));
+  writeAtomic(join(work, 'items.json'), JSON.stringify({ id, createdAt: session.createdAt ?? new Date().toISOString(), organizedBy, variant: p.variant ?? 'main', items }, null, 2));
+  writeAtomic(join(work, 'feedback.md'), feedbackMarkdown(id, items, tl, p.file.language));
+  rmSync(o.dir, { recursive: true, force: true });   // a leftover without items.json (checked above)
+  renameSync(work, o.dir);
   await applyEdit(p, [{ op: 'setReview', patch: {
     feedback: [...tl.review.feedback.filter((f) => f.id !== id), { id: id as `fb_${string}`, status: 'open', items: items.length }],
     openItems: [...tl.review.openItems, { ref: id, kind: 'feedback', summary: t(ctx, `フィードバック ${items.length} 件（feedback/${id}/feedback.md）`, `${items.length} feedback item(s) (feedback/${id}/feedback.md)`) }],

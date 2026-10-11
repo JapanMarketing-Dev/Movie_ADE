@@ -1,7 +1,7 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { applyOps, validateTimeline, type Issue, type Op, type Timeline } from '@solocut/core';
-import { initialStatus, loadTemplate, type PipelineStep, type StepState, type Template } from '@solocut/templates';
+import { deepMerge, initialStatus, loadTemplate, type PipelineStep, type StepState, type Template } from '@solocut/templates';
 import { CliError, type Ctx } from './ctx.js';
 
 export interface ProjectFile {
@@ -33,7 +33,8 @@ export function vpaths(p: Pick<Project, 'dir' | 'variant'>) {
   return {
     timeline: v ? join(p.dir, 'variants', v, 'timeline.json') : join(p.dir, 'timeline.json'),
     history: v ? join(p.dir, '.solocut', `history.${v}.jsonl`) : join(p.dir, '.solocut', 'history.jsonl'),
-    preview: v ? join(p.dir, 'renders', v, 'preview.mp4') : join(p.dir, 'renders', 'preview.mp4'),
+    /** renders/youtube/preview.mp4 for the main video, renders/<variant>/preview.mp4 for a derived one. */
+    preview: join(p.dir, 'renders', v ?? 'youtube', 'preview.mp4'),
     /** Project-relative caption files (used by compile and uploads). */
     ass: v ? `captions/${v}.ass` : 'captions/main.ass',
     srt: v ? `captions/${v}.srt` : 'captions/main.srt',
@@ -99,7 +100,7 @@ export const paths = (dir: string) => ({
   transcript: join(dir, 'derived', 'transcripts', 'main.json'),
   analysis: join(dir, 'derived', 'analysis'),
   cache: join(dir, 'derived', 'cache'),
-  preview: join(dir, 'renders', 'preview.mp4'),
+  preview: join(dir, 'renders', 'youtube', 'preview.mp4'),
 });
 
 type Where = string | Pick<Project, 'dir' | 'variant'>;
@@ -123,6 +124,33 @@ export function readTimeline(w: Where): Timeline {
 
 export function writeTimeline(w: Where, t: Timeline): void {
   writeAtomic(tlPath(w), JSON.stringify(t, null, 2) + '\n');
+}
+
+/**
+ * Merge a patch into <root>/<id>/template.yaml (an override that `extends` the same id; written as JSON, which is
+ * valid YAML). The merged template is loaded once; when it does not validate, the old file is restored.
+ * `project` (a project dir) puts <project>/templates first in the search path for that check.
+ */
+export function writeTemplateOverride(root: string, id: string, patch: Record<string, unknown>, note: string, o: { project?: string } = {}): { file: string; template: Template } {
+  const file = join(root, id, 'template.yaml');
+  const before = existsSync(file) ? readFileSync(file, 'utf8') : null;
+  let current: Record<string, unknown> = { id, extends: id };
+  if (before !== null) {
+    try {
+      current = JSON.parse(before.replace(/^#.*\n/gm, '')) as Record<string, unknown>;
+    } catch {
+      throw new CliError('template-override', `${file} exists and is not machine-written; merge this by hand: ${JSON.stringify(patch)}`);
+    }
+  }
+  writeAtomic(file, `# template override (${note}). JSON is valid YAML.\n${JSON.stringify(deepMerge(current, patch), null, 2)}\n`);
+  try {
+    const template = loadTemplate(id, { extraDirs: o.project ? [join(o.project, 'templates')] : [] });
+    return { file: o.project ? relative(o.project, file).split('\\').join('/') : file, template };
+  } catch (e) {
+    if (before === null) rmSync(dirname(file), { recursive: true, force: true });
+    else writeAtomic(file, before);
+    throw new CliError('invalid-template', `the merged template does not validate: ${(e as Error).message}`);
+  }
 }
 
 export function projectTemplate(p: Project): Template {

@@ -9,6 +9,7 @@ import {
   VARIANTS, applyEdit, openProject, paths, projectTemplate, readStatus, readTimeline, setStep, variantExists, vpaths, writeTimeline,
   type Project, type Variant,
 } from '../project.js';
+import { loadAnalysis } from '../analysis.js';
 import { apiKeyFor } from '../keys.js';
 import { buildCaptionsFor, readTranscript } from './media.js';
 
@@ -180,8 +181,12 @@ export async function cmdDerive(ctx: Ctx, args: string[]): Promise<void> {
   }
   if (!selection.length) throw new CliError('nothing-selected', t(ctx, '選べる区間がありませんでした', 'no segments could be selected'));
   const layoutMap = cfg.layout && tpl.layouts.default !== cfg.layout ? { [tpl.layouts.default]: cfg.layout } as DeriveOptions['layoutMap'] : undefined;
+  // faces steer the camera crops, the cursor steers the screen crop (derived/analysis/, desktop recordings)
+  const an = loadAnalysis(p.dir, main);
+  const hasTracks = !!(an.tracks.faces || an.tracks.cursor);
+  warnings.push(...an.warnings);
   let next = deriveVariant(main, target, {
-    selection, maxFrames, ...(cfg.captions ? { captionStyle: cfg.captions } : {}), ...(layoutMap ? { layoutMap } : {}),
+    selection, maxFrames, ...(hasTracks ? { tracks: an.tracks } : {}), ...(cfg.captions ? { captionStyle: cfg.captions } : {}), ...(layoutMap ? { layoutMap } : {}),
     reframe: 'face', hookSegment: selection[0]!, rules: `prompts/vertical.md (${tpl.id}@${tpl.version})`,
   });
   let kept: string[] = [];

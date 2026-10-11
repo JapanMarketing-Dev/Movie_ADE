@@ -111,7 +111,9 @@ function loadFromDir(dir: string, dirs: string[]): Template {
     if (parentId === undefined || parentId === null) break;
     if (typeof parentId !== 'string') throw new TemplateError(`extends must be a template id`, join(cur.dir, 'template.yaml'));
     // a template may extend one with the same id from a lower-priority dir (user override of a built-in)
-    const parentDir = findDir(parentId, dirs, parentId === id ? cur.dir : undefined);
+    // (search only the dirs after the current one, so project → user → built-in overrides chain without a cycle)
+    const below = parentId === id ? dirs.slice(dirs.findIndex((d) => resolve(join(d, id)) === resolve(cur.dir)) + 1) : dirs;
+    const parentDir = findDir(parentId, below, parentId === id ? cur.dir : undefined);
     if (!parentDir) throw new TemplateError(`template "${id}" extends unknown template "${parentId}"`, join(cur.dir, 'template.yaml'));
     if (chain.length > 16) throw new TemplateError('extends chain too deep', join(dir, 'template.yaml'));
     cur = readRaw(parentDir);

@@ -187,3 +187,22 @@ describe('variants (docs/18)', () => {
     expect(['main', 'tiktok', 'youtube-shorts', 'shorts', '', null].map(isVariant)).toEqual([true, true, true, false, false, false]);
   });
 });
+
+describe('mask review items', () => {
+  const tl = {
+    masks: [
+      { id: 'mask_pii_a', kind: 'pixelate', source: 't1.screen', reason: 'pii:email', track: [], decided: { by: 'rule', reason: 'OCR found email on screen', confidence: 0.8, needsReview: true } },
+      { id: 'mask_b', kind: 'blur', source: 't1.screen', reason: 'manual', track: [], decided: { by: 'human', reason: 'x' } },
+    ],
+  };
+  it('lists masks that need review', () => {
+    const ov = timelineOverview(tl);
+    expect(ov.review).toEqual([{ id: 'mask_pii_a', lane: 'masks', label: 'pii:email · t1.screen', reason: 'OCR found email on screen', confidence: 0.8, by: 'rule' }]);
+  });
+  it('accept → setDecided; reject → removeMask; legacy accept re-adds', () => {
+    const it0 = timelineOverview(tl).review[0]!;
+    expect(reviewOps(tl, it0, 'accept')[0]).toMatchObject({ op: 'setDecided', target: 'mask_pii_a', decided: { by: 'human', needsReview: false } });
+    expect(reviewOps(tl, it0, 'reject')).toEqual([{ op: 'removeMask', id: 'mask_pii_a' }]);
+    expect(reviewOps(tl, it0, 'accept', 'legacy').map((o) => o.op)).toEqual(['removeMask', 'addMask']);
+  });
+});
