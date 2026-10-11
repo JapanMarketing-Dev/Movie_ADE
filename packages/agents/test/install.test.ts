@@ -34,10 +34,14 @@ describe('installOutcome（終了コードの読み方）', () => {
 
 describe('agentInstallCommand', () => {
   it('1行で入れられるものはコマンド、無いものは undefined（リンクだけ）', () => {
-    expect(agentInstallCommand('codex')).toMatch(/codex/)
-    expect(agentInstallCommand('devin')).toBe('curl -fsSL https://cli.devin.ai/install.sh | bash')
+    // POSIX（macOS）の手順を明示して確かめる（既定は実行中の OS。Windows は下の describe で確かめる）
+    expect(agentInstallCommand('codex', 'darwin')).toMatch(/codex/)
+    expect(agentInstallCommand('devin', 'darwin')).toBe('curl -fsSL https://cli.devin.ai/install.sh | bash')
     // ソースから入れるしかないもの
-    expect(agentInstallCommand('zcode')).toBeUndefined()
+    expect(agentInstallCommand('zcode', 'darwin')).toBeUndefined()
+    expect(agentInstallCommand('zcode', 'win32')).toBeUndefined()
+    // 引数なしは実行中の OS の手順と同じ
+    expect(agentInstallCommand('devin')).toBe(agentInstallCommand('devin', process.platform))
   })
 })
 

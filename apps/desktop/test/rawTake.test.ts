@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CLOCK_SANITY_MS, filesFromNames, filesFromSources, filesFromTakeJson, newestTake, pickCamera, pickRawTake, rawTake, trackStartMs,
@@ -87,7 +87,7 @@ describe('filesFromSources', () => {
     );
     expect([...m.keys()].sort()).toEqual(['take_1', 'take_2']);
     const t1 = m.get('take_1')!;
-    expect(t1.find((x) => x.id === 's')!.path).toBe('/proj/media/takes/take_1/screen.mp4');
+    expect(t1.find((x) => x.id === 's')!.path).toBe(resolve('/proj', 'media/takes/take_1/screen.mp4'));
     const cam = t1.find((x) => x.id === 'c')!;
     expect(cam.path).toBe('/abs/cam.mp4');
     expect(cam.role).toBe('front');
@@ -165,10 +165,10 @@ describe('filesFromTakeJson', () => {
     const files = filesFromTakeJson(
       { tracks: [{ file: 'screen.mp4', kind: 'screen' }, { file: 'gone.mp4', kind: 'camera' }, { file: '../x.mp4', kind: 'camera' }, { file: 'a/b.mp4', kind: 'camera' }, { file: 'k.mp4', kind: 'keys' }, null, { kind: 'mic' }] },
       '/t',
-      (p) => p !== '/t/gone.mp4',
+      (p) => p !== join('/t', 'gone.mp4'),
     )!;
     expect(files.map((x) => x.id)).toEqual(['screen']);
-    expect(files[0]!.path).toBe('/t/screen.mp4');
+    expect(files[0]!.path).toBe(join('/t', 'screen.mp4'));
     expect(files[0]!.start).toBe(0);
   });
   it('keeps a track role (main camera)', () => {

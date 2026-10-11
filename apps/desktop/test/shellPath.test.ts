@@ -26,12 +26,21 @@ describe('login shell PATH', () => {
     expect(loginShellPathFailure(null)?.message).toBe('login shell PATH marker missing');
   });
   it('merges and dedupes dirs, keeping order', () => {
-    expect(mergeDirs('/usr/bin:/bin', '/opt/homebrew/bin:/usr/bin', ['/x', '/bin'], ':')).toEqual(['/usr/bin', '/bin', '/opt/homebrew/bin', '/x']);
+    // the login shell's PATH uses the host's separator (';' on Windows, ':' elsewhere)
+    const shellSep = process.platform === 'win32' ? ';' : ':';
+    expect(mergeDirs('/usr/bin:/bin', ['/opt/homebrew/bin', '/usr/bin'].join(shellSep), ['/x', '/bin'], ':')).toEqual(['/usr/bin', '/bin', '/opt/homebrew/bin', '/x']);
   });
   it('includes the common install dirs (~/.local/bin, Homebrew…)', () => {
+    // home-relative dirs are built with the host's path.join (backslashes on a Windows host)
     const d = extraInstallDirs('/Users/u', 'darwin');
-    for (const x of ['/Users/u/.local/bin', '/Users/u/.npm-global/bin', '/Users/u/.bun/bin', '/Users/u/.cargo/bin', '/Users/u/.volta/bin', '/opt/homebrew/bin', '/usr/local/bin']) expect(d).toContain(x);
+    for (const x of [join('/Users/u', '.local', 'bin'), join('/Users/u', '.npm-global', 'bin'), join('/Users/u', '.bun', 'bin'), join('/Users/u', '.cargo', 'bin'), join('/Users/u', '.volta', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']) expect(d).toContain(x);
     expect(extraInstallDirs('/home/u', 'linux')).toContain('/snap/bin');
+    expect(extraInstallDirs('/home/u', 'darwin')).not.toContain('/snap/bin');
+  });
+  it('Windows install dirs: npm, WinGet links, ~/.local/bin; no Homebrew', () => {
+    const d = extraInstallDirs('C:\\Users\\u', 'win32');
+    expect(d).toContain(join('C:\\Users\\u', '.local', 'bin'));
+    expect(d).not.toContain('/opt/homebrew/bin');
   });
 });
 
