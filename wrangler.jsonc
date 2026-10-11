@@ -10,6 +10,8 @@
   },
   "workers_dev": false,
   "routes": [
-    { "pattern": "solocut.app", "custom_domain": true }
+    { "pattern": "solocut.app", "custom_domain": true },
+    // www is redirected to the apex by a zone redirect rule (see docs/07_distribution.md)
+    { "pattern": "www.solocut.app", "custom_domain": true }
   ]
 }

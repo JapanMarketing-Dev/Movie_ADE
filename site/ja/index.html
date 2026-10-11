@@ -49,6 +49,7 @@
   <symbol id="i-json" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z"/><path d="M11.5 13.5L20 4"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
 </svg>
 <a class="skip" href="#main">本文へ移動</a>
@@ -63,7 +64,7 @@
     </nav>
     <div class="header-actions">
       <a class="lang-switch" href="/" hreflang="en" lang="en">English</a>
-      <a class="btn btn-sm btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label-hide">GitHub</span></a>
+      <a class="btn btn-sm btn-ghost" href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label-hide">GitHub</span></a>
       <a class="btn btn-sm btn-primary" href="/ja/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="btn-label-hide">ダウンロード</span></a>
     </div>
   </div>
@@ -76,8 +77,8 @@
         <h1>1人で撮る。<br>編集は<em>テンプレどおりにAIが。</em></h1>
         <p class="lede">技術動画と語り動画のために。画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。</p>
         <div class="hero-actions">
-          <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
-          <a class="btn btn-lg btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>設計を読む</a>
+          <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
+          <a class="btn btn-lg btn-ghost" href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>設計を読む</a>
         </div>
         <p class="hero-meta">macOS · Windows · Linux · MIT ライセンス · YouTube / TikTok / Shorts / Reels</p>
       </div>
@@ -231,7 +232,8 @@
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><h3>用意済みのプロンプト</h3><p>粗カット、フィードバック対応、ショートを3本、投稿文の作成…。どれもワンクリック。プロンプトの中身は JSON で自由に変えられます。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><h3>投稿と告知まで</h3><p>エディタから YouTube と TikTok に投稿し、X・Instagram・Threads・Facebook に「動画を投稿しました」を告知。承認するまで何も投稿されません。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><h3>画像生成でサムネイル</h3><p>フレームを選んで、Codex や Gemini のサブスク、OpenAI や Google の API キーでサムネイルを生成。日本語のタイトルは崩れないよう確実に組みます。</p></li>
-        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>効果音・BGM が最初からそろう</h3><p>自由に使える効果音と BGM の初期ライブラリを初回起動時にダウンロード。クレジット表記も自動で作ります。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>効果音・BGM はすぐ使える</h3><p>自由に使える効果音・BGM・イラストのライブラリ。あなたかエージェントが選んだときに、その素材だけをダウンロード。クレジット表記も自動で作ります。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><h3>過去の動画をいつでも参考に</h3><p>完成した動画とその timeline.json をすべて検索できる形で保存。「先月のあの回みたいに」と頼めば、エージェントがその作りに合わせます。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-json"/></svg><h3>設定はすべて JSON</h3><p>設定は公開スキーマ付きの JSON ファイル。手で編集しても、エージェントに「変えて」と頼んでもOK。</p></li>
       </ul>
       <ul class="feat-grid reveal">
@@ -264,7 +266,7 @@
       <h2>1人で撮って、毎日出す。</h2>
       <p>Solocut は開発中です。GitHub で進み具合を追いかけてください。</p>
       <div class="hero-actions">
-        <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
+        <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
         <a class="btn btn-lg btn-ghost" href="/ja/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>ダウンロード</a>
       </div>
     </div>
@@ -276,10 +278,10 @@
     <span>© 2026 JapanMarketing-Dev</span>
     <nav aria-label="Footer">
       <a href="/ja/download">ダウンロード</a>
-      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer">設計書</a>
+      <a href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer">設計書</a>
       <a href="/ja/privacy">プライバシー</a>
-      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT ライセンス</a>
-      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://github.com/JapanMarketing-Dev/solocut/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT ライセンス</a>
+      <a href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer">GitHub</a>
     </nav>
   </div>
 </footer>

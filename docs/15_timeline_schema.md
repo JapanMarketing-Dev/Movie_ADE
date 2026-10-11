@@ -71,6 +71,7 @@ interface Meta {
   language: 'ja' | 'en';
   targets: ('youtube' | 'youtube-shorts' | 'tiktok' | 'instagram-reels')[];
   glossary: { term: string; reading?: string; note?: string }[];  // 用語集（字幕の誤変換の修正に使う）
+  references: { archive: Id<'arc'>; use: ('pacing' | 'scenes' | 'captions' | 'sfx' | 'multicam' | 'thumbnail-style' | 'structure')[]; note?: string }[];  // 参考にする過去の回（[17](./17_archive.md)）
 }
 ```
 

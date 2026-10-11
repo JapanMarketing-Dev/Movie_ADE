@@ -15,6 +15,7 @@ Solocut is a free, open-source (MIT) video-editing ADE (Agentic Development Envi
 - **Publish from the editor** to YouTube and TikTok, and announce it on X, Instagram, Threads and Facebook.
 - **Benchmark** any YouTube or TikTok video by URL: caption style, sound effects, music level and pacing become a template.
 - **Thumbnails** with image generation through your Codex or Gemini subscription or an API key.
+- **Archive**: every past video and its `timeline.json` stay searchable, so your agent can say “make it like that one”.
 - **Every setting is JSON**, with a public schema your agent can edit.
 - **Auto-update** from Cloudflare (solocut.app), signed.
 
@@ -40,6 +41,7 @@ Solocut is a free, open-source (MIT) video-editing ADE (Agentic Development Envi
 | [14 投稿](./docs/14_publishing.md) | YouTube, TikTok, X, Instagram, Threads, Facebook |
 | [15 timeline.json](./docs/15_timeline_schema.md) | The typed, information-rich edit plan; scene patterns |
 | [16 素材ライブラリ](./docs/16_asset_library.md) | Sound effects, music, illustrations, licenses and credits |
+| [17 アーカイブ](./docs/17_archive.md) | Past videos and their timelines, always at hand for reference |
 
 ## License
 

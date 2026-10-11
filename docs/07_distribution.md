@@ -18,7 +18,8 @@ Cloudflare R2（downloads.solocut.app）
   ├─ agents.json(.sig)    エージェントCLIの一覧（起動・更新のコマンド）
   ├─ library-terms.json(.sig)      素材サイトの規約の要約（[16](./16_asset_library.md)）
   ├─ publish-capabilities.json(.sig) 各 SNS の審査の状態と使える投稿方式（[14](./14_publishing.md)）
-  └─ packs/               効果音・BGM・イラストの初期パック（再配布が許されたものだけ）
+  ├─ library-catalog.json(.sig)   素材の目録（id、タグ、ライセンス、ハッシュ値、場所）
+  └─ library/             効果音・BGM・イラストの素材を1つずつ（再配布が許されたものだけ。都度ダウンロード）
           │
           ▼
 Cloudflare Workers の静的アセット（solocut.app）  ダウンロードページ。latest.json を読んで、OS ごとのボタンを出す
@@ -46,6 +47,7 @@ Cloudflare Worker（auth.solocut.app）  SNS の OAuth のトークン交換だ�
 
 - Cloudflare Workers の静的アセット（Worker 名 `solocut-site`、`wrangler.jsonc`）。Pages は Workers に統合されたため、こちらを使う。ビルドの工程はなし（`node tools/site/build.mjs` で HTML を生成し、`site/` をそのまま公開する）
 - 公開済み: https://solocut.app（英語）、https://solocut.app/ja（日本語）
+- `www.solocut.app` も Worker のカスタムドメインにつなぎ、ゾーンのリダイレクトルール（`http_request_dynamic_redirect`）で `https://solocut.app` へ 301 で転送する（パスとクエリは引き継ぐ）。ゾーンの「常に HTTPS を使用」は有効
 - 構成: トップ（何ができるか、デモ動画、ダウンロードボタン）、ダウンロード（OS ごと、チェックサム）、ドキュメント（テンプレート、CLI、判定モデル）、プライバシー、ライセンス
 - 日本語と英語
 - `_headers` で CSP とキャッシュを設定する

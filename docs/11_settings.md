@@ -53,11 +53,12 @@ API キーは JSON に書かない。`settings.json` には `"apiKeyRef": "opena
     "order": ["codex", "gemini", "openai"],
     "providers": {
       "codex": { "via": "subscription" },
-      "gemini": { "via": "subscription" },
-      "openai": { "via": "api", "apiKeyRef": "openai", "model": "gpt-image-1" }
+      "gemini": { "via": "api", "apiKeyRef": "gemini" },   // サブスクのログインだけで生成できるかは実装時に確認
+      "openai": { "via": "api", "apiKeyRef": "openai", "model": "gpt-image-2" }
     }
   },
-  "audioLibrary": { "packs": ["solocut-default"], "autoCredits": true },
+  "library": { "catalog": "solocut-default", "download": "on-demand", "cacheLimitGB": 2, "autoCredits": true },
+  "archive": { "autoRegister": ["export", "publish"], "keepPreview": true, "analytics": { "youtube": false } },
   "benchmark": { "keepThumbnails": false, "maxMinutes": 3 },
   "export": { "defaultTargets": ["youtube"], "hwEncodePreview": true },
   "updates": { "channel": "stable", "auto": true },

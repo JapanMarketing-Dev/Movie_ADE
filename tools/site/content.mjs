@@ -1,5 +1,5 @@
 // Text for solocut.app. One object per language; tools/site/build.mjs renders both from the same markup.
-export const REPO = 'https://github.com/JapanMarketing-Dev/Movie_ADE';
+export const REPO = 'https://github.com/JapanMarketing-Dev/solocut';
 export const SITE = 'https://solocut.app';
 
 export const en = {
@@ -115,7 +115,8 @@ export const en = {
     ['i-list', 'Ready-made prompts', 'Rough cut, fix feedback, make 3 Shorts, write the post… One click each, and every prompt is yours to edit in JSON.'],
     ['i-send', 'Publish and announce', 'Upload to YouTube and TikTok from the editor, then post “new video” to X, Instagram, Threads and Facebook. Nothing goes out until you approve.'],
     ['i-image', 'Thumbnails with image generation', 'Pick a frame and generate thumbnails with your Codex or Gemini subscription, or an OpenAI or Google API key. Titles are typeset so Japanese text never breaks.'],
-    ['i-music', 'Sound effects and music, ready', 'A starter library of sound effects and BGM you are free to use, downloaded on first launch, with credits written for you.'],
+    ['i-music', 'Sound effects and music, on tap', 'A library of sound effects, BGM and illustrations you are free to use. Each one downloads the moment you or your agent picks it, with credits written for you.'],
+    ['i-archive', 'Your past videos, at hand', 'Every finished video and its timeline stay searchable. Ask “make it like the one from last month” and your agent follows that edit.'],
     ['i-json', 'Every setting is JSON', 'Settings live in a JSON file with a public schema. Edit it by hand or just ask your agent to change it.'],
   ],
   libs: {
@@ -278,7 +279,8 @@ export const ja = {
     ['i-list', '用意済みのプロンプト', '粗カット、フィードバック対応、ショートを3本、投稿文の作成…。どれもワンクリック。プロンプトの中身は JSON で自由に変えられます。'],
     ['i-send', '投稿と告知まで', 'エディタから YouTube と TikTok に投稿し、X・Instagram・Threads・Facebook に「動画を投稿しました」を告知。承認するまで何も投稿されません。'],
     ['i-image', '画像生成でサムネイル', 'フレームを選んで、Codex や Gemini のサブスク、OpenAI や Google の API キーでサムネイルを生成。日本語のタイトルは崩れないよう確実に組みます。'],
-    ['i-music', '効果音・BGM が最初からそろう', '自由に使える効果音と BGM の初期ライブラリを初回起動時にダウンロード。クレジット表記も自動で作ります。'],
+    ['i-music', '効果音・BGM はすぐ使える', '自由に使える効果音・BGM・イラストのライブラリ。あなたかエージェントが選んだときに、その素材だけをダウンロード。クレジット表記も自動で作ります。'],
+    ['i-archive', '過去の動画をいつでも参考に', '完成した動画とその timeline.json をすべて検索できる形で保存。「先月のあの回みたいに」と頼めば、エージェントがその作りに合わせます。'],
     ['i-json', '設定はすべて JSON', '設定は公開スキーマ付きの JSON ファイル。手で編集しても、エージェントに「変えて」と頼んでもOK。'],
   ],
   libs: {
