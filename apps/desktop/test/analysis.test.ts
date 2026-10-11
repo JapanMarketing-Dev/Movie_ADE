@@ -101,10 +101,10 @@ describe('PII → mask ops', () => {
     width: 1920,
     height: 1080,
     frames: [
-      { f: 0, t: 0, changed: true, hits: [{ kind: 'email', label: 'email', text: 'x', box }] },
-      { f: 30, t: 1, changed: false, hits: [{ kind: 'email', label: 'email', text: 'x', box: { ...box, x: 0.11 } }] },
-      { f: 60, t: 2, changed: true, hits: [] },
-      { f: 300, t: 10, changed: true, hits: [{ kind: 'token', label: 'openai', text: 'x', box: { x: 0.5, y: 0.5, w: 0.3, h: 0.03 } }] },
+      { f: 0, t: 0, changed: true, boxes: [{ ...box, kind: 'email', label: 'email', text: 'x' }] },
+      { f: 30, t: 1, changed: false, boxes: [{ ...box, x: 0.11, kind: 'email', label: 'email', text: 'x' }] },
+      { f: 60, t: 2, changed: true, boxes: [] },
+      { f: 300, t: 10, changed: true, boxes: [{ x: 0.5, y: 0.5, w: 0.3, h: 0.03, kind: 'token', label: 'openai', text: 'x' }] },
     ],
   };
   it('links hits into tracks', () => {

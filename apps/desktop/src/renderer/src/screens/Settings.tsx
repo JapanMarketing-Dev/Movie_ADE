@@ -3,6 +3,7 @@ import { RotateCcw, Save } from 'lucide-react';
 import type { AppInfo, SettingsDoc, UpdateState } from '@shared/types';
 import { useT } from '../i18n';
 import { ApiKeys } from '../components/ApiKeys';
+import type { AgentStatus } from '@shared/types';
 import { api, errMsg } from '../lib/api';
 
 type Which = 'settings' | 'prompts';
@@ -25,6 +26,7 @@ export function Settings({ info, toast, onSaved }: { info: AppInfo | null; toast
   const [dirty, setDirty] = useState(false);
   const [external, setExternal] = useState(false);
   const [upd, setUpd] = useState<UpdateState | null>(null);
+  const [agents, setAgents] = useState<AgentStatus[] | null>(null);
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
@@ -40,6 +42,10 @@ export function Settings({ info, toast, onSaved }: { info: AppInfo | null; toast
   useEffect(() => {
     void load(which);
   }, [which, load]);
+
+  useEffect(() => {
+    void api.invoke('agents:list').then(setAgents);
+  }, []);
 
   useEffect(() => {
     void api.invoke('update:state').then(setUpd);
@@ -148,6 +154,7 @@ export function Settings({ info, toast, onSaved }: { info: AppInfo | null; toast
             </select>
           </div>
         </div>
+        <SubscriptionAI parsed={parsed} agents={agents} setKey={setKey} />
         <h2 style={{ margin: '10px 0 0' }}>{t('keys.title')}</h2>
         <ApiKeys toast={toast} />
         <div style={{ flex: 1 }} />
@@ -217,5 +224,70 @@ export function Settings({ info, toast, onSaved }: { info: AppInfo | null; toast
         )}
       </section>
     </div>
+  );
+}
+
+// The app is free and AI runs on the user's own subscriptions: decisions default to `auto` (the installed agent CLI),
+// image generation to Codex. API providers stay optional.
+const DECISION_PROVIDERS = ['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'ollama', 'openai', 'typesafe', 'off'] as const;
+const CLI_AGENT: Record<string, string> = { 'claude-cli': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
+
+function SubscriptionAI({ parsed, agents, setKey }: { parsed: unknown; agents: AgentStatus[] | null; setKey: (k: string, v: unknown) => Promise<void> }) {
+  const t = useT();
+  const provider = String(get(parsed, 'decision.provider') ?? 'auto');
+  const order = get(parsed, 'agents.order');
+  const prefer = Array.isArray(order) ? order.map(String) : ['claude', 'codex', 'gemini'];
+  const installed = (agents ?? []).filter((a) => a.installed && ['claude', 'codex', 'gemini'].includes(a.id));
+  const auto = prefer.map((id) => installed.find((a) => a.id === id)).find(Boolean) ?? installed[0];
+  const imgOrder = get(parsed, 'imageGen.order');
+  const img = Array.isArray(imgOrder) && imgOrder.length ? String(imgOrder[0]) : 'codex';
+  const label = (p: string) =>
+    p === 'auto'
+      ? t('dec.auto')
+      : CLI_AGENT[p]
+        ? t('dec.cli', { agent: agents?.find((a) => a.id === CLI_AGENT[p])?.label ?? CLI_AGENT[p]! })
+        : p === 'off'
+          ? t('dec.off')
+          : t('dec.api', { name: p });
+  return (
+    <>
+      <div className="field">
+        <label>{t('dec.title')}</label>
+        <select className="input" value={provider} onChange={(e) => void setKey('decision.provider', e.target.value)}>
+          {(DECISION_PROVIDERS as readonly string[]).includes(provider) ? null : <option value={provider}>{provider}</option>}
+          {DECISION_PROVIDERS.map((p) => (
+            <option key={p} value={p}>
+              {label(p)}
+            </option>
+          ))}
+        </select>
+        <span className="dim" style={{ fontSize: 12 }}>
+          {agents === null
+            ? t('common.loading')
+            : provider === 'auto'
+              ? auto
+                ? t('dec.autoUses', { agent: `${auto.label}${auto.version ? ` ${auto.version}` : ''}` })
+                : t('dec.noAgent')
+              : CLI_AGENT[provider] && !installed.some((a) => a.id === CLI_AGENT[provider])
+                ? t('dec.notInstalled')
+                : ''}
+        </span>
+      </div>
+      <div className="field">
+        <label>{t('img.title')}</label>
+        <select
+          className="input"
+          value={img}
+          onChange={(e) => {
+            const rest = (Array.isArray(imgOrder) ? imgOrder.map(String) : ['codex', 'gemini', 'openai']).filter((x) => x !== e.target.value);
+            void setKey('imageGen.order', [e.target.value, ...rest]);
+          }}
+        >
+          <option value="codex">{t('img.codex')}</option>
+          <option value="gemini">{t('img.gemini')}</option>
+          <option value="openai">{t('img.openai')}</option>
+        </select>
+      </div>
+    </>
   );
 }

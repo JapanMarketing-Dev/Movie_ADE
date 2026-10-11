@@ -28,6 +28,7 @@ const TYPES: Record<string, string> = {
   mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska',
   wav: 'audio/wav', mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', opus: 'audio/ogg',
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
+  wasm: 'application/wasm', js: 'text/javascript', mjs: 'text/javascript',
   json: 'application/json', md: 'text/markdown; charset=utf-8', srt: 'text/plain; charset=utf-8', vtt: 'text/vtt',
 };
 

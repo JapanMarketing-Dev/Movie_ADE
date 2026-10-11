@@ -192,6 +192,9 @@ export interface FacesFile {
   frames: { f: number; t: number; faces: (NBox & { score: number })[] }[];
 }
 
+/** One PII box at a source frame: the hit flattened (the format engine's masksFromPii reads). */
+export type PiiBox = NBox & { kind: PiiKind; label: string; text: string };
+
 export interface PiiFile {
   schema: 1;
   source: string;
@@ -199,7 +202,11 @@ export interface PiiFile {
   sourceFps: number;
   width: number;
   height: number;
-  frames: { f: number; t: number; changed: boolean; hits: PiiHit[] }[];
+  frames: { f: number; t: number; changed: boolean; boxes: PiiBox[] }[];
+}
+
+export function toPiiBoxes(hits: PiiHit[]): PiiBox[] {
+  return hits.map((h) => ({ ...h.box, kind: h.kind, label: h.label, text: h.text }));
 }
 
 // ---------- masks ----------
@@ -229,13 +236,14 @@ export interface MaskTrack {
 export function trackHits(frames: PiiFile['frames'], maxGapFrames: number): MaskTrack[] {
   const tracks: MaskTrack[] = [];
   for (const fr of frames) {
-    for (const h of fr.hits) {
+    for (const b of fr.boxes) {
+      const box = { x: b.x, y: b.y, w: b.w, h: b.h };
       const t = tracks.find((tr) => {
         const last = tr.points[tr.points.length - 1]!;
-        return tr.kind === h.kind && fr.f - last.f <= maxGapFrames && fr.f > last.f && iou(last.box, h.box) >= 0.3;
+        return tr.kind === b.kind && fr.f - last.f <= maxGapFrames && fr.f > last.f && iou(last.box, box) >= 0.3;
       });
-      if (t) t.points.push({ f: fr.f, box: h.box });
-      else tracks.push({ kind: h.kind, label: h.label, points: [{ f: fr.f, box: h.box }] });
+      if (t) t.points.push({ f: fr.f, box });
+      else tracks.push({ kind: b.kind, label: b.label, points: [{ f: fr.f, box }] });
     }
   }
   return tracks;

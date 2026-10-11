@@ -123,6 +123,19 @@ describe('built-in templates', () => {
 });
 
 describe('loader errors and overrides', () => {
+  it('project → user → built-in overrides of the same id chain without a cycle', () => {
+    const user = join(home, 'templates', 'talk');
+    mkdirSync(user, { recursive: true });
+    writeFileSync(join(user, 'template.yaml'), 'id: talk\nextends: talk\ncaptions: { maxLines: 1 }\n');
+    const proj = join(home, 'proj', 'templates', 'talk');
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(join(proj, 'template.yaml'), 'id: talk\nextends: talk\ncaptions: { maxCharsPerLine: 18 }\n');
+    const t = loadTemplate('talk', { extraDirs: [join(home, 'proj', 'templates')] });
+    expect(t.captions).toMatchObject({ maxLines: 1, maxCharsPerLine: 18 });
+    expect(t.chain.length).toBeGreaterThanOrEqual(4);   // project, user, built-in talk, base
+    expect(loadTemplate('talk').captions.maxLines).toBe(1);
+  });
+
   it('rejects unknown and malformed ids', () => {
     expect(() => loadTemplate('nope-nothing')).toThrow(/not found/);
     expect(() => loadTemplate('../etc')).toThrow(/invalid template id/);

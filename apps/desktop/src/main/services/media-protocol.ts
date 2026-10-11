@@ -1,21 +1,36 @@
 // solocut-media://file/<encoded absolute path> — serves local media to the renderer with Range support so
 // <video> can seek. Only files under allowed roots (opened projects, the archive) are served.
-import { protocol } from 'electron';
-import { createReadStream, promises as fsp } from 'node:fs';
+import { protocol, session } from 'electron';
+import { createReadStream, promises as fsp, realpathSync } from 'node:fs';
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { MEDIA_SCHEME, pathFromMediaUrl } from '../../shared/ipc';
 import { contentTypeFor, parseRange } from './range';
+import { appOrigins, corsOrigin } from './cors';
 
 const roots = new Set<string>();
 
-export function allowMediaRoot(dir: string): void {
-  if (!dir || !isAbsolute(dir)) return;
-  roots.add(resolve(dir));
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
 }
 
+export function allowMediaRoot(dir: string): void {
+  if (!dir || !isAbsolute(dir)) return;
+  roots.add(real(dir));
+}
+
+/** Test hook. */
+export function clearMediaRoots(): void {
+  roots.clear();
+}
+
+/** True only for files under an allowed root after resolving symlinks (a link inside a project cannot escape it). */
 export function isAllowed(path: string): boolean {
-  const p = resolve(normalize(path));
+  const p = real(resolve(normalize(path)));
   for (const r of roots) {
     const rel = relative(r, p);
     if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel) && !rel.split(sep).includes('..'))) return true;
@@ -30,8 +45,13 @@ export function registerMediaScheme(): void {
   ]);
 }
 
+/**
+ * Registers the handler on the app's own session only. Remote pages (any future in-app browser, OAuth, webviews)
+ * must use a separate partition, where this scheme does not exist.
+ */
 export function handleMediaProtocol(): void {
-  protocol.handle(MEDIA_SCHEME, async (req) => {
+  const allowed = appOrigins(process.env.ELECTRON_RENDERER_URL);
+  session.defaultSession.protocol.handle(MEDIA_SCHEME, async (req) => {
     const path = pathFromMediaUrl(req.url);
     if (!path || !isAbsolute(path) || !isAllowed(path)) return new Response('forbidden', { status: 403 });
     let size: number;
@@ -44,8 +64,13 @@ export function handleMediaProtocol(): void {
     }
     const type = contentTypeFor(path);
     const r = parseRange(req.headers.get('range'), size);
-    // CORS: the analysis window's workers (opaque origin) fetch wasm and language data through this scheme
-    const common = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' };
+    // CORS only for the app's own pages (the analysis window's workers fetch wasm and language data this way)
+    const acao = corsOrigin(req.headers.get('origin'), allowed);
+    const common: Record<string, string> = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' };
+    if (acao) {
+      common['Access-Control-Allow-Origin'] = acao;
+      common.Vary = 'Origin';
+    }
     if (r.kind === 'invalid') {
       return new Response(null, { status: 416, headers: { ...common, 'Content-Range': `bytes */${size}` } });
     }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyItemEdits, boxFrom, boxPoints, contentRect, feedbackAgentMessage, feedbackMarkdown, frameAt, normalizePoint, parseFeedbackShow, renumber, simplifyStroke } from '../src/shared/feedback';
+import { resolve } from 'node:path';
 import { parseCandidates, parseImages } from '../src/main/services/thumbs';
 
 describe('feedback geometry and time', () => {
@@ -74,16 +75,22 @@ describe('feedback show results (CLI items.json)', () => {
 
 describe('thumbnail CLI output', () => {
   it('parses candidates with project-relative paths', () => {
-    const c = parseCandidates('/p', { candidates: [{ frame: 10, timecode: '00:00:00:10', image: 'renders/thumbnails/c1.png', score: 0.9 }, { frame: 'x' }, { image: '/abs/c2.png', frame: 20 }] });
-    expect(c).toEqual([{ frame: 10, timecode: '00:00:00:10', image: '/p/renders/thumbnails/c1.png', score: 0.9 }, { frame: 20, timecode: '', image: '/abs/c2.png' }]);
+    const proj = resolve('/p');
+    const abs = resolve('/abs/c2.png');
+    const c = parseCandidates(proj, { candidates: [{ frame: 10, timecode: '00:00:00:10', image: 'renders/thumbnails/c1.png', score: 0.9 }, { frame: 'x' }, { image: abs, frame: 20 }] });
+    // paths are platform paths (backslashes and a drive letter on Windows)
+    expect(c).toEqual([{ frame: 10, timecode: '00:00:00:10', image: resolve(proj, 'renders/thumbnails/c1.png'), score: 0.9 }, { frame: 20, timecode: '', image: abs }]);
     expect(parseCandidates('/p', null)).toEqual([]);
   });
   it('parses `thumb gen` thumbnails ({ format, file, provider })', () => {
-    const imgs = parseImages('/np', { thumbnails: [{ format: 'youtube', file: 'renders/thumbnails/youtube-1.jpg', base: 'x', provider: 'codex' }], errors: [] });
-    expect(imgs).toEqual([{ path: '/np/renders/thumbnails/youtube-1.jpg', favorite: false, provider: 'codex' }]);
+    const np = resolve('/np');
+    const imgs = parseImages(np, { thumbnails: [{ format: 'youtube', file: 'renders/thumbnails/youtube-1.jpg', base: 'x', provider: 'codex' }], errors: [] });
+    expect(imgs).toEqual([{ path: resolve(np, 'renders/thumbnails/youtube-1.jpg'), favorite: false, provider: 'codex' }]);
   });
   it('parses generated images (strings or objects)', () => {
-    const imgs = parseImages('/nonexistent-project', { images: ['renders/thumbnails/a.png', { path: '/x/b.jpg', provider: 'codex' }, 5] });
-    expect(imgs).toEqual([{ path: '/nonexistent-project/renders/thumbnails/a.png', favorite: false }, { path: '/x/b.jpg', favorite: false, provider: 'codex' }]);
+    const proj = resolve('/nonexistent-project');
+    const b = resolve('/x/b.jpg');
+    const imgs = parseImages(proj, { images: ['renders/thumbnails/a.png', { path: b, provider: 'codex' }, 5] });
+    expect(imgs).toEqual([{ path: resolve(proj, 'renders/thumbnails/a.png'), favorite: false }, { path: b, favorite: false, provider: 'codex' }]);
   });
 });

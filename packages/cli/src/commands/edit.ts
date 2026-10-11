@@ -124,11 +124,14 @@ function splitOps(ctx: Ctx, p: Project, flags: Record<string, unknown>): Op[] {
   if (!at.length || at.some((x) => !Number.isInteger(x) || x < 0)) throw new CliError('usage', '--at needs source frames (integers ≥ 0), e.g. --at 1200,1530');
   const tl = readTimeline(p);
   if (!tl.segments.some((s) => s.id === seg)) throw new CliError('not-found', t(ctx, `区間がありません: ${seg}`, `no such segment: ${seg}`));
+  let ops: Op[];
   try {
-    return splitForSwitch(tl, seg, at);
+    ops = splitForSwitch(tl, seg, at);
   } catch (e) {
     throw new CliError('invalid-op', (e as Error).message);
   }
+  if (!ops.length) throw new CliError('invalid-op', t(ctx, `${seg} の中に分ける位置がありません（--at は素材のフレーム）`, `no split point inside ${seg} (--at takes source frames)`));
+  return ops;
 }
 
 export async function cmdEdit(ctx: Ctx, args: string[]): Promise<void> {

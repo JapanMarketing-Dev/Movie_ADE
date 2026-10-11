@@ -74,7 +74,8 @@ describe('sfx apply', () => {
     expect(tl.sources.sfx_whoosh_kenney1).toMatchObject({ kind: 'asset', path: 'assets/library/sfx_whoosh_kenney1.wav', license: { id: 'CC0-1.0', credit: 'swish.wav — Kenney (CC0-1.0)' } });
     expect(tl.audio.sfx.every((s: { decided: { by: string } }) => s.decided.by === 'template')).toBe(true);
     // a human sfx stays; re-running replaces only the template ones
-    await run(['edit', 'addSfx', '--sfx', JSON.stringify({ id: 'sfx_mine', asset: 'sfx_whoosh_kenney1', at: 450, gainDb: -10, decided: { by: 'human', reason: 'ここで鳴らす' } })]);
+    const mine = await run(['edit', 'addSfx', '--sfx', JSON.stringify({ id: 'sfx_mine', asset: 'sfx_whoosh_kenney1', at: 450, gainDb: -10, trigger: 'manual', decided: { by: 'human', reason: 'ここで鳴らす' } })]);
+    expect(mine.json, mine.stdout + mine.stderr).toMatchObject({ ok: true });
     const again = await run(['sfx', 'apply']);
     expect(again.json.removed).toBe(r.json.added);
     const after = timeline().audio.sfx;
@@ -259,7 +260,7 @@ describe('tracks apply', () => {
     expect((await run(['tracks', 'apply', '--follow-clicks', '--no-follow-clicks'])).code).toBe(2);
     const none = await run(['tracks', 'apply']);
     expect(none.json).toMatchObject({ ok: true, overlays: 0 });
-    expect(none.json.warnings.join(' ')).toMatch(/analysis/);
+    expect(none.json.warnings.join(' ')).toMatch(/解析|analysis/);
     mkdirSync(join(dir, 'derived', 'analysis'), { recursive: true });
     writeFileSync(join(dir, 'derived', 'analysis', 'keys.take_1.jsonl'), JSON.stringify({ t_ms: 5000, keys: ['ctrl', 'c'] }));
     const r = await run(['tracks', 'apply', '--dry-run']);
@@ -330,19 +331,24 @@ describe('bench', () => {
 describe('mcp tools for round 5', () => {
   it('maps the new tools onto CLI argv', async () => {
     const calls: string[][] = [];
-    const server = createMcpServer({ run: async (argv) => { calls.push(argv); return { code: 0, stdout: '{"ok":true}', stderr: '' }; } });
-    const call = (name: string, args: object) => server.handleLine(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }));
+    const server = createMcpServer(async (argv) => {
+      calls.push(argv);
+      return { code: 0, stdout: '{"ok":true}', stderr: '' };
+    }, { defaultProject: '/p' });
+    const call = (name: string, args: object) => server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } });
     await call('split_for_switch', { segment: 'seg_1', at: [10, 20], reason: 'r' });
     await call('sfx_apply', { dryRun: true });
     await call('tracks_apply', { followClicks: false, overlays: false });
+    await call('tracks_apply', { followClicks: true });
     await call('masks_from_analysis', { kind: 'blur', variant: 'tiktok' });
     await call('multicam_material', {});
-    expect(calls.map((c) => c.slice(0, -1).filter((x) => x !== '--json'))).toEqual([
-      ['edit', 'split-for-switch', '--segment', 'seg_1', '--at', '10,20', '--reason'],
-      ['sfx', 'apply'],
-      ['tracks', 'apply', '--no-follow-clicks'],
-      ['masks', 'from-analysis', '--kind', 'blur', '--variant'],
-      ['multicam'],
+    expect(calls).toEqual([
+      ['edit', 'split-for-switch', '--segment', 'seg_1', '--at', '10,20', '--reason', 'r', '--json', '--project', '/p'],
+      ['sfx', 'apply', '--dry-run', '--json', '--project', '/p'],
+      ['tracks', 'apply', '--no-follow-clicks', '--no-overlays', '--json', '--project', '/p'],
+      ['tracks', 'apply', '--follow-clicks', '--json', '--project', '/p'],
+      ['masks', 'from-analysis', '--kind', 'blur', '--json', '--project', '/p', '--variant', 'tiktok'],
+      ['multicam', 'material', '--json', '--project', '/p'],
     ]);
   });
 });

@@ -9,7 +9,7 @@ import tessWorkerUrl from 'tesseract.js/dist/worker.min.js?url';
 import tessCoreUrl from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 import type { AnalysisJob } from '@shared/types';
 import { mediaUrl } from '@shared/ipc';
-import { findPii, frameDiff, sampleTimes, toGray, type FacesFile, type OcrWord, type PiiFile, type PiiHit } from '@shared/analysis';
+import { findPii, frameDiff, sampleTimes, toGray, toPiiBoxes, type FacesFile, type OcrWord, type PiiBox, type PiiFile } from '@shared/analysis';
 
 const api = window.solocut;
 const CHANGE_THRESHOLD = 0.012;
@@ -106,7 +106,7 @@ async function ocr(job: AnalysisJob): Promise<PiiFile> {
   const times = sampleTimes(v.duration, job.sampleFps);
   const out: PiiFile = { schema: 1, source: job.sourceId, fps: job.sampleFps, sourceFps: job.sourceFps, width: job.width, height: job.height, frames: [] };
   let lastGray: Uint8Array | null = null;
-  let lastHits: PiiHit[] = [];
+  let lastBoxes: PiiBox[] = [];
   for (let i = 0; i < times.length; i++) {
     const t = times[i]!;
     await seek(v, t);
@@ -130,10 +130,10 @@ async function ocr(job: AnalysisJob): Promise<PiiFile> {
           }
         }
       }
-      lastHits = findPii(lines);
+      lastBoxes = toPiiBoxes(findPii(lines));
       lastGray = gray;
     }
-    out.frames.push({ f: Math.round(t * job.sourceFps), t, changed, hits: lastHits });
+    out.frames.push({ f: Math.round(t * job.sourceFps), t, changed, boxes: lastBoxes });
     api.send('analysis:progress', job.id, (i + 1) / times.length);
   }
   return out;

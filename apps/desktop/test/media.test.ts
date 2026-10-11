@@ -32,6 +32,7 @@ describe('parseRange', () => {
     expect(contentTypeFor('/a/B.MP4')).toBe('video/mp4');
     expect(contentTypeFor('x.webm')).toBe('video/webm');
     expect(contentTypeFor('noext')).toBe('application/octet-stream');
+    expect(contentTypeFor('/x/vision_wasm_internal-ab.wasm')).toBe('application/wasm'); // streaming compile needs it
   });
 });
 
