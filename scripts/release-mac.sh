@@ -26,8 +26,11 @@ for app in release/mac-arm64/Solocut.app release/mac/Solocut.app; do
   xcrun stapler validate "$app"
   spctl --assess --type execute --verbose=2 "$app"
 done
+# electron-builder notarizes the .app; notarize the signed dmg too so opening the download shows no warning.
 for dmg in release/*.dmg; do
-  xcrun stapler staple "$dmg" || true
+  xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+  xcrun stapler staple "$dmg"
+  spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 done
 
 cd "$ROOT"
