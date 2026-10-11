@@ -63,6 +63,8 @@ module.exports = {
   },
 
   linux: {
+    // The npm package name (@solocut/desktop) is not a valid file name; name the binary explicitly.
+    executableName: 'solocut-desktop',
     icon: 'build/icons',
     category: 'AudioVideo',
     target: [
