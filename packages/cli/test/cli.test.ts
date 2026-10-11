@@ -131,7 +131,7 @@ describe('status / next / step', () => {
 
   it('a fresh project waits for media', async () => {
     const s = await inDir(['status']);
-    expect(s.json.steps).toHaveLength(21);
+    expect(s.json.steps).toHaveLength(22);
     expect(s.json.steps.map((x: { step: string }) => x.step)).toContain('derive:tiktok');
     expect(s.json.variants).toEqual({ tiktok: { exists: false, stale: false, lastCheckFailed: 0 }, 'youtube-shorts': { exists: false, stale: false, lastCheckFailed: 0 } });
     expect(s.json.next).toMatchObject({ step: 'ingest', state: 'needs-human' });
@@ -152,14 +152,14 @@ describe('status / next / step', () => {
     expect((await inDir(['next'])).json).toMatchObject({ step: 'ingest', state: 'ready' });
     await inDir(['step', 'ingest', 'done']);
     await inDir(['step', 'sync', 'skipped', '--note', 'one camera']);
-    expect((await inDir(['next'])).json.step).toBe('transcribe');
+    expect((await inDir(['next'])).json.step).toBe('analyze');
     const st = JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8'));
     expect(st.find((x: { step: string }) => x.step === 'sync')).toMatchObject({ state: 'skipped', note: 'one camera' });
   });
 
   it('next --with-prompt includes the template prompt text', async () => {
     await seed();
-    for (const s of ['ingest', 'sync', 'transcribe']) await inDir(['step', s, 'done']);
+    for (const s of ['ingest', 'sync', 'analyze', 'transcribe']) await inDir(['step', s, 'done']);
     mkdirSync(join(dir, 'derived', 'transcripts'), { recursive: true });
     writeFileSync(join(dir, 'derived', 'transcripts', 'main.json'), JSON.stringify({ words: [] }));
     const n = await inDir(['next', '--with-prompt']);
@@ -368,7 +368,7 @@ describe('tl', () => {
 
 describe('config / prompts / templates / lib / past', () => {
   it('config get/set/schema/path', async () => {
-    expect((await sb.run(['config', 'get', 'decision.provider', '--json'])).json).toMatchObject({ ok: true, value: 'off' });
+    expect((await sb.run(['config', 'get', 'decision.provider', '--json'])).json).toMatchObject({ ok: true, value: 'auto' });
     expect((await sb.run(['config', 'set', 'recording.camera.fps', '60', '--json'])).json.value).toBe(60);
     expect((await sb.run(['config', 'get', 'recording.camera.fps'])).stdout).toBe('60\n');
     const bad = await sb.run(['config', 'set', 'recording.camera.fps', '61', '--json']);

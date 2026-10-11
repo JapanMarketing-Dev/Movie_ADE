@@ -16,6 +16,7 @@ import {
 import { allTimelines, captionsLib, freshPreview, media } from './media.js';
 import { apiKeyFor } from '../keys.js';
 import { ensureFonts } from '../fonts.js';
+import { decisionSetup, isSkip } from '../decision.js';
 import { emptyOutput } from './meta.js';
 
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
@@ -124,28 +125,25 @@ async function cmdCandidates(ctx: Ctx, args: string[]): Promise<void> {
     out.push({ frame: c.frame, timecode: frameToTimecode(c.frame, tl.canvas.fps), score: c.score, heuristic: c.score, image });
   }
   // the decision model looks at eyes / blur / expression when configured
-  const s = loadSettings();
   const warnings: string[] = [];
-  if (s.decision.provider !== 'off') {
-    for (const c of out) {
-      try {
-        const [a] = await decide({
-          state: { purpose: 'video thumbnail', title: tl.meta.title },
-          questions: [{ id: 'good', kind: 'yesno', text: t(ctx, '人物の目が開いていて、ブレておらず、表情が良いか（サムネイルに使えるか）', 'Are the eyes open, the image sharp and the expression good (usable as a thumbnail)?') }],
-          images: [{ id: 'frame', path: c.image }],
-        }, {
-          provider: s.decision.provider, model: s.decision.model, ...(s.decision.endpoint ? { endpoint: s.decision.endpoint } : {}),
-          ...(apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider) ? { apiKey: apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider)! } : {}), cacheDir: join(paths(p.dir).cache, 'decisions'),
-        });
-        if (a?.p !== undefined) {
-          c.model = a.p;
-          c.score = Math.round((0.5 * c.heuristic + 0.5 * a.p) * 1000) / 1000;
-          if (band(a.p, { autoAbove: 1.01, autoBelow: 0.2 }) === 'no') c.score = 0;
-        }
-      } catch (e) {
-        warnings.push(`decision model: ${(e as Error).message}`);
-        break;
+  const setup = decisionSetup(ctx, p, 'thumbnail');
+  if (!isSkip(setup) && out.length) {
+    // every candidate in one call: one yes/no question per frame image
+    try {
+      const answers = await decide({
+        state: { purpose: 'video thumbnail', title: tl.meta.title },
+        questions: out.map((c, i) => ({ id: `f${i}`, kind: 'yesno' as const, text: t(ctx, `画像 f${i}: 人物の目が開いていて、ブレておらず、表情が良いか（サムネイルに使えるか）`, `Image f${i}: are the eyes open, the image sharp and the expression good (usable as a thumbnail)?`) })),
+        images: out.map((c, i) => ({ id: `f${i}`, path: c.image })),
+      }, setup.options);
+      for (const a of answers) {
+        const c = out[Number(a.id.slice(1))];
+        if (!c || a.p === undefined) continue;
+        c.model = a.p;
+        c.score = Math.round((0.5 * c.heuristic + 0.5 * a.p) * 1000) / 1000;
+        if (band(a.p, { autoAbove: 1.01, autoBelow: 0.2 }) === 'no') c.score = 0;
       }
+    } catch (e) {
+      warnings.push(`decision model: ${(e as Error).message}`);
     }
   }
   out.sort((a, b) => b.score - a.score);

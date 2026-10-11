@@ -15,7 +15,7 @@ import { registerProject } from '@solocut/archive';
 import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
 import { cameraCount, loadAnalysis } from '../analysis.js';
-import { apiKeyFor } from '../keys.js';
+import { decisionSetup, isSkip } from '../decision.js';
 import { ensureFonts } from '../fonts.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
 import {
@@ -467,63 +467,50 @@ function takeDurationSec(tl: Timeline, take: string): number {
   return best;
 }
 
-function decisionBudget(p: Project): number {
-  const s = loadSettings();
-  let projectSpent = 0;
-  let todaySpent = 0;
-  const today = new Date().toISOString().slice(0, 10);
-  try {
-    for (const line of readFileSync(paths(p.dir).decisions, 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      const e = JSON.parse(line) as { at?: string; costUsd?: number };
-      projectSpent += e.costUsd ?? 0;
-      if (e.at?.startsWith(today)) todaySpent += e.costUsd ?? 0;
-    }
-  } catch {
-    /* no log yet */
-  }
-  return Math.max(0, Math.min(s.decision.limits.perProjectUsd - projectSpent, s.decision.limits.perDayUsd - todaySpent, s.autopilot.budget.decisionUsd - projectSpent));
-}
-
-
-/** Ask the decision model about filler/retake candidates. Returns them judged; failures fall back to the rule. */
+/**
+ * Ask the decision model about filler/retake candidates, many per call (agent CLIs are slow and counted in calls).
+ * Failures fall back to the rule for the rest.
+ */
 async function judge(ctx: Ctx, p: Project, tpl: Template, cands: Removal[], words: TranscriptFile['words'], warnings: string[]): Promise<{ cut: Removal[]; review: Removal[] }> {
-  const s = loadSettings();
   const ask = cands.filter((c) => c.kind === 'filler' || c.kind === 'retake');
   const rest = cands.filter((c) => !(c.kind === 'filler' || c.kind === 'retake'));
-  if (s.decision.provider === 'off' || !ask.length) return { cut: cands, review: [] };
-  const cloud = s.decision.provider !== 'ollama' && !(s.decision.endpoint && /^https?:\/\/(localhost|127\.0\.0\.1)/.test(s.decision.endpoint));
-  if (cloud && !s.decision.cloudConsent) {
-    warnings.push(t(ctx, 'クラウドの判定モデルへの送信に同意していないため、規則で決めました（設定 decision.cloudConsent）', 'cloud decision model not consented (decision.cloudConsent); used the rules'));
+  if (!ask.length) return { cut: cands, review: [] };
+  const setup = decisionSetup(ctx, p, 'cut');
+  if (isSkip(setup)) {
+    if (setup.skip === 'consent') warnings.push(t(ctx, 'クラウドの判定モデルへの送信に同意していないため、規則で決めました（設定 decision.cloudConsent）', 'cloud decision model not consented (decision.cloudConsent); used the rules'));
     return { cut: cands, review: [] };
   }
   const cut: Removal[] = [...rest];
   const review: Removal[] = [];
-  const cacheDir = join(paths(p.dir).cache, 'decisions');
   const thresholds = tpl.decisions.cutKeep;
-  for (const c of ask) {
-    const q: Question[] = [{ id: 'cut', kind: 'yesno', text: t(ctx, 'この部分を切っても、話の流れは自然につながるか', 'Does the speech still flow naturally if this part is cut?') }];
+  const BATCH = 40;
+  for (let i = 0; i < ask.length; i += BATCH) {
+    const batch = ask.slice(i, i + BATCH);
     const state = {
-      template_rules: tpl.prompts['rough-cut']?.slice(0, 1500) ?? '', kind: c.kind,
-      before: textIn(words, c.start - 6, c.start, p.file.language), candidate: c.text ?? textIn(words, c.start, c.end, p.file.language),
-      after: textIn(words, c.end, c.end + 6, p.file.language),
+      template_rules: tpl.prompts['rough-cut']?.slice(0, 1500) ?? '',
+      candidates: batch.map((c, j) => ({
+        id: `c${i + j}`, kind: c.kind, before: textIn(words, c.start - 6, c.start, p.file.language),
+        candidate: c.text ?? textIn(words, c.start, c.end, p.file.language), after: textIn(words, c.end, c.end + 6, p.file.language),
+      })),
     };
+    const questions: Question[] = batch.map((_, j) => ({
+      id: `c${i + j}`, kind: 'yesno',
+      text: t(ctx, `候補 c${i + j} を切っても、話の流れは自然につながるか`, `Does the speech still flow naturally if candidate c${i + j} is cut?`),
+    }));
     try {
-      const [a] = await decide({ state, questions: q }, {
-        provider: s.decision.provider, model: s.decision.model, ...(s.decision.endpoint ? { endpoint: s.decision.endpoint } : {}),
-        ...(apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider) ? { apiKey: apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider)! } : {}),
-        cacheDir, budget: { remainingUsd: decisionBudget(p) },
-        onUsage: (u) => appendFileSync(paths(p.dir).decisions, JSON.stringify({ at: new Date().toISOString(), kind: 'cut', candidate: [c.start, c.end], ...u }) + '\n'),
+      const answers = await decide({ state, questions }, setup.options);
+      const byId = new Map(answers.map((a) => [a.id, a.p ?? 0.5]));
+      batch.forEach((c, j) => {
+        const pr = byId.get(`c${i + j}`) ?? 0.5;
+        const b = band(pr, thresholds);
+        if (b === 'yes') cut.push({ ...c, by: 'decision-model', confidence: pr });
+        else if (b === 'ask') review.push({ ...c, by: 'decision-model', confidence: pr, needsReview: true });
+        // 'no': keep the words (not cut)
       });
-      const pr = a?.p ?? 0.5;
-      const b = band(pr, thresholds);
-      if (b === 'yes') cut.push({ ...c, by: 'decision-model', confidence: pr });
-      else if (b === 'ask') review.push({ ...c, by: 'decision-model', confidence: pr, needsReview: true });
-      // 'no': keep the words (not cut)
     } catch (e) {
-      if (e instanceof DecideError && e.code === 'budget') warnings.push(t(ctx, '判定モデルの費用の上限に達したため、残りは規則で決めました', 'decision budget reached; the rest used the rules'));
+      if (e instanceof DecideError && e.code === 'budget') warnings.push(t(ctx, '判定モデルの上限に達したため、残りは規則で決めました', 'decision budget reached; the rest used the rules'));
       else warnings.push(`decision model: ${(e as Error).message}`);
-      cut.push(c, ...ask.slice(ask.indexOf(c) + 1));
+      cut.push(...ask.slice(i));
       return { cut, review };
     }
   }

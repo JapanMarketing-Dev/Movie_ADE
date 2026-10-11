@@ -48,12 +48,17 @@ const Transcription = z.object({
 });
 
 const Decision = z.object({
-  provider: z.enum(['off', 'ollama', 'openai', 'typesafe', 'custom']).default('off'),
+  /** 'auto' = the first installed agent CLI (claude-cli → codex-cli → gemini-cli), else off: runs on the user's subscription. */
+  provider: z.enum(['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'off', 'ollama', 'openai', 'typesafe', 'custom']).default('auto'),
   model: z.string().default('qwen3-vl'),
   endpoint: z.string().url().optional(),
   apiKeyRef: z.string().optional(),
   limits: z
-    .object({ perProjectUsd: z.number().min(0).default(2), perDayUsd: z.number().min(0).default(5) })
+    .object({
+      perProjectUsd: z.number().min(0).default(2), perDayUsd: z.number().min(0).default(5),
+      /** Agent CLI providers are counted in calls (each call batches many questions). */
+      perProjectCalls: z.number().int().min(0).default(200),
+    })
     .prefault({}),
   cloudConsent: z.boolean().default(false),
 });

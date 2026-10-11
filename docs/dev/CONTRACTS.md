@@ -389,7 +389,12 @@ export function listTemplates(o?: { extraDirs?: string[] }): Template[];   // ex
 export function loadTemplate(id: string, o?: { extraDirs?: string[] }): Template;  // `extends` (deep merge; arrays replace); id must equal folder name
 export function generateAgentsMd(t: Template, project: { dir: string; title: string; lang: 'ja'|'en' }): string;
 export const CLAUDE_MD = '@AGENTS.md\n';
-export type StepId = 'ingest'|'sync'|'transcribe'|'rough-cut'|'multicam'|'captions'|'sfx'|'layout'|'preview'|'check'|'review'|'final'|'thumbnail'|'metadata';
+export type StepId = 'ingest'|'sync'|'transcribe'|'rough-cut'|'multicam'|'captions'|'sfx'|'layout'|'preview'|'check'|'review'|'final'|'thumbnail'|'metadata'
+  |'analyze'|'masks';   // round 5: analyze (deps ingest, sync), masks (deps rough-cut, analyze; preview depends on it)
+// Families: tech pipeline [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check,
+// thumbnail, metadata, review, final]; talk the same without masks. Template fields added: `sfx { rules: { on: emphasis|section|cut|
+// scene-in|caption-in, kind, probability?, gainDb? }[], maxPerMin?, gainDb?, minSpacingMs? }`, `zoom { followClicks: boolean |
+// { scale?, holdSec?, rampSec? } }`, `captionLook` (core TemplatePatch shape). A same-id override chains project → ~/.solocut → built-in.
 export interface StepState { step: StepId; state: 'todo'|'running'|'done'|'needs-human'|'skipped'; note?: string; at?: string }
 export type PipelineStep = StepId | 'publish' | `derive:${Variant}` | `check:${Variant}` | `final:${Variant}`;   // Variant = 'tiktok'|'youtube-shorts'
 export function derivedTargets(t): Variant[];          // outputs with derive + enabled
@@ -406,6 +411,7 @@ export function nextStep(template: Template, status: StepState[], ctx: { hasTake
   // check done needs lastCheckFailed = 0; review always waits for a human (autopilot skips it); autopilot never skips
   // needs-human sync and stops before stopBefore steps. While waiting, `meanwhile` names a later step whose deps passed.
 export function initialStatus(t): StepState[] /* expanded pipeline */; export const STEP_DEPS; export function stepText(step, lang, variants?);
+// NextContext.cameras?: number — with fewer than 2 camera sources multicam counts as passed (undefined = unknown → asked).
 ```
 
 ## @solocut/archive
@@ -474,13 +480,16 @@ markers; VFR/webm → CFR proxy in derived/proxies), `import <file> [--take] [--
 `transcribe [--take] [--source] [--model]` (whisper-cli `-ml 1 -sow -ojf`; derived/transcripts/main.json, word times in
 the take clock), `analyze`, `propose cuts [--replace] [--dry-run]`, `edit <op> --<field> <json|string> --reason …` /
 `edit '<json>'` / `edit --ops <file|json|->` (ops needing `decided` get it from --reason), `undo`, `redo`, `history`,
-`validate`, `captions build`, `render --preview|--final [--target] [--out]` (preview → renders/preview.mp4; final →
-renders/<target>/<title>.mp4, sets outputs[].render, auto-registers in the archive), `frame --at <frame|timecode>`
+`validate`, `captions build`, `render --preview|--final [--target] [--out]` (main: renders/youtube/{preview,final}.mp4,
+plus a compatibility copy renders/preview.mp4 of the main preview; variants: renders/<variant>/{preview,final}.mp4;
+`--target` other than youtube on the main → renders/<target>/final.mp4; final sets outputs[].render and auto-registers
+the main video in the archive), `frame --at <frame|timecode>`
 (extracted from the up-to-date preview), `check [--only failed]` (checks/<run>/report.{md,json}, review.lastCheck),
 `tl summary|show|range|query|why`, `past list|search|show|timeline|compare|reuse|register`, `config get|set|schema|path`,
 `prompts list|show [--var k=v]`, `templates`, `lib list|install ffmpeg|whisper|whisper-small|fonts|all` (all = ffmpeg, whisper,
 fonts), `doctor`, `version`, `derive`, `thumb candidates|gen|pick`, `meta [show]|set|write`, `feedback import|set|update|list|show|done`,
-`publish record`, `mcp`.
+`publish record`, `sfx apply`, `masks from-analysis`, `multicam material`, `edit split-for-switch`, `tracks apply`,
+`bench profile|apply`, `mcp`.
 Progress goes to stderr: one redrawn line (`\r`) on a TTY, otherwise at most one line per 10 %. With `--json` it is NDJSON on
 stderr, one line per whole percent: `{"progress":{"task":"ffmpeg"|"whisper"|"render"|…,"fraction":0.42,"label":"…", …extra}}`;
 the final result is still the single JSON object on stdout.
@@ -497,7 +506,7 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
   original source; bases come from the providers in `settings.imageGen.order` (fail over in order; none → the frame
   itself): codex = `codex exec -i <frame> '$imagegen …'` + newest files in `$CODEX_HOME/generated_images`; openai =
   Images API edits (gpt-image-2, key `SOLOCUT_OPENAI_API_KEY`/`OPENAI_API_KEY`); gemini = generateContent with
-  inline image (key `SOLOCUT_GEMINI_API_KEY`, model from `imageGen.providers.gemini.model`). The title is typeset by
+  inline image (key `SOLOCUT_GEMINI_API_KEY`, model from `imageGen.providers.gemini.model`, default `gemini-nano-banana-2.1`). The title is typeset by
   Solocut as its own layer: `renders/thumbnails/title-<format>.svg` is always written; it is composited directly when
   ffmpeg has an SVG decoder (librsvg), else the same layout is drawn with libass; neither → error `ffmpeg-features`.
   Output `renders/thumbnails/{youtube-N.jpg 1280×720, shorts-N.jpg 1080×1920}` (≤ 2 MB), bases `base-*.png`;
@@ -516,7 +525,8 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
   scene-in → scene starts, cut → segment starts) at the past rate, caption style, copied asset sources, and
   `meta.references`; added elements carry `decided.needsReview`. `--apply` applies the ops and merges `templatePatch`
   (e.g. `cut.silence.minMs`, `captions.style`) into `<project>/templates/<id>/template.yaml` (`extends` the same id).
-- `feedback import <session-dir> [--organize claude|codex|auto] [--id fb_…]` reads the app's session folder:
+- `feedback import <session-dir> [--organize claude|codex|auto] [--id fb_…]` reads the app's session folder (everything is
+  built in `feedback/.tmp-<id>-<pid>/` and renamed to `feedback/<id>/` at the end, so a failed transcription leaves nothing):
 
   ```jsonc
   // session.json (written by the desktop app)
@@ -549,13 +559,46 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
   notes? }`, order = new order, missing = deleted) → renumbered 1..n, NN.png renamed along, items.json/feedback.md rewritten.
 - `mcp [--project dir]`: MCP server over stdio (newline-delimited JSON-RPC 2.0; protocol 2025-06-18 / 2025-03-26 /
   2024-11-05). Tools: status, next, step, tl_summary, tl_show, tl_range, tl_query, tl_why, edit, undo, redo, validate,
-  propose_cuts, captions_build, derive, render (`all`), check (`all`), thumb_pick, frame (also returns the PNG), past_list,
+  propose_cuts, captions_build, derive, render (`all`), check (`all`), thumb_pick, multicam_material, split_for_switch,
+  sfx_apply, tracks_apply, masks_from_analysis, frame (also returns the PNG), past_list,
   past_search, past_show, past_timeline, past_reuse, feedback_list, feedback_show, meta_set. Every tool also takes optional
   `project` and `variant`. Each runs the CLI command in-process with `--json`; failures are `isError: true` results.
 - `publish record --target youtube|tiktok|youtube-shorts --status draft|scheduled|published|failed [--url <http(s)>]
   [--at ISO] [--variant v]`: `--url` required for published/scheduled; sets `outputs[].publish = { status, url?, at }` on the
   video that owns the target (tiktok/shorts → their variant when it exists). The `publish` step is done when every
   video's targets are published or scheduled, else needs-human with the pending list.
+- Round 5 (engine helpers wired in; all are one undoable edit, `--dry-run` validates only, `--variant` works):
+  - Analysis files (CLI `loadAnalysis`): `derived/analysis/faces.<sourceId>.json`, `pii.<sourceId>.json`, `cuts.<sourceId>.json`
+    (number[] source seconds), `cursor.<takeId>.jsonl`, `keys.<takeId>.jsonl`; cursor/key logs fall back to the screen
+    source's `cursorLog`/`keyLog` and `media/takes/<take>/{cursor,keys}.jsonl`. Malformed files → warnings, never errors.
+  - `sfx apply [--seed s] [--keep] [--dry-run]`: template `sfx.rules` (cap `sfx.maxPerMin` ?? `audio.sfx.maxPerMinute`, gain
+    `sfx.gainDb` ?? `audio.sfx.gainDb`, seed = project id) over the library: asset sources named `sfx_<kind>…`, files in
+    `assets/sfx/<kind>/` and `~/.solocut/library/cache/sfx/<kind>/` (sidecar `<file>.json` per docs/16: id, category,
+    features.durationMs, license.spdx, author, title → LicenseRef { id: spdx, credit: "<title> — <author> (<spdx>)" }).
+    Cache files are copied to `assets/library/<id><ext>` when used. Earlier template-placed sfx (`decided.by: template`)
+    are replaced unless `--keep`. → `{ variant, added, removed, sfx: { id, at, timecode, trigger, asset, gainDb }[], library,
+    dryRun, changed, warnings }`; no rules → error `no-rules`.
+  - `masks from-analysis [--source id] [--kinds email,token] [--kind pixelate|blur|fill] [--pad 0.15] [--keep] [--dry-run]`:
+    core masksFromPii per source with a pii file; earlier `mask_pii_*` masks not decided by a human are rebuilt; marks the
+    `masks` step done (note: how many need review / no analysis files). → `{ variant, added, removed, masks: { id, source,
+    reason, kind, from, to, keyframes }[], sources, files, dryRun, changed, warnings }`.
+  - `multicam material` → `{ variant, cameras: { id, role, take }[], segments: SegmentMaterial[] (core cameraMaterial),
+    check: CheckFinding (camera-switch), rules: { maxShotSec, minShotSec, prompt }, files, warnings }`.
+    `edit split-for-switch --segment <id> --at <sourceFrame,…|[…]>` → core splitForSwitch ops (ids `<id>_s1…`); no split
+    point inside the segment → `invalid-op`.
+  - `tracks apply [--follow-clicks|--no-follow-clicks] [--no-overlays] [--dry-run]`: core applyTracks (followClicks from
+    template `zoom.followClicks`) → setSegments when changed; click rings / keystroke badges from overlaysFromInputLogs when
+    `features.cursorHighlight` / `features.keystrokes` (generated `ov_click_*` / `ov_key_*` are rebuilt). → `{ variant,
+    segmentsChanged, zoomKeyframesAdded, followClicks, overlays, removedOverlays, files, dryRun, changed, warnings }`.
+  - `check` adds the template's track checks when their inputs exist: caption-safe-area (captions present),
+    caption-face-overlap (face tracks), mosaic-tracking (pii files), camera-switch (≥ 2 cameras; transcript words).
+  - `derive` passes the loaded face/cursor tracks to deriveVariant (moving vertical crops).
+  - `bench profile <samples.json|{source?, samples}> [--out f] [--url u] [--platform p]` → core benchmarkProfile, written
+    to `--out` or `~/.solocut/benchmarks/bench_<time>.json` → `{ path, profile, patch }`. `bench apply <profile.json>
+    [--template id] [--dry-run]`: profileToTemplatePatch deep-merged into the project's override
+    (`<project>/templates/<id>/template.yaml`, when id is the project's template) or `~/.solocut/templates/<id>/template.yaml`;
+    the merged template must load or the file is restored (`invalid-template`); a hand-written override is never touched
+    (`template-override`). → `{ template, scope: 'project'|'user', file, patch, dryRun }`. Errors `invalid-samples`, `invalid-profile`.
 History: `.solocut/history.jsonl` (main) / `.solocut/history.<variant>.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.
@@ -658,7 +701,7 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
   re-derive is one undoable edit on the variant history and keeps human-decided telop/image overlays, scenes, sfx, masks
   and the output's metadata/thumbnail/publish. Captions are rebuilt with the target's style (`outputs.<t>.captions`).
   Files per variant: `variants/<v>/timeline.json`, `.solocut/history.<v>.jsonl`, `renders/<v>/preview.mp4`,
-  `captions/<v>.{ass,srt}`, final `renders/<v>/<title>.mp4`. A command with `--variant v` before derive fails with
+  `captions/<v>.{ass,srt}`, final `renders/<v>/final.mp4`. A command with `--variant v` before derive fails with
   `no-variant` (hint: solocut derive). Status steps: `derive:<v>` done when it exists and is fresh (stale → back to todo),
   `check:<v>` reset to todo after a re-derive, `final:<v>`, `publish`.
 - cli (plan): `solocut derive --target tiktok|youtube-shorts [--max-sec N] [--selection id,id] [--json]`; global `--variant <target>`

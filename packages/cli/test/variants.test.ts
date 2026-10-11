@@ -91,7 +91,7 @@ describe('derive', () => {
     await run(['edit', 'trimSegment', '--id', 'seg_1', '--to', '500', '--reason', '短く']);
     expect((await run(['status'])).json.variants.tiktok.stale).toBe(true);
     await run(['step', 'derive:tiktok', 'done']);
-    for (const s of ['ingest', 'sync', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check']) await run(['step', s, 'done']);
+    for (const s of ['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check']) await run(['step', s, 'done']);
     expect((await run(['next'])).json).toMatchObject({ step: 'derive:tiktok', state: 'ready', variant: 'tiktok' });
     const r = await run(['derive', '--target', 'tiktok', '--selection', 'seg_1,seg_2', '--replace']);
     expect(r.json, r.stdout).toMatchObject({ ok: true, kept: ['ov_human'] });
@@ -139,7 +139,7 @@ describe('--variant on timeline commands', () => {
     const r = await sb.run(['status', '--variant', 'tiktok', '--json'], { cwd: dir });
     expect(r.json).toMatchObject({ ok: true, variant: 'tiktok' });
     expect(r.json.summary.canvas).toMatch(/^1080x1920/);
-    expect(r.json.steps).toHaveLength(21);
+    expect(r.json.steps).toHaveLength(22);
   });
 
   it('meta set --variant writes the TikTok post text', async () => {

@@ -1,5 +1,7 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
 
 // Decision model client (docs/05_decision_model.md). Typed questions in, probabilities out. The request shape follows
@@ -18,9 +20,34 @@ export interface DecisionRequest {
 
 export interface DecisionAnswer { id: string; p?: number; choice?: Record<string, number>; score?: number }
 
-export type Provider = 'ollama' | 'openai' | 'typesafe' | 'custom' | 'off';
+export type Provider = 'ollama' | 'openai' | 'typesafe' | 'custom' | 'off' | CliProvider;
 
-export interface Usage { provider: Provider; model: string; cached: boolean; costUsd: number; tokensIn?: number; tokensOut?: number; key: string }
+/** Providers that run through the user's own agent CLI (their subscription): no API key, budget counted in calls. */
+export const CLI_PROVIDERS = ['claude-cli', 'codex-cli', 'gemini-cli'] as const;
+export type CliProvider = (typeof CLI_PROVIDERS)[number];
+export const isCliProvider = (p: string): p is CliProvider => (CLI_PROVIDERS as readonly string[]).includes(p);
+/** The executable each CLI provider runs. */
+export const CLI_COMMANDS: Record<CliProvider, string> = { 'claude-cli': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
+
+/**
+ * `decision.provider: 'auto'` → the first installed agent CLI (claude → codex → gemini), else 'off'.
+ * `which` resolves a command on PATH (e.g. @solocut/toolchain whichSync).
+ */
+export function resolveProvider(setting: string, which: (cmd: string) => string | null): Provider {
+  if (setting !== 'auto') return setting as Provider;
+  for (const p of CLI_PROVIDERS) if (which(CLI_COMMANDS[p])) return p;
+  return 'off';
+}
+
+export interface Usage {
+  provider: Provider; model: string; cached: boolean; costUsd: number; tokensIn?: number; tokensOut?: number; key: string;
+  /** Agent CLI calls made (0 when cached); CLI providers are budgeted in calls. */
+  calls?: number;
+}
+
+/** Runs an agent CLI: prompt on stdin, in `cwd`. Injected in tests. */
+export type CliRunner = (file: string, args: string[], o: { cwd: string; input: string; timeoutMs: number; env?: NodeJS.ProcessEnv }) =>
+  Promise<{ code: number; stdout: string; stderr: string }>;
 
 export interface DecideOptions {
   provider: Provider;
@@ -33,10 +60,16 @@ export interface DecideOptions {
   onUsage?: (u: Usage) => void;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** CLI providers: the executable (default claude / codex / gemini on PATH). */
+  command?: string;
+  /** CLI providers: remaining calls (refused before running at < 1). */
+  callBudget?: { remaining: number };
+  runCli?: CliRunner;
+  env?: NodeJS.ProcessEnv;
 }
 
 export class DecideError extends Error {
-  constructor(public readonly code: 'off' | 'budget' | 'http' | 'malformed' | 'config' | 'image', message: string) {
+  constructor(public readonly code: 'off' | 'budget' | 'http' | 'malformed' | 'config' | 'image' | 'cli', message: string) {
     super(message);
     this.name = 'DecideError';
   }
@@ -206,7 +239,7 @@ const PRICES: [RegExp, number, number][] = [
 const IMAGE_TOKENS = 1100;
 
 export function estimateCost(provider: Provider, model: string, tokensIn: number, tokensOut: number): number {
-  if (provider === 'ollama' || provider === 'off') return 0;
+  if (provider === 'ollama' || provider === 'off' || isCliProvider(provider)) return 0;
   const [, pin, pout] = PRICES.find(([re]) => re.test(model)) ?? [null, 2.5, 10];
   return (tokensIn * pin + tokensOut * pout) / 1e6;
 }
@@ -334,6 +367,125 @@ async function callTypesafe(req: DecisionRequest, images: LoadedImage[], o: Deci
   return { raw: res, ...(res?.usage?.input_tokens !== undefined ? { tokensIn: res.usage.input_tokens } : {}), ...(res?.usage?.output_tokens !== undefined ? { tokensOut: res.usage.output_tokens } : {}) };
 }
 
+// ---------- agent CLI providers (the user's subscription) ----------
+
+/** Default runner: spawn without a shell; Windows .cmd/.bat shims go through cmd.exe (Node refuses them directly). */
+export const defaultCliRunner: CliRunner = (file, args, o) => new Promise((res) => {
+  let cmd = file;
+  let argv = args;
+  let verbatim = false;
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(file)) {
+    const q = (a: string) => (/^[A-Za-z0-9_\-.:\\/=@]+$/.test(a) ? a : `"${a.replace(/"/g, '""')}"`);
+    cmd = (o.env ?? process.env).ComSpec ?? 'cmd.exe';
+    argv = ['/d', '/s', '/c', `"${[file, ...args].map(q).join(' ')}"`];
+    verbatim = true;
+  }
+  const child = spawn(cmd, argv, { cwd: o.cwd, env: o.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: verbatim, windowsHide: true });
+  let stdout = '';
+  let stderr = '';
+  const timer = setTimeout(() => child.kill(), o.timeoutMs);
+  child.stdout.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
+  child.stderr.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
+  child.on('error', (e) => {
+    clearTimeout(timer);
+    res({ code: 127, stdout, stderr: stderr + e.message });
+  });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    res({ code: code ?? 1, stdout, stderr });
+  });
+  child.stdin.on('error', () => undefined);
+  child.stdin.end(o.input);
+});
+
+/** A model name only goes to the CLI that understands it (settings.decision.model may name an Ollama model). */
+function cliModel(p: CliProvider, model: string): string | null {
+  const m = model.trim();
+  if (!m) return null;
+  if (p === 'claude-cli') return /^(claude|opus|sonnet|haiku)/i.test(m) ? m : null;
+  if (p === 'codex-cli') return /^(gpt|o\d|codex)/i.test(m) ? m : null;
+  return /^gemini/i.test(m) ? m : null;
+}
+
+function cliPrompt(req: DecisionRequest, images: { id: string; note?: string; file: string }[]): string {
+  return [
+    SYSTEM,
+    userText(req, []),
+    ...(images.length ? [`IMAGES: read each file before answering — ${images.map((i) => `${i.file} = ${i.id}${i.note ? ` (${i.note})` : ''}`).join(', ')}`] : []),
+    `Reply with the JSON object only (no prose, no code fence), matching this JSON Schema:\n${JSON.stringify(answerJsonSchema())}`,
+  ].join('\n\n');
+}
+
+/** The last {...} block in a text (agent CLIs sometimes add a sentence around the JSON). */
+function lastJsonObject(text: string): string {
+  const t = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  if (t.startsWith('{')) return t;
+  const end = t.lastIndexOf('}');
+  for (let i = t.lastIndexOf('{', end); i >= 0; i = t.lastIndexOf('{', i - 1)) {
+    try {
+      JSON.parse(t.slice(i, end + 1));
+      return t.slice(i, end + 1);
+    } catch {
+      /* try an earlier brace */
+    }
+  }
+  return t;
+}
+
+async function callCli(req: DecisionRequest, o: DecideOptions & { provider: CliProvider }): Promise<ProviderResult> {
+  const work = mkdtempSync(join(tmpdir(), 'solocut-decide-'));
+  try {
+    // images are copied next to the prompt so the agent can read them with its file tool (and nothing else)
+    const images = (req.images ?? []).map((img, i) => {
+      const file = `img_${i + 1}${extname(img.path).toLowerCase() || '.png'}`;
+      try {
+        copyFileSync(img.path, join(work, file));
+      } catch (e) {
+        throw new DecideError('image', `cannot read image ${img.path}: ${(e as Error).message}`);
+      }
+      return { id: img.id, ...(img.note ? { note: img.note } : {}), file };
+    });
+    const prompt = cliPrompt(req, images);
+    const model = cliModel(o.provider, o.model);
+    const exe = o.command ?? CLI_COMMANDS[o.provider];
+    let args: string[];
+    if (o.provider === 'claude-cli') {
+      args = ['-p', '--output-format', 'json', '--strict-mcp-config', '--allowedTools', 'Read',
+        '--disallowedTools', 'Bash', 'Edit', 'Write', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', '--max-turns', String(images.length + 2), ...(model ? ['--model', model] : [])];
+    } else if (o.provider === 'codex-cli') {
+      writeFileSync(join(work, 'schema.json'), JSON.stringify(answerJsonSchema()));
+      args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--output-schema', 'schema.json', '--output-last-message', 'answer.json',
+        ...(model ? ['--model', model] : []), ...images.map((i) => `--image=${i.file}`), '-'];
+    } else {
+      args = ['--output-format', 'json', ...(model ? ['--model', model] : []), '-p', `Follow the instructions on stdin and answer with the JSON object only.${images.length ? ` ${images.map((i) => `@${i.file}`).join(' ')}` : ''}`];
+    }
+    const r = await (o.runCli ?? defaultCliRunner)(exe, args, { cwd: work, input: prompt, timeoutMs: o.timeoutMs ?? 300_000, ...(o.env ? { env: o.env } : {}) });
+    if (r.code === 127) throw new DecideError('cli', `${exe} is not installed or not runnable (${r.stderr.trim().slice(-200)})`);
+    if (o.provider === 'codex-cli') {
+      if (r.code !== 0) throw new DecideError('cli', `codex exec failed (${r.code}): ${r.stderr.trim().slice(-300)}`);
+      const f = join(work, 'answer.json');
+      return { raw: lastJsonObject(existsSync(f) ? readFileSync(f, 'utf8') : r.stdout) };
+    }
+    let env: Record<string, unknown>;
+    try {
+      env = JSON.parse(lastJsonObject(r.stdout)) as Record<string, unknown>;
+    } catch {
+      throw new DecideError(r.code === 0 ? 'malformed' : 'cli', `${exe} (${r.code}): ${(r.stdout.trim() || r.stderr.trim()).slice(-300)}`);
+    }
+    if (o.provider === 'claude-cli') {
+      // { type: 'result', subtype, is_error, result: "<text>", usage: { input_tokens, output_tokens } }
+      if (env.is_error === true || typeof env.result !== 'string') throw new DecideError('cli', `claude -p failed: ${String(env.result ?? env.subtype ?? r.stderr).slice(0, 300)}`);
+      const u = env.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+      return { raw: lastJsonObject(env.result), ...(u?.input_tokens !== undefined ? { tokensIn: u.input_tokens } : {}), ...(u?.output_tokens !== undefined ? { tokensOut: u.output_tokens } : {}) };
+    }
+    // gemini: { response: "<text>", stats, error? }
+    if (env.error || typeof env.response !== 'string') throw new DecideError('cli', `gemini -p failed: ${JSON.stringify(env.error ?? env).slice(0, 300)}`);
+    return { raw: lastJsonObject(env.response) };
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 /** Ask the decision model. Cached by request hash; refuses (before sending) when the estimated cost exceeds the budget. */
 export async function decide(req: DecisionRequest, o: DecideOptions): Promise<DecisionAnswer[]> {
   if (o.provider === 'off') throw new DecideError('off', 'decision model is off (settings: decision.provider)');
@@ -344,26 +496,44 @@ export async function decide(req: DecisionRequest, o: DecideOptions): Promise<De
     ids.add(q.id);
     if (q.kind === 'choice' && q.options.length < 2) throw new DecideError('config', `choice question ${q.id} needs at least 2 options`);
   }
+  if ((o.provider as string) === 'auto') throw new DecideError('config', "provider 'auto' must be resolved first (resolveProvider)");
   if ((o.provider === 'openai' || o.provider === 'typesafe') && !o.apiKey) throw new DecideError('config', `${o.provider}: apiKey is required`);
   if (o.provider === 'custom' && !o.endpoint) throw new DecideError('config', 'custom: endpoint is required (OpenAI-compatible base URL)');
-  const images = loadImages(req);
+  const cli = isCliProvider(o.provider);
+  // CLI providers read the image files themselves: hash them for the cache key only
+  const images = cli ? (req.images ?? []).map((img) => {
+    try {
+      return { id: img.id, sha256: createHash('sha256').update(readFileSync(img.path)).digest('hex') } as LoadedImage;
+    } catch (e) {
+      throw new DecideError('image', `cannot read image ${img.path}: ${(e as Error).message}`);
+    }
+  }) : loadImages(req);
   const key = requestKey(req, o, images);
   const cached = cacheGet(o.cacheDir, key);
   if (cached) {
     try {
       const answers = parseAnswers({ answers: cached }, req.questions);
-      o.onUsage?.({ provider: o.provider, model: o.model, cached: true, costUsd: 0, key });
+      o.onUsage?.({ provider: o.provider, model: o.model, cached: true, costUsd: 0, key, ...(cli ? { calls: 0 } : {}) });
       return answers;
     } catch {
       /* stale or corrupt cache entry: ask again */
     }
+  }
+  if (cli) {
+    if (o.callBudget && o.callBudget.remaining < 1) throw new DecideError('budget', `decision budget exceeded: no ${o.provider} calls left`);
+    const r = await callCli(req, o as DecideOptions & { provider: CliProvider });
+    const answers = parseAnswers(r.raw, req.questions);
+    if (o.callBudget) o.callBudget.remaining -= 1;
+    cachePut(o.cacheDir, key, answers, { provider: o.provider, model: o.model, costUsd: 0 });
+    o.onUsage?.({ provider: o.provider, model: o.model, cached: false, costUsd: 0, key, calls: 1, ...(r.tokensIn !== undefined ? { tokensIn: r.tokensIn } : {}), ...(r.tokensOut !== undefined ? { tokensOut: r.tokensOut } : {}) });
+    return answers;
   }
   const est = estimateTokens(userText(req, images) + SYSTEM, images.length, req.questions.length);
   const reserve = estimateCost(o.provider, o.model, est.tin, est.tout);
   if (o.budget && reserve > o.budget.remainingUsd) {
     throw new DecideError('budget', `decision budget exceeded: needs ~$${reserve.toFixed(4)}, remaining $${o.budget.remainingUsd.toFixed(4)}`);
   }
-  const call = { ollama: callOllama, openai: callOpenAI, custom: callCustom, typesafe: callTypesafe }[o.provider];
+  const call = ({ ollama: callOllama, openai: callOpenAI, custom: callCustom, typesafe: callTypesafe } as Partial<Record<Provider, typeof callOllama>>)[o.provider];
   if (!call) throw new DecideError('config', `unknown provider: ${o.provider}`);
   const r = await call(req, images, o);
   const answers = parseAnswers(r.raw, req.questions);

@@ -16,12 +16,14 @@ export class Sandbox {
     // never download fonts in tests: an (empty) fonts folder means "use system fonts"
     mkdirSync(join(this.root, 'fonts'), { recursive: true });
     process.env.SOLOCUT_FONTS = join(this.root, 'fonts');
+    // never call a real agent CLI as the decision model (default 'auto' would find claude/codex on a dev machine)
+    process.env.SOLOCUT_DECISION_PROVIDER = 'off';
   }
 
   async run(args: string[], o: { cwd?: string; env?: Record<string, string>; stdin?: string } = {}): Promise<Run> {
     let stdout = '';
     let stderr = '';
-    const env: NodeJS.ProcessEnv = { ...process.env, SOLOCUT_HOME: this.home, SOLOCUT_FONTS: join(this.root, 'fonts') };
+    const env: NodeJS.ProcessEnv = { ...process.env, SOLOCUT_HOME: this.home, SOLOCUT_FONTS: join(this.root, 'fonts'), SOLOCUT_DECISION_PROVIDER: 'off' };
     // one PATH key only (Windows copies it as "Path")
     if (o.env && Object.keys(o.env).some((k) => k.toUpperCase() === 'PATH')) for (const k of Object.keys(env)) if (k.toUpperCase() === 'PATH') delete env[k];
     Object.assign(env, o.env);

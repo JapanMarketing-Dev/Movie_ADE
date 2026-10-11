@@ -10,7 +10,7 @@ import {
   type Project, type Variant,
 } from '../project.js';
 import { loadAnalysis } from '../analysis.js';
-import { apiKeyFor } from '../keys.js';
+import { decisionSetup, isSkip } from '../decision.js';
 import { buildCaptionsFor, readTranscript } from './media.js';
 
 // docs/18: derive the vertical variants (TikTok, YouTube Shorts) from the main timeline. The engine does the
@@ -112,19 +112,16 @@ export function keepHumanEdits(old: Timeline, next: Timeline): { timeline: Timel
 
 /** Decision-model scores "is this segment interesting / understandable on its own" (0..1), when configured. */
 async function highlightScores(ctx: Ctx, p: Project, main: Timeline, warnings: string[]): Promise<Record<string, number> | undefined> {
-  const s = loadSettings();
-  if (s.decision.provider === 'off') return undefined;
   const segs = main.segments.filter((x) => x.text.trim()).slice(0, 80);
   if (!segs.length) return undefined;
+  const setup = decisionSetup(ctx, p, 'highlight');
+  if (isSkip(setup)) return undefined;
   try {
-    const key = apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider);
+    // one call for every segment
     const answers = await decide({
       state: { title: main.meta.title, goal: main.meta.goal, audience: main.meta.audience, segments: segs.map((x) => ({ id: x.id, role: x.role, text: x.text })) },
       questions: segs.map((x) => ({ id: x.id, kind: 'score' as const, text: t(ctx, `区間 ${x.id} は、縦型の短い動画の一部として単体で見て面白い・分かるか`, `Is segment ${x.id} interesting and understandable on its own in a short vertical video?`) })),
-    }, {
-      provider: s.decision.provider, model: s.decision.model, ...(s.decision.endpoint ? { endpoint: s.decision.endpoint } : {}),
-      ...(key ? { apiKey: key } : {}), cacheDir: `${paths(p.dir).cache}/decisions`,
-    });
+    }, setup.options);
     return Object.fromEntries(answers.map((a) => [a.id, a.score ?? 0]));
   } catch (e) {
     warnings.push(`decision model: ${(e as Error).message}`);

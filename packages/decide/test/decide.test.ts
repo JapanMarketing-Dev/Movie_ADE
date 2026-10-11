@@ -1,9 +1,9 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  DecideError, answerJsonSchema, band, decide, estimateCost, parseAnswers, requestKey, type DecideOptions, type DecisionRequest, type Question, type Usage,
+  DecideError, answerJsonSchema, band, decide, defaultCliRunner, estimateCost, isCliProvider, parseAnswers, requestKey, resolveProvider, type DecideOptions, type DecisionRequest, type Question, type Usage,
 } from '../src/index.js';
 
 let dir: string;
@@ -226,5 +226,123 @@ describe('decide', () => {
 
   it('DecideError is an Error', () => {
     expect(new DecideError('off', 'x')).toBeInstanceOf(Error);
+  });
+});
+
+describe('agent CLI providers (the user subscription)', () => {
+  type Run = { file: string; args: string[]; cwd: string; input: string; files: string[] };
+  const runner = (reply: (r: Run) => { code?: number; stdout?: string; stderr?: string; answerFile?: string }) => {
+    const runs: Run[] = [];
+    const runCli: DecideOptions['runCli'] = async (file, args, o) => {
+      const r: Run = { file, args, cwd: o.cwd, input: o.input, files: readdirSync(o.cwd).sort() };
+      runs.push(r);
+      const x = reply(r);
+      if (x.answerFile !== undefined) writeFileSync(join(o.cwd, 'answer.json'), x.answerFile);
+      return { code: x.code ?? 0, stdout: x.stdout ?? '', stderr: x.stderr ?? '' };
+    };
+    return { runs, runCli };
+  };
+  const img = () => {
+    const f = join(dir, 'frame.png');
+    writeFileSync(f, 'PNGDATA');
+    return f;
+  };
+
+  it('resolveProvider: auto picks the first installed CLI, else off; explicit settings pass through', () => {
+    expect(resolveProvider('auto', (c) => (c === 'codex' || c === 'gemini' ? `/bin/${c}` : null))).toBe('codex-cli');
+    expect(resolveProvider('auto', (c) => (c === 'claude' ? '/bin/claude' : `/bin/${c}`))).toBe('claude-cli');
+    expect(resolveProvider('auto', () => null)).toBe('off');
+    expect(resolveProvider('ollama', () => null)).toBe('ollama');
+    expect(resolveProvider('gemini-cli', () => null)).toBe('gemini-cli');
+    expect(isCliProvider('claude-cli')).toBe(true);
+    expect(isCliProvider('openai')).toBe(false);
+  });
+
+  it('claude-cli: print mode JSON, Read only, images copied next to the prompt, usage in calls, cached', async () => {
+    const { runs, runCli } = runner(() => ({ stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `Here you go:\n${JSON.stringify(good)}`, usage: { input_tokens: 900, output_tokens: 60 } }) }));
+    const usage: Usage[] = [];
+    const budget = { remaining: 2 };
+    const o = opts({ provider: 'claude-cli', model: 'qwen3-vl', runCli, callBudget: budget, onUsage: (u) => usage.push(u) });
+    const a = await decide({ ...req, images: [{ id: 'frame', path: img(), note: 'the take' }] }, o);
+    expect(a[0]).toEqual({ id: 'cut', p: 0.9 });
+    const r = runs[0]!;
+    expect(r.file).toBe('claude');
+    expect(r.args.slice(0, 3)).toEqual(['-p', '--output-format', 'json']);
+    expect(r.args).toContain('--strict-mcp-config');
+    expect(r.args[r.args.indexOf('--allowedTools') + 1]).toBe('Read');
+    expect(r.args).toContain('Bash');
+    expect(r.args).not.toContain('--model');   // an Ollama model name is not passed to claude
+    expect(r.files).toEqual(['img_1.png']);
+    expect(r.input).toContain('img_1.png = frame (the take)');
+    expect(r.input).toContain('"answers"');
+    expect(usage[0]).toMatchObject({ provider: 'claude-cli', cached: false, costUsd: 0, calls: 1, tokensIn: 900 });
+    expect(budget.remaining).toBe(1);
+    expect(existsSync(r.cwd)).toBe(false);   // the work folder is removed
+    await decide({ ...req, images: [{ id: 'frame', path: join(dir, 'frame.png'), note: 'the take' }] }, o);
+    expect(runs).toHaveLength(1);
+    expect(usage[1]).toMatchObject({ cached: true, calls: 0 });
+    // a claude model name is passed through
+    await decide({ ...req, state: { x: 1 } }, { ...o, model: 'sonnet' });
+    expect(runs[1]!.args.slice(-2)).toEqual(['--model', 'sonnet']);
+  });
+
+  it('codex-cli: exec with --output-schema, read-only sandbox, --image=, answer file', async () => {
+    const { runs, runCli } = runner((r) => {
+      expect(r.files).toEqual(['img_1.png', 'schema.json']);
+      return { answerFile: JSON.stringify(good), stdout: 'log noise' };
+    });
+    const a = await decide({ ...req, images: [{ id: 'frame', path: img() }] }, opts({ provider: 'codex-cli', model: 'gpt-5-mini', command: '/opt/bin/codex', runCli }));
+    expect(a[2]).toEqual({ id: 'fun', score: 0.4 });
+    const r = runs[0]!;
+    expect(r.file).toBe('/opt/bin/codex');
+    expect(r.args).toEqual(['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--output-schema', 'schema.json', '--output-last-message', 'answer.json', '--model', 'gpt-5-mini', '--image=img_1.png', '-']);
+  });
+
+  it('gemini-cli: -p with @image refs and JSON output', async () => {
+    const { runs, runCli } = runner(() => ({ stdout: JSON.stringify({ response: '```json\n' + JSON.stringify(good) + '\n```', stats: {} }) }));
+    const a = await decide({ ...req, images: [{ id: 'frame', path: img() }] }, opts({ provider: 'gemini-cli', model: 'gemini-2.5-pro', runCli }));
+    expect(a[1]!.choice).toEqual({ first: 0.25, second: 0.75 });
+    const r = runs[0]!;
+    expect(r.args.slice(0, 4)).toEqual(['--output-format', 'json', '--model', 'gemini-2.5-pro']);
+    expect(r.args.at(-1)).toContain('@img_1.png');
+  });
+
+  it('failures: not installed, non-zero exit, is_error, prose without JSON, call budget, auto unresolved', async () => {
+    const run = (x: { code?: number; stdout?: string; stderr?: string }) => runner(() => x).runCli;
+    const err = async (o: Partial<DecideOptions>) => {
+      try {
+        await decide(req, opts(o));
+        return 'resolved';
+      } catch (e) {
+        return (e as DecideError).code;
+      }
+    };
+    expect(await err({ provider: 'claude-cli', runCli: run({ code: 127, stderr: 'ENOENT' }) })).toBe('cli');
+    expect(await err({ provider: 'codex-cli', runCli: run({ code: 1, stderr: 'not logged in' }) })).toBe('cli');
+    expect(await err({ provider: 'claude-cli', runCli: run({ stdout: JSON.stringify({ is_error: true, result: 'Credit balance is too low' }) }) })).toBe('cli');
+    expect(await err({ provider: 'claude-cli', runCli: run({ stdout: JSON.stringify({ is_error: false, result: 'I think yes.' }) }) })).toBe('malformed');
+    expect(await err({ provider: 'gemini-cli', runCli: run({ stdout: 'not json at all' }) })).toBe('malformed');
+    expect(await err({ provider: 'gemini-cli', runCli: run({ code: 1, stdout: '', stderr: 'auth' }) })).toBe('cli');
+    expect(await err({ provider: 'gemini-cli', runCli: run({ stdout: JSON.stringify({ error: { message: 'quota' } }) }) })).toBe('cli');
+    expect(await err({ provider: 'claude-cli', callBudget: { remaining: 0 }, runCli: run({}) })).toBe('budget');
+    expect(await err({ provider: 'auto' as never })).toBe('config');
+    expect(await err({ provider: 'claude-cli', runCli: run({ stdout: '{}' }) })).toBe('cli');
+    expect(estimateCost('claude-cli', 'x', 1e6, 1e6)).toBe(0);
+  });
+
+  it('missing image is reported before running the CLI', async () => {
+    const { runs, runCli } = runner(() => ({}));
+    await expect(decide({ ...req, images: [{ id: 'x', path: join(dir, 'nope.png') }] }, opts({ provider: 'claude-cli', runCli }))).rejects.toMatchObject({ code: 'image' });
+    expect(runs).toHaveLength(0);
+  });
+
+  it('the default runner runs a real process with the prompt on stdin', async () => {
+    const script = join(dir, 'echo.mjs');
+    writeFileSync(script, "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.stringify({is_error:false,result:JSON.stringify({answers:[{id:'cut',p:s.includes('QUESTIONS')?0.8:0.1,choice:null,score:null}]})})));");
+    const r = await defaultCliRunner(process.execPath, [script], { cwd: dir, input: 'QUESTIONS: …', timeoutMs: 10_000 });
+    expect(r.code).toBe(0);
+    expect(JSON.parse(JSON.parse(r.stdout).result).answers[0].p).toBe(0.8);
+    const missing = await defaultCliRunner(join(dir, 'no-such-binary'), [], { cwd: dir, input: '', timeoutMs: 5_000 });
+    expect(missing.code).toBe(127);
   });
 });

@@ -27,8 +27,8 @@ describe('defaults', () => {
     expect(s.agents.order).toEqual(['claude', 'codex', 'gemini']);
     expect(s.agents.failover.enabled).toBe(true);
     expect(s.recording.camera).toEqual({ deviceId: 'default', width: 1920, height: 1080, fps: 30 });
-    expect(s.decision.provider).toBe('off');
-    expect(s.decision.limits).toEqual({ perProjectUsd: 2, perDayUsd: 5 });
+    expect(s.decision.provider).toBe('auto');
+    expect(s.decision.limits).toEqual({ perProjectUsd: 2, perDayUsd: 5, perProjectCalls: 200 });
     expect(s.library.download).toBe('on-demand');
     expect(s.autopilot).toEqual({ stopBefore: ['publish'], maxFixLoops: 3, notify: ['done', 'needs-human'], budget: { decisionUsd: 2 } });
     expect(s.telemetry.crashReports).toBe(true);
@@ -146,6 +146,10 @@ describe('get/set by dot path', () => {
     expect(loadSettings().imageGen.providers.mine).toEqual({ via: 'api', apiKeyRef: 'mine' });
   });
 
+  it('decision.provider accepts auto and the agent CLIs', () => {
+    for (const v of ['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'off', 'ollama']) expect(setSetting('decision.provider', v).decision.provider).toBe(v);
+  });
+
   it('rejects invalid values with issues', () => {
     try {
       setSetting('recording.camera.fps', 61);
@@ -158,6 +162,8 @@ describe('get/set by dot path', () => {
     expect(() => setSetting('language', 'de')).toThrow(SettingsError);
     expect(() => setSetting('agents.order', ['not-an-agent'])).toThrow(SettingsError);
     expect(() => setSetting('decision.endpoint', 'not a url')).toThrow(SettingsError);
+    expect(() => setSetting('decision.provider', 'chatgpt-web')).toThrow(SettingsError);
+    expect(() => setSetting('decision.limits.perProjectCalls', 1.5)).toThrow(SettingsError);
     expect(existsSync(settingsPath())).toBe(false);
   });
 
