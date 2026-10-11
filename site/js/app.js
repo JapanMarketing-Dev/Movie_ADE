@@ -79,14 +79,34 @@ async function downloads() {
   const notice = document.querySelector('[data-dl-notice]');
   const lang = document.body.dataset.lang;
   if (notice) notice.textContent = lang === 'ja' ? `最新版 ${latest.version}（${latest.date}）` : `Latest version ${latest.version} (${latest.date}).`;
+  const LABEL = {
+    mac: { arm64: lang === 'ja' ? 'Apple シリコン' : 'Apple silicon', x64: 'Intel' },
+    win: { x64: 'x64', arm64: 'ARM64' },
+    linux: { AppImage: 'AppImage', deb: '.deb' },
+  };
+  const isArm = /arm|aarch/i.test(navigator.userAgent) || (navigator.userAgentData?.architecture === 'arm');
   for (const btn of document.querySelectorAll('[data-dl]')) {
-    // Prefer the installer for the visitor's CPU; fall back to the first installer for that OS.
-    const files = latest.files.filter((f) => f.os === btn.dataset.dl && f.kind === 'installer');
+    const os = btn.dataset.dl;
+    const files = latest.files.filter((f) => f.os === os && f.kind === 'installer');
     if (!files.length) continue;
-    const f = files.find((x) => x.arch === 'arm64' && /arm|aarch/i.test(navigator.userAgent)) || files[0];
-    btn.href = new URL(f.path, DOWNLOAD_BASE).href;
+    // Mac browsers report "Intel" even on Apple silicon, so default to arm64 on mac and show Intel as the alternative.
+    const primary = os === 'mac' ? (files.find((f) => f.arch === 'arm64') || files[0])
+      : os === 'win' ? (files.find((f) => f.arch === (isArm ? 'arm64' : 'x64')) || files[0])
+      : (files.find((f) => f.name.endsWith('.AppImage')) || files[0]);
+    const label = (f) => os === 'linux' ? LABEL.linux[f.name.endsWith('.deb') ? 'deb' : 'AppImage'] : LABEL[os][f.arch] || f.arch;
+    btn.href = new URL(primary.path, DOWNLOAD_BASE).href;
     btn.removeAttribute('aria-disabled');
-    btn.querySelector('[data-dl-label]').textContent = labels.get;
+    btn.querySelector('[data-dl-label]').textContent = `${labels.get} (${label(primary)})`;
+    const alt = document.querySelector(`[data-dl-alt="${os}"]`);
+    if (alt) {
+      const others = files.filter((f) => f !== primary);
+      alt.replaceChildren(...others.flatMap((f, i) => {
+        const a = document.createElement('a');
+        a.href = new URL(f.path, DOWNLOAD_BASE).href;
+        a.textContent = label(f);
+        return i ? [document.createTextNode(' · '), a] : [document.createTextNode(lang === 'ja' ? 'ほかの形式: ' : 'Also: '), a];
+      }));
+    }
   }
 }
 downloads();

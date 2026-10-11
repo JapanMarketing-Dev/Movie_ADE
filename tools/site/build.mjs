@@ -250,8 +250,8 @@ ${header(t, 'home')}
         <h1>${t.h1}</h1>
         <p class="lede">${md(t.lede)}</p>
         <div class="hero-actions">
-          <a class="btn btn-lg btn-primary" href="${REPO}" target="_blank" rel="noopener noreferrer">${icon('i-github', 'icon-fill')}${esc(t.ctaPrimary)}</a>
-          <a class="btn btn-lg btn-ghost" href="${REPO}/tree/main/docs" target="_blank" rel="noopener noreferrer">${icon('i-book')}${esc(t.ctaSecondary)}</a>
+          <a class="btn btn-lg btn-primary" href="${t.root}download">${icon('i-download')}${esc(t.ctaPrimary)}</a>
+          <a class="btn btn-lg btn-ghost" href="${REPO}" target="_blank" rel="noopener noreferrer">${icon('i-github', 'icon-fill')}${esc(t.ctaSecondary)}</a>
         </div>
         <p class="hero-meta">${esc(t.heroMeta)}</p>
       </div>
@@ -379,8 +379,8 @@ ${tplYaml}</pre></div>
       <h2>${esc(t.cta.h2)}</h2>
       <p>${esc(t.cta.p)}</p>
       <div class="hero-actions">
-        <a class="btn btn-lg btn-primary" href="${REPO}" target="_blank" rel="noopener noreferrer">${icon('i-github', 'icon-fill')}${esc(t.ctaPrimary)}</a>
-        <a class="btn btn-lg btn-ghost" href="${t.root}download">${icon('i-download')}${esc(t.nav.download)}</a>
+        <a class="btn btn-lg btn-primary" href="${t.root}download">${icon('i-download')}${esc(t.ctaPrimary)}</a>
+        <a class="btn btn-lg btn-ghost" href="${REPO}" target="_blank" rel="noopener noreferrer">${icon('i-github', 'icon-fill')}${esc(t.ctaSecondary)}</a>
       </div>
     </div>
   </section>
@@ -394,6 +394,7 @@ function download(t) {
         <h3>${esc(name)}</h3><p>${esc(sub)}</p>
         <p class="you" hidden>${esc(d.you)}</p>
         <a class="btn btn-primary" data-dl="${id}" aria-disabled="true" href="#">${icon('i-download')}<span data-dl-label>${esc(d.soon)}</span></a>
+        <p class="dl-alt" data-dl-alt="${id}"></p>
       </div>`).join('\n      ');
   return `${head(t, { title: `${d.title} — Solocut`, description: d.description, path: `${t.root}download` })}
 ${header(t, 'download')}

@@ -386,3 +386,5 @@ p code, li code { font: .9em var(--mono); background: var(--panel-2); border: 1p
 .sc-publish.on .pubs li { animation: stepon .35s calc(1s + var(--i) * .5s) both; }
 .sc-publish.on .pubs li em { animation: pop .3s calc(1s + var(--i) * .5s) both; }
 .pv-thumb b, .fb-cap, .demo-caption { word-break: auto-phrase; }
+.dl-alt { font-size: 13px; color: var(--faint); min-height: 1.2em; }
+.dl-alt a { color: var(--muted); }
