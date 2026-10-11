@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Solocut — 1人で撮る。編集はテンプレどおりにAIが。</title>
+  <title>Solocut — 動画編集のためのADE</title>
   <meta name="description" content="Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#07070a">
@@ -13,7 +13,7 @@
   <link rel="alternate" hreflang="x-default" href="https://solocut.app">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Solocut">
-  <meta property="og:title" content="Solocut — 1人で撮る。編集はテンプレどおりにAIが。">
+  <meta property="og:title" content="Solocut — 動画編集のためのADE">
   <meta property="og:description" content="Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。">
   <meta property="og:url" content="https://solocut.app/ja">
   <meta property="og:image" content="https://solocut.app/assets/og.png">
@@ -22,6 +22,8 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://solocut.app/assets/og.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/js/app.js"></script>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。"}</script>
@@ -29,6 +31,7 @@
 <body data-page="home" data-lang="ja">
 <svg class="sprite" aria-hidden="true">
   <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z"/><path d="M4 21a2 2 0 0 1 2-2h13v2H6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
@@ -55,7 +58,7 @@
 <a class="skip" href="#main">本文へ移動</a>
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
+    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="bm-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22222d"/><stop offset="1" stop-color="#0b0b10"/></linearGradient><linearGradient id="bm-g" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".55" stop-color="#ff4a3d"/><stop offset="1" stop-color="#e8264f"/></linearGradient><clipPath id="bm-t"><polygon points="0,0 1024,0 1024,202.5 0,872.0"/></clipPath><clipPath id="bm-b"><polygon points="0,900.0 1024,230.5 1024,1024 0,1024"/></clipPath></defs><rect width="1024" height="1024" rx="228" fill="url(#bm-bg)"/><g clip-path="url(#bm-t)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round" transform="translate(16 -16)"/></g><g clip-path="url(#bm-b)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round"/></g></svg><span>Solocut</span></a>
     <nav class="site-nav" aria-label="Main">
       <a href="#how">使い方</a>
       <a href="#templates">テンプレート</a>
@@ -64,6 +67,7 @@
     </nav>
     <div class="header-actions">
       <a class="lang-switch" href="/" hreflang="en" lang="en">English</a>
+      <a class="btn btn-sm btn-ghost btn-icon-only" href="https://x.com/ai_agent_dev" target="_blank" rel="noopener noreferrer" aria-label="X"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-x"/></svg></a>
       <a class="btn btn-sm btn-ghost" href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label-hide">GitHub</span></a>
       <a class="btn btn-sm btn-primary" href="/ja/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="btn-label-hide">ダウンロード</span></a>
     </div>
@@ -73,9 +77,9 @@
   <section class="hero">
     <div class="wrap hero-inner">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="dot"></span>動画編集ADE · 無料・オープンソース · 開発中</p>
-        <h1>1人で撮る。<br>編集は<em>テンプレどおりにAIが。</em></h1>
-        <p class="lede">技術動画と語り動画のために。画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。</p>
+        <p class="eyebrow"><span class="dot"></span>Agentic Development Environment · 無料・オープンソース</p>
+        <h1><em>動画編集</em>のための<br>ADE。</h1>
+        <p class="lede">1人で撮って、編集はテンプレどおりにAIが。技術動画と語り動画のために、画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。</p>
         <div class="hero-actions">
           <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
           <a class="btn btn-lg btn-ghost" href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>設計を読む</a>
@@ -107,6 +111,39 @@
     </div>
   </div>
 </div>
+    </div>
+  </section>
+
+  <section class="demo-sec" id="demo" aria-label="Solocut でできること">
+    <div class="wrap" data-demo>
+      <div class="demo-tabs" role="tablist"><button type="button" role="tab" class="dt" data-demo-tab="0" aria-selected="true"><span class="dt-n">01</span>撮る<i class="dt-bar"></i></button><button type="button" role="tab" class="dt" data-demo-tab="1" aria-selected="false"><span class="dt-n">02</span>1プロンプト<i class="dt-bar"></i></button><button type="button" role="tab" class="dt" data-demo-tab="2" aria-selected="false"><span class="dt-n">03</span>フレームチェック<i class="dt-bar"></i></button><button type="button" role="tab" class="dt" data-demo-tab="3" aria-selected="false"><span class="dt-n">04</span>喋って直す<i class="dt-bar"></i></button><button type="button" role="tab" class="dt" data-demo-tab="4" aria-selected="false"><span class="dt-n">05</span>投稿<i class="dt-bar"></i></button></div>
+      <div class="demo-stage" aria-hidden="true"><div class="sc sc-record" data-scene="0">
+      <div class="rec-top"><span class="rec-dot"></span><span data-rec-time>00:00:00</span></div>
+      <div class="rec-tiles">
+        <div class="tile t-screen"><div class="codebar"></div><i style="--w:78%"></i><i style="--w:62%"></i><i style="--w:48%"></i><i style="--w:14%"></i><i style="--w:70%"></i></div>
+        <div class="tile t-cam"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg><span>カメラA</span></div>
+        <div class="tile t-cam b"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg><span>カメラB</span></div>
+      </div>
+      <div class="rec-tracks"><div class="rt"><span>画面</span><div class="rt-bar"><i class="c0"></i></div></div><div class="rt"><span>カメラA</span><div class="rt-bar"><i class="c1"></i></div></div><div class="rt"><span>カメラB</span><div class="rt-bar"><i class="c2"></i></div></div><div class="rt"><span>マイク</span><div class="rt-bar"><i class="wv"></i></div></div></div>
+    </div><div class="sc sc-prompt" data-scene="1">
+      <div class="term"><div class="term-tabs"><span class="on">claude</span><span>codex</span></div>
+        <div class="tl"><span class="t-p">›</span> <span data-type="動画を完成させて"></span><span class="caret"></span></div>
+        <div class="tl t-d">$ solocut next --json</div></div>
+      <ol class="steps"><li style="--i:0"><span class="st-ic"></span>取り込み</li><li style="--i:1"><span class="st-ic"></span>同期</li><li style="--i:2"><span class="st-ic"></span>文字起こし</li><li style="--i:3"><span class="st-ic"></span>粗カット</li><li style="--i:4"><span class="st-ic"></span>画角</li><li style="--i:5"><span class="st-ic"></span>字幕</li><li style="--i:6"><span class="st-ic"></span>効果音</li><li style="--i:7"><span class="st-ic"></span>モザイク</li><li style="--i:8"><span class="st-ic"></span>チェック</li><li style="--i:9"><span class="st-ic"></span>書き出し</li><li style="--i:10"><span class="st-ic"></span>サムネイル</li><li style="--i:11"><span class="st-ic"></span>投稿文</li></ol>
+    </div><div class="sc sc-check" data-scene="2">
+      <div class="fgrid"><div class="fr ok" style="--i:0"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>カット 00:12</b><em>✓</em></div><div class="fr ok" style="--i:1"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>カット 00:31</b><em>✓</em></div><div class="fr ok" style="--i:2"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>字幕 c18</b><em>✓</em></div><div class="fr ask" style="--i:3"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>カット 00:41</b><em>?</em></div><div class="fr ok" style="--i:4"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>カット 01:02</b><em>✓</em></div><div class="fr mask" style="--i:5"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg><i class="fr-mask"></i></div><b>メール → モザイク</b><em>▦</em></div><div class="fr ok" style="--i:6"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>画角の切り替え</b><em>✓</em></div><div class="fr ok" style="--i:7"><div class="fr-img"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg></div><b>セーフエリア</b><em>✓</em></div></div>
+      <i class="scanline"></i>
+    </div><div class="sc sc-feedback" data-scene="3">
+      <div class="fb-video"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg><span class="fb-cap">この設定で全部変わります</span>
+        <svg class="fb-pen" viewBox="0 0 400 225" preserveAspectRatio="none"><path d="M118 168c-30-12-20-36 32-41 72-7 152-4 168 14 13 17-32 31-112 32-50 1-86-1-104-8"/></svg>
+        <span class="fb-say">「この字幕、顔にかぶってる。下にずらして」</span><span class="fb-tc">00:00:41:07</span></div>
+      <div class="fb-card"><b>feedback.md</b><span>00:00:41:07 · 字幕 c52 · 顔の下へ移動</span><em>→ claude</em></div>
+    </div><div class="sc sc-publish" data-scene="4">
+      <div class="pub-video"><div class="pv-thumb"><svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg><b>この設定で全部変わります</b></div><span class="pub-ok">✓ あなたが承認</span></div>
+      <ul class="pubs"><li style="--i:0"><span>YouTube</span><em>✓</em></li><li style="--i:1"><span>TikTok</span><em>✓</em></li><li style="--i:2"><span>X</span><em>✓</em></li><li style="--i:3"><span>Instagram</span><em>✓</em></li><li style="--i:4"><span>Threads</span><em>✓</em></li><li style="--i:5"><span>Facebook</span><em>✓</em></li></ul>
+    </div></div>
+      <p class="demo-caption" aria-live="polite" data-demo-caption data-caps='[&quot;画面・カメラ2台・マイクを、それぞれ別のトラックで同時に収録。&quot;,&quot;「動画を完成させて」と言うだけ。エージェントがテンプレートの手順をすべて進めます。&quot;,&quot;判定モデルが、カットと字幕の前後のフレームを1枚ずつ確認します。&quot;,&quot;気になるところを囲んで話すだけ。タイムコード付きの修正指示になります。&quot;,&quot;YouTube と TikTok に投稿し、各 SNS で告知。&quot;]'>画面・カメラ2台・マイクを、それぞれ別のトラックで同時に収録。</p>
+      <p class="demo-note">アプリの動きを表した模型のアニメーションです。</p>
     </div>
   </section>
 
@@ -274,14 +311,16 @@
 </main>
 <footer class="site-footer">
   <div class="wrap">
-    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
-    <span>© 2026 JapanMarketing-Dev</span>
+    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="bm-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22222d"/><stop offset="1" stop-color="#0b0b10"/></linearGradient><linearGradient id="bm-g" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".55" stop-color="#ff4a3d"/><stop offset="1" stop-color="#e8264f"/></linearGradient><clipPath id="bm-t"><polygon points="0,0 1024,0 1024,202.5 0,872.0"/></clipPath><clipPath id="bm-b"><polygon points="0,900.0 1024,230.5 1024,1024 0,1024"/></clipPath></defs><rect width="1024" height="1024" rx="228" fill="url(#bm-bg)"/><g clip-path="url(#bm-t)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round" transform="translate(16 -16)"/></g><g clip-path="url(#bm-b)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round"/></g></svg><span>Solocut</span></a>
+    <span>© 2026 JapanMarketing合同会社</span>
     <nav aria-label="Footer">
       <a href="/ja/download">ダウンロード</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer">設計書</a>
       <a href="/ja/privacy">プライバシー</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT ライセンス</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://x.com/ai_agent_dev" target="_blank" rel="noopener noreferrer">X</a>
+      <a href="https://www.japan-marketing.co.jp/" target="_blank" rel="noopener noreferrer">運営会社</a>
     </nav>
   </div>
 </footer>

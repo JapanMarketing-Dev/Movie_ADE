@@ -90,3 +90,47 @@ async function downloads() {
   }
 }
 downloads();
+
+// Demo: five scenes that play in turn. Click a tab to jump; hover pauses. Reduced motion shows each scene's end state.
+function demoPlayer() {
+  const root = document.querySelector('[data-demo]');
+  if (!root) return;
+  const tabs = [...root.querySelectorAll('[data-demo-tab]')];
+  const scenes = [...root.querySelectorAll('[data-scene]')];
+  const caption = root.querySelector('[data-demo-caption]');
+  const caps = JSON.parse(caption.dataset.caps);
+  const DUR = 7000;
+  let i = 0; let timer = 0; let recTimer = 0; let typeTimer = 0;
+  root.style.setProperty('--dur', `${DUR / 1000}s`);
+
+  const startRec = (scene) => {
+    const el = scene.querySelector('[data-rec-time]');
+    if (!el) return;
+    let s = 12 * 60 + 41;
+    const tick = () => { s += 1; el.textContent = `00:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+    tick(); recTimer = setInterval(tick, reduced ? 1e9 : 1000);
+  };
+  const startType = (scene) => {
+    const el = scene.querySelector('[data-type]');
+    if (!el) return;
+    const text = el.dataset.type;
+    if (reduced) { el.textContent = text; return; }
+    let n = 0; el.textContent = '';
+    typeTimer = setInterval(() => { n += 1; el.textContent = text.slice(0, n); if (n >= text.length) clearInterval(typeTimer); }, 1600 / text.length);
+  };
+  const show = (n) => {
+    clearInterval(recTimer); clearInterval(typeTimer);
+    i = (n + scenes.length) % scenes.length;
+    scenes.forEach((s, k) => { s.classList.remove('on'); if (k === i) { void s.offsetWidth; s.classList.add('on'); } });
+    tabs.forEach((t, k) => { t.setAttribute('aria-selected', String(k === i)); const b = t.querySelector('.dt-bar'); if (b) { b.style.animation = 'none'; void b.offsetWidth; b.style.animation = ''; } });
+    caption.textContent = caps[i];
+    startRec(scenes[i]); startType(scenes[i]);
+  };
+  const schedule = () => { clearTimeout(timer); if (!reduced && !root.classList.contains('demo-paused')) timer = setTimeout(() => { show(i + 1); schedule(); }, DUR); };
+  tabs.forEach((t, k) => t.addEventListener('click', () => { show(k); schedule(); }));
+  root.addEventListener('mouseenter', () => { root.classList.add('demo-paused'); clearTimeout(timer); });
+  root.addEventListener('mouseleave', () => { root.classList.remove('demo-paused'); schedule(); });
+  if (reduced) root.classList.add('demo-paused');
+  show(0); schedule();
+}
+demoPlayer();

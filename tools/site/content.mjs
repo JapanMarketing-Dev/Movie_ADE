@@ -1,16 +1,18 @@
 // Text for solocut.app. One object per language; tools/site/build.mjs renders both from the same markup.
 export const REPO = 'https://github.com/JapanMarketing-Dev/solocut';
 export const SITE = 'https://solocut.app';
+export const X_URL = 'https://x.com/ai_agent_dev';
+export const COMPANY_URL = 'https://www.japan-marketing.co.jp/';
 
 export const en = {
   lang: 'en', other: 'ja', otherLabel: '日本語', root: '/', home: '/', otherRoot: '/ja/', otherHome: '/ja',
-  title: 'Solocut — Shoot alone. Your agent edits by template.',
+  title: 'Solocut — The ADE for video editing',
   description: 'Solocut is a free, open-source video-editing ADE for YouTube and TikTok. Record screen and camera at once, let Claude Code or Codex edit by your template in the terminal, and check every frame with a decision model.',
   nav: { how: 'How it works', templates: 'Templates', checks: 'Frame checks', faq: 'FAQ', download: 'Download', docs: 'Design docs' },
   skip: 'Skip to content',
-  eyebrow: 'Video-editing ADE · Free & open source · In development',
-  h1: 'Shoot alone.<br>Your agent <em>edits by template.</em>',
-  lede: 'Made for tech tutorials and talking-head videos. Solocut records your screen, camera and mic at once, then Claude Code, Codex or any terminal agent cuts, captions and lays out the video by your template. A decision model checks every cut frame by frame, and you give feedback by talking over the preview.',
+  eyebrow: 'Agentic Development Environment · Free & open source',
+  h1: 'The ADE for<br><em>video editing.</em>',
+  lede: 'Shoot alone; your agent edits by template. Made for tech tutorials and talking-head videos, Solocut records your screen, camera and mic at once, then Claude Code, Codex or any terminal agent cuts, captions and lays out the video by your template. A decision model checks every cut frame by frame, and you give feedback by talking over the preview.',
   ctaPrimary: 'Get notified on GitHub', ctaSecondary: 'Read the design',
   heroMeta: 'macOS · Windows · Linux · MIT license · YouTube / TikTok / Shorts / Reels',
   works: 'Works with',
@@ -32,6 +34,25 @@ export const en = {
       ['', '$ solocut edit move-caption c52 --y 1420'],
       ['t-ok', '✓ all checks passed'],
     ],
+  },
+  demo: {
+    label: 'What Solocut does',
+    note: 'An animated model of the app.',
+    tabs: [
+      ['record', 'Record', 'Screen, two cameras and mic, each on its own track.'],
+      ['prompt', 'One prompt', 'Say “finish the video”. Your agent runs every step of the template.'],
+      ['check', 'Frame check', 'A decision model checks the frames around every cut and caption.'],
+      ['feedback', 'Talk to fix', 'Circle what bothers you and say it. It becomes a timecoded fix.'],
+      ['publish', 'Publish', 'Upload to YouTube and TikTok, then announce it everywhere.'],
+    ],
+    tracks: ['screen', 'camera A', 'camera B', 'mic'],
+    prompt: 'Finish the video',
+    steps: ['ingest', 'sync', 'transcribe', 'rough cut', 'camera angles', 'captions', 'sound effects', 'mosaic', 'check', 'export', 'thumbnail', 'post text'],
+    checks: [['ok', 'cut 00:12'], ['ok', 'cut 00:31'], ['ok', 'caption c18'], ['ask', 'cut 00:41'], ['ok', 'cut 01:02'], ['mask', 'email → mosaic'], ['ok', 'camera switch'], ['ok', 'safe area']],
+    say: '“This caption covers my face. Move it down.”',
+    card: ['feedback.md', '00:00:41:07 · caption c52 · move below the face'],
+    cap: 'This setting changes everything',
+    approve: 'Approved by you',
   },
   how: {
     kicker: 'How it works', h2: 'From one take to a finished video, without a timeline.',
@@ -150,7 +171,7 @@ export const en = {
     ],
   },
   cta: { h2: 'Shoot alone. Ship every day.', p: 'Solocut is in development. Follow along on GitHub.' },
-  footer: { license: 'MIT License', privacy: 'Privacy', made: '© 2026 JapanMarketing-Dev' },
+  footer: { license: 'MIT License', privacy: 'Privacy', made: '© 2026 JapanMarketing LLC', company: 'JapanMarketing LLC' },
   dl: {
     title: 'Download Solocut', description: 'Download Solocut for macOS, Windows and Linux.',
     h1: 'Download', p: 'Free for macOS, Windows and Linux. Solocut updates itself after you install it.',
@@ -168,13 +189,13 @@ export const en = {
 
 export const ja = {
   lang: 'ja', other: 'en', otherLabel: 'English', root: '/ja/', home: '/ja', otherRoot: '/', otherHome: '/',
-  title: 'Solocut — 1人で撮る。編集はテンプレどおりにAIが。',
+  title: 'Solocut — 動画編集のためのADE',
   description: 'Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。',
   nav: { how: '使い方', templates: 'テンプレート', checks: 'フレームチェック', faq: 'よくある質問', download: 'ダウンロード', docs: '設計書' },
   skip: '本文へ移動',
-  eyebrow: '動画編集ADE · 無料・オープンソース · 開発中',
-  h1: '1人で撮る。<br>編集は<em>テンプレどおりにAIが。</em>',
-  lede: '技術動画と語り動画のために。画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。',
+  eyebrow: 'Agentic Development Environment · 無料・オープンソース',
+  h1: '<em>動画編集</em>のための<br>ADE。',
+  lede: '1人で撮って、編集はテンプレどおりにAIが。技術動画と語り動画のために、画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。',
   ctaPrimary: 'GitHub で最新情報を受け取る', ctaSecondary: '設計を読む',
   heroMeta: 'macOS · Windows · Linux · MIT ライセンス · YouTube / TikTok / Shorts / Reels',
   works: '対応エージェント',
@@ -196,6 +217,25 @@ export const ja = {
       ['', '$ solocut edit move-caption c52 --y 1420'],
       ['t-ok', '✓ すべてのチェックに合格'],
     ],
+  },
+  demo: {
+    label: 'Solocut でできること',
+    note: 'アプリの動きを表した模型のアニメーションです。',
+    tabs: [
+      ['record', '撮る', '画面・カメラ2台・マイクを、それぞれ別のトラックで同時に収録。'],
+      ['prompt', '1プロンプト', '「動画を完成させて」と言うだけ。エージェントがテンプレートの手順をすべて進めます。'],
+      ['check', 'フレームチェック', '判定モデルが、カットと字幕の前後のフレームを1枚ずつ確認します。'],
+      ['feedback', '喋って直す', '気になるところを囲んで話すだけ。タイムコード付きの修正指示になります。'],
+      ['publish', '投稿', 'YouTube と TikTok に投稿し、各 SNS で告知。'],
+    ],
+    tracks: ['画面', 'カメラA', 'カメラB', 'マイク'],
+    prompt: '動画を完成させて',
+    steps: ['取り込み', '同期', '文字起こし', '粗カット', '画角', '字幕', '効果音', 'モザイク', 'チェック', '書き出し', 'サムネイル', '投稿文'],
+    checks: [['ok', 'カット 00:12'], ['ok', 'カット 00:31'], ['ok', '字幕 c18'], ['ask', 'カット 00:41'], ['ok', 'カット 01:02'], ['mask', 'メール → モザイク'], ['ok', '画角の切り替え'], ['ok', 'セーフエリア']],
+    say: '「この字幕、顔にかぶってる。下にずらして」',
+    card: ['feedback.md', '00:00:41:07 · 字幕 c52 · 顔の下へ移動'],
+    cap: 'この設定で全部変わります',
+    approve: 'あなたが承認',
   },
   how: {
     kicker: '使い方', h2: '撮ったテイクから完成まで。タイムラインは触らない。',
@@ -314,7 +354,7 @@ export const ja = {
     ],
   },
   cta: { h2: '1人で撮って、毎日出す。', p: 'Solocut は開発中です。GitHub で進み具合を追いかけてください。' },
-  footer: { license: 'MIT ライセンス', privacy: 'プライバシー', made: '© 2026 JapanMarketing-Dev' },
+  footer: { license: 'MIT ライセンス', privacy: 'プライバシー', made: '© 2026 JapanMarketing合同会社', company: '運営会社' },
   dl: {
     title: 'Solocut をダウンロード', description: 'macOS・Windows・Linux 向けの Solocut をダウンロード。',
     h1: 'ダウンロード', p: 'macOS・Windows・Linux 向け、無料。インストール後は自動で更新されます。',

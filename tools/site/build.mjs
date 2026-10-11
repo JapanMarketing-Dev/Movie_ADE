@@ -3,7 +3,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { en, ja, REPO, SITE } from './content.mjs';
+import { en, ja, REPO, SITE, X_URL, COMPANY_URL } from './content.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'site');
 
@@ -14,6 +14,7 @@ const icon = (id, cls = '') => `<svg class="icon${cls ? ' ' + cls : ''}" aria-hi
 
 const SPRITE = `<svg class="sprite" aria-hidden="true">
   <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
   <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z"/><path d="M4 21a2 2 0 0 1 2-2h13v2H6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
@@ -38,7 +39,7 @@ const SPRITE = `<svg class="sprite" aria-hidden="true">
   <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
 </svg>`;
 
-const MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+const MARK = `<svg class="brand-mark" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="bm-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22222d"/><stop offset="1" stop-color="#0b0b10"/></linearGradient><linearGradient id="bm-g" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".55" stop-color="#ff4a3d"/><stop offset="1" stop-color="#e8264f"/></linearGradient><clipPath id="bm-t"><polygon points="0,0 1024,0 1024,202.5 0,872.0"/></clipPath><clipPath id="bm-b"><polygon points="0,900.0 1024,230.5 1024,1024 0,1024"/></clipPath></defs><rect width="1024" height="1024" rx="228" fill="url(#bm-bg)"/><g clip-path="url(#bm-t)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round" transform="translate(16 -16)"/></g><g clip-path="url(#bm-b)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round"/></g></svg>`;
 
 const AGENTS = ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode', 'Cursor', 'GitHub Copilot', 'Your own CLI'];
 
@@ -70,6 +71,8 @@ function head(t, { title, description, path }) {
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="${SITE}/assets/og.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/js/app.js"></script>
   <script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'SoftwareApplication', name: 'Solocut', applicationCategory: 'MultimediaApplication', operatingSystem: 'macOS, Windows, Linux', offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' }, license: 'https://opensource.org/licenses/MIT', url: SITE, description })}</script>
@@ -94,6 +97,7 @@ ${SPRITE}
     </nav>
     <div class="header-actions">
       <a class="lang-switch" href="${otherHref}" hreflang="${t.other}" lang="${t.other}">${esc(t.otherLabel)}</a>
+      <a class="btn btn-sm btn-ghost btn-icon-only" href="${X_URL}" target="_blank" rel="noopener noreferrer" aria-label="X">${icon('i-x', 'icon-fill')}</a>
       <a class="btn btn-sm btn-ghost" href="${REPO}" target="_blank" rel="noopener noreferrer">${icon('i-github', 'icon-fill')}<span class="btn-label-hide">GitHub</span></a>
       <a class="btn btn-sm btn-primary" href="${p}download">${icon('i-download')}<span class="btn-label-hide">${esc(t.nav.download)}</span></a>
     </div>
@@ -112,6 +116,8 @@ function footer(t) {
       <a href="${t.root}privacy">${esc(t.footer.privacy)}</a>
       <a href="${REPO}/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">${esc(t.footer.license)}</a>
       <a href="${REPO}" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="${X_URL}" target="_blank" rel="noopener noreferrer">X</a>
+      <a href="${COMPANY_URL}" target="_blank" rel="noopener noreferrer">${esc(t.footer.company)}</a>
     </nav>
   </div>
 </footer>
@@ -160,6 +166,53 @@ function mock(t) {
 </div>`;
 }
 
+
+function demo(t) {
+  const d = t.demo;
+  const person = '<svg class="pp" viewBox="0 0 120 150" aria-hidden="true"><circle cx="60" cy="52" r="30"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z"/></svg>';
+  const tabs = d.tabs.map(([id, label], i) => `<button type="button" role="tab" class="dt" data-demo-tab="${i}" aria-selected="${i === 0}"><span class="dt-n">${String(i + 1).padStart(2, '0')}</span>${esc(label)}<i class="dt-bar"></i></button>`).join('');
+  const caps = d.tabs.map(([, , cap]) => esc(cap));
+  const code = ['const cut = await solocut.next()', 'if (cut.state === "ready") {', '  run(cut.commands)', '}', 'render({ target: "youtube" })'].map((l, i) => `<i style="--w:${[78, 62, 48, 14, 70][i]}%"></i>`).join('');
+  const record = `<div class="sc sc-record" data-scene="0">
+      <div class="rec-top"><span class="rec-dot"></span><span data-rec-time>00:00:00</span></div>
+      <div class="rec-tiles">
+        <div class="tile t-screen"><div class="codebar"></div>${code}</div>
+        <div class="tile t-cam">${person}<span>${esc(d.tracks[1])}</span></div>
+        <div class="tile t-cam b">${person}<span>${esc(d.tracks[2])}</span></div>
+      </div>
+      <div class="rec-tracks">${d.tracks.map((n, i) => `<div class="rt"><span>${esc(n)}</span><div class="rt-bar"><i class="${i === 3 ? 'wv' : 'c' + i}"></i></div></div>`).join('')}</div>
+    </div>`;
+  const prompt = `<div class="sc sc-prompt" data-scene="1">
+      <div class="term"><div class="term-tabs"><span class="on">claude</span><span>codex</span></div>
+        <div class="tl"><span class="t-p">›</span> <span data-type="${esc(d.prompt)}"></span><span class="caret"></span></div>
+        <div class="tl t-d">$ solocut next --json</div></div>
+      <ol class="steps">${d.steps.map((st, i) => `<li style="--i:${i}"><span class="st-ic"></span>${esc(st)}</li>`).join('')}</ol>
+    </div>`;
+  const check = `<div class="sc sc-check" data-scene="2">
+      <div class="fgrid">${d.checks.map(([k, label], i) => `<div class="fr ${k}" style="--i:${i}"><div class="fr-img">${person}${k === 'mask' ? '<i class="fr-mask"></i>' : ''}</div><b>${esc(label)}</b><em>${k === 'ok' ? '✓' : k === 'ask' ? '?' : '▦'}</em></div>`).join('')}</div>
+      <i class="scanline"></i>
+    </div>`;
+  const feedback = `<div class="sc sc-feedback" data-scene="3">
+      <div class="fb-video">${person}<span class="fb-cap">${esc(d.cap)}</span>
+        <svg class="fb-pen" viewBox="0 0 400 225" preserveAspectRatio="none"><path d="M118 168c-30-12-20-36 32-41 72-7 152-4 168 14 13 17-32 31-112 32-50 1-86-1-104-8"/></svg>
+        <span class="fb-say">${esc(d.say)}</span><span class="fb-tc">00:00:41:07</span></div>
+      <div class="fb-card"><b>${esc(d.card[0])}</b><span>${esc(d.card[1])}</span><em>→ claude</em></div>
+    </div>`;
+  const pubs = ['YouTube', 'TikTok', 'X', 'Instagram', 'Threads', 'Facebook'];
+  const publish = `<div class="sc sc-publish" data-scene="4">
+      <div class="pub-video"><div class="pv-thumb">${person}<b>${esc(d.cap)}</b></div><span class="pub-ok">✓ ${esc(d.approve)}</span></div>
+      <ul class="pubs">${pubs.map((p, i) => `<li style="--i:${i}"><span>${p}</span><em>✓</em></li>`).join('')}</ul>
+    </div>`;
+  return `<section class="demo-sec" id="demo" aria-label="${esc(d.label)}">
+    <div class="wrap" data-demo>
+      <div class="demo-tabs" role="tablist">${tabs}</div>
+      <div class="demo-stage" aria-hidden="true">${record}${prompt}${check}${feedback}${publish}</div>
+      <p class="demo-caption" aria-live="polite" data-demo-caption data-caps='${esc(JSON.stringify(caps))}'>${caps[0]}</p>
+      <p class="demo-note">${esc(d.note)}</p>
+    </div>
+  </section>`;
+}
+
 function home(t) {
   const flow = t.how.steps.map(([h, p]) => `<li><h3>${esc(h)}</h3><p>${md(p)}</p></li>`).join('\n        ');
   const bullets = (arr) => `<ul class="bullets">${arr.map((b) => `<li>${icon('i-check')}<span>${md(b)}</span></li>`).join('')}</ul>`;
@@ -205,6 +258,8 @@ ${header(t, 'home')}
       ${mock(t)}
     </div>
   </section>
+
+  ${demo(t)}
 
   <section class="works" aria-label="${esc(t.works)}">
     <div class="wrap works-row"><strong>${esc(t.works)}</strong>${AGENTS.map((a) => `<span>${esc(t.lang === 'ja' && a === 'Your own CLI' ? '独自のCLI' : a)}</span>`).join('')}</div>
