@@ -42,7 +42,7 @@ function btbn(os: ToolOs, arch: ToolArch, plat: string, kind: 'zip' | 'tar.xz', 
   };
 }
 
-function whisper(os: ToolOs, arch: ToolArch, plat: string, sha256: string): ToolAsset {
+function sw(os: ToolOs, arch: ToolArch, plat: string, sha256: string): ToolAsset {
   return {
     os, arch, url: `${WHISPER}/whisper-cli-v1.9.5-${plat}.zip`, sha256, kind: 'zip',
     bin: { 'whisper-cli': `whisper/whisper-cli${os === 'win' ? '.exe' : ''}` },
@@ -101,12 +101,12 @@ export const DEFAULT_MANIFEST: ToolManifest = {
       license: 'MIT',
       source: 'https://github.com/ggml-org/whisper.cpp/tree/v1.9.5',
       assets: [
-        whisper('mac', 'arm64', 'mac-arm64', '9e2a402b17ff881425dd524a7facc0359b482cb689ad8a48fd4239ec79bd72d8'),
-        whisper('mac', 'x64', 'mac-x64', 'b153abab26dae2b35df3f72b7050308cdbcd1bdbbe42dcdb56ec7dcadd846de6'),
-        whisper('linux', 'x64', 'linux-x64', '1072cca8f8560bd935e80835b08bb18f72f0e37bdce21f13781bcb8ee2e59070'),
-        whisper('linux', 'arm64', 'linux-arm64', 'cd0c9d9a4c830246b9b34c6bb7a0ced15e735c3d174964d62339907baece9937'),
-        whisper('win', 'x64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
-        whisper('win', 'arm64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
+        sw('mac', 'arm64', 'mac-arm64', '9e2a402b17ff881425dd524a7facc0359b482cb689ad8a48fd4239ec79bd72d8'),
+        sw('mac', 'x64', 'mac-x64', 'b153abab26dae2b35df3f72b7050308cdbcd1bdbbe42dcdb56ec7dcadd846de6'),
+        sw('linux', 'x64', 'linux-x64', '1072cca8f8560bd935e80835b08bb18f72f0e37bdce21f13781bcb8ee2e59070'),
+        sw('linux', 'arm64', 'linux-arm64', 'cd0c9d9a4c830246b9b34c6bb7a0ced15e735c3d174964d62339907baece9937'),
+        sw('win', 'x64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
+        sw('win', 'arm64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
       ],
     },
     'whisper-model': {

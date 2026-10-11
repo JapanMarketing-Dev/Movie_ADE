@@ -41,6 +41,8 @@ afterAll(() => new Promise<void>((r) => server.close(() => r())));
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'solocut-tc-'));
   process.env.SOLOCUT_HOME = join(tmp, 'home');
+  // the suite may run with a managed ffmpeg in the environment; resolution-order tests need a clean slate
+  for (const k of ['SOLOCUT_FFMPEG', 'SOLOCUT_FFPROBE', 'SOLOCUT_WHISPER_CLI', 'SOLOCUT_WHISPER_MODEL', 'SOLOCUT_WHISPER_MODEL_SMALL']) delete process.env[k];
   routes.clear();
   hits.clear();
 });
