@@ -40,7 +40,7 @@ describe('basics', () => {
   it('help and version', async () => {
     const h = await sb.run([]);
     expect(h.code).toBe(0);
-    expect(h.stdout).toContain('solocut 0.1.0');
+    expect(h.stdout).toContain(`solocut ${CLI_VERSION}`);
     expect(h.stdout).toContain('propose cuts');
     expect((await sb.run(['version', '--json'])).json).toMatchObject({ ok: true, version: CLI_VERSION, timelineSchema: 1 });
     expect((await sb.run(['--version'])).stdout).toBe(`solocut ${CLI_VERSION}\n`);
