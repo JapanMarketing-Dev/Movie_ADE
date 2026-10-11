@@ -88,6 +88,8 @@ my-video/
 
 ## タイムラインのモデル（timeline.json）
 
+> 型の完全な定義と、持たせる情報の一覧は [15](./15_timeline_schema.md)。ここでは概略だけを示す。
+
 ```jsonc
 {
   "schema": 1,

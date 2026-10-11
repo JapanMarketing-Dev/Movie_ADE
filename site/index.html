@@ -47,6 +47,8 @@
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
   <symbol id="i-json" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z"/><path d="M11.5 13.5L20 4"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
 </svg>
 <a class="skip" href="#main">Skip to content</a>
@@ -205,7 +207,7 @@
 
   <section class="section" id="benchmark">
     <div class="wrap split">
-      <div class="reveal"><p class="kicker">Benchmark</p><h2>Paste a URL. Borrow the pattern, not the video.</h2><p class="lede" style="font-size:17px">Open any YouTube or TikTok video in the built-in browser. While it plays, Solocut measures how captions appear, where sound effects land, how loud the music sits under the voice and how fast the cuts come, then turns it into a template you can use. Nothing is downloaded; only numbers are kept.</p></div>
+      <div class="reveal"><p class="kicker">Benchmark</p><h2>Paste a URL. Borrow the pattern, not the video.</h2><p class="lede" style="font-size:17px">Open a reference video — your own, or one you have permission to study — in the built-in browser. While you play it, Solocut measures how captions appear, where sound effects land, how loud the music sits under the voice and how fast the cuts come, then turns it into a template you can use. Nothing is downloaded or saved; only numbers are kept.</p></div>
       <div class="card reveal">
         <p class="bench-url">youtube.com/watch?v=…</p>
         <dl class="bench"><div><dt>Captions</dt><dd>bottom 22% · 14 chars · word highlight · yellow emphasis</dd></div><div><dt>Cuts</dt><dd>2.4 s average · 14 jump cuts/min · punch-in ×1.12</dd></div><div><dt>Music</dt><dd>lo-fi · 88 BPM · −21 dB under voice · ducking</dd></div><div><dt>Sound effects</dt><dd>9/min · pop on emphasis · whoosh on new section</dd></div><div><dt>Voice</dt><dd>380 chars/min · −15 LUFS</dd></div></dl>
@@ -225,6 +227,9 @@
     <div class="wrap">
       <div class="section-head reveal"><p class="kicker">Why Solocut</p><h2>Built for one person.</h2></div>
       <ul class="feat-grid reveal" style="margin-bottom:14px">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg><h3>Shoot 20 minutes. One prompt.</h3><p>Say “finish the video” and your agent runs every step of the template, up to a publish-ready video with thumbnails and a description.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><h3>Ready-made prompts</h3><p>Rough cut, fix feedback, make 3 Shorts, write the post… One click each, and every prompt is yours to edit in JSON.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><h3>Publish and announce</h3><p>Upload to YouTube and TikTok from the editor, then post “new video” to X, Instagram, Threads and Facebook. Nothing goes out until you approve.</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><h3>Thumbnails with image generation</h3><p>Pick a frame and generate thumbnails with your Codex or Gemini subscription, or an OpenAI or Google API key. Titles are typeset so Japanese text never breaks.</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>Sound effects and music, ready</h3><p>A starter library of sound effects and BGM you are free to use, downloaded on first launch, with credits written for you.</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-json"/></svg><h3>Every setting is JSON</h3><p>Settings live in a JSON file with a public schema. Edit it by hand or just ask your agent to change it.</p></li>
@@ -249,6 +254,7 @@
         <details><summary>Do I need to know how to edit?</summary><p>No. You record and talk. The template and your agent do the editing; you review the result.</p></details>
         <details><summary>Is Remotion required?</summary><p>No. The render engine is FFmpeg. Remotion is an optional add-on for motion graphics, and Solocut shows its license terms before installing it. HyperFrames and Revideo are alternatives.</p></details>
         <details><summary>Which platforms can I export for?</summary><p>YouTube (16:9, up to 4K), TikTok, YouTube Shorts and Instagram Reels (9:16), with captions, chapters and metadata.</p></details>
+        <details><summary>Can it post for me?</summary><p>Yes. Solocut uploads to YouTube and TikTok and announces the video on X, Instagram, Threads and Facebook, always after you check and approve the post.</p></details>
       </div>
     </div>
   </section>

@@ -15,13 +15,17 @@ Cloudflare R2（downloads.solocut.app）
   ├─ releases/<version>/  インストーラー、更新用のファイル、manifest.json、SHA256SUMS(.sig)
   ├─ latest.json          最新の正式版
   ├─ toolchain.json(.sig) ツールの推奨バージョン（ffmpeg、whisper.cpp など）とハッシュ値
-  └─ agents.json(.sig)    エージェントCLIの一覧（起動・更新のコマンド）
+  ├─ agents.json(.sig)    エージェントCLIの一覧（起動・更新のコマンド）
+  ├─ library-terms.json(.sig)      素材サイトの規約の要約（[16](./16_asset_library.md)）
+  ├─ publish-capabilities.json(.sig) 各 SNS の審査の状態と使える投稿方式（[14](./14_publishing.md)）
+  └─ packs/               効果音・BGM・イラストの初期パック（再配布が許されたものだけ）
           │
           ▼
-Cloudflare Pages（solocut.app）  ダウンロードページ。latest.json を読んで、OS ごとのボタンを出す
+Cloudflare Workers の静的アセット（solocut.app）  ダウンロードページ。latest.json を読んで、OS ごとのボタンを出す
+Cloudflare Worker（auth.solocut.app）  SNS の OAuth のトークン交換だけ（[14](./14_publishing.md)）。トークンは保存しない
 ```
 
-サーバー側の処理はない（静的サイト＋R2 だけ）。費用はほぼかからない。
+サーバー側の処理は、SNS のトークン交換の Worker だけ（トークンも動画も保存しない）。あとは静的サイトと R2 なので、費用はほぼかからない。
 
 ## アプリの自動更新
 
@@ -40,7 +44,8 @@ Cloudflare Pages（solocut.app）  ダウンロードページ。latest.json を
 
 ## サイト（solocut.app）
 
-- Cloudflare Pages のプロジェクト `solocut`、ビルドの工程はなし（`site/` をそのまま公開する）
+- Cloudflare Workers の静的アセット（Worker 名 `solocut-site`、`wrangler.jsonc`）。Pages は Workers に統合されたため、こちらを使う。ビルドの工程はなし（`node tools/site/build.mjs` で HTML を生成し、`site/` をそのまま公開する）
+- 公開済み: https://solocut.app（英語）、https://solocut.app/ja（日本語）
 - 構成: トップ（何ができるか、デモ動画、ダウンロードボタン）、ダウンロード（OS ごと、チェックサム）、ドキュメント（テンプレート、CLI、判定モデル）、プライバシー、ライセンス
 - 日本語と英語
 - `_headers` で CSP とキャッシュを設定する

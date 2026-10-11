@@ -47,6 +47,8 @@
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
   <symbol id="i-json" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z"/><path d="M11.5 13.5L20 4"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
 </svg>
 <a class="skip" href="#main">本文へ移動</a>
@@ -205,7 +207,7 @@
 
   <section class="section" id="benchmark">
     <div class="wrap split">
-      <div class="reveal"><p class="kicker">ベンチマーク</p><h2>URL を貼るだけ。真似るのは動画ではなく、パターン。</h2><p class="lede" style="font-size:17px">YouTube や TikTok の動画をアプリ内のブラウザで開くと、再生している間に、字幕の出し方、効果音の入れどころ、話し声に対する BGM の音量、カットの間隔を測り、使えるテンプレートにします。動画はダウンロードせず、残すのは数値だけです。</p></div>
+      <div class="reveal"><p class="kicker">ベンチマーク</p><h2>URL を貼るだけ。真似るのは動画ではなく、パターン。</h2><p class="lede" style="font-size:17px">参考にしたい動画（自分の動画や、許可を得た動画）をアプリ内のブラウザで開き、再生している間に、字幕の出し方、効果音の入れどころ、話し声に対する BGM の音量、カットの間隔を測り、使えるテンプレートにします。動画はダウンロードも保存もせず、残すのは数値だけです。</p></div>
       <div class="card reveal">
         <p class="bench-url">youtube.com/watch?v=…</p>
         <dl class="bench"><div><dt>字幕</dt><dd>下から 22% · 1行 14 文字 · 単語ハイライト · 黄色で強調</dd></div><div><dt>カット</dt><dd>平均 2.4 秒 · 1分に 14 回のジャンプカット · ズーム ×1.12</dd></div><div><dt>BGM</dt><dd>Lo-fi · 88 BPM · 声より −21 dB · ダッキングあり</dd></div><div><dt>効果音</dt><dd>1分に 9 回 · 強調で「ポン」· 章の切り替えで「シュッ」</dd></div><div><dt>声</dt><dd>1分 380 文字 · −15 LUFS</dd></div></dl>
@@ -225,6 +227,9 @@
     <div class="wrap">
       <div class="section-head reveal"><p class="kicker">Solocut の特長</p><h2>1人のために作りました。</h2></div>
       <ul class="feat-grid reveal" style="margin-bottom:14px">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg><h3>20分撮って、プロンプト1つ</h3><p>「動画を完成させて」と言えば、エージェントがテンプレートの手順をすべて進め、サムネイルと説明文まで付いた投稿できる動画に仕上げます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg><h3>用意済みのプロンプト</h3><p>粗カット、フィードバック対応、ショートを3本、投稿文の作成…。どれもワンクリック。プロンプトの中身は JSON で自由に変えられます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><h3>投稿と告知まで</h3><p>エディタから YouTube と TikTok に投稿し、X・Instagram・Threads・Facebook に「動画を投稿しました」を告知。承認するまで何も投稿されません。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><h3>画像生成でサムネイル</h3><p>フレームを選んで、Codex や Gemini のサブスク、OpenAI や Google の API キーでサムネイルを生成。日本語のタイトルは崩れないよう確実に組みます。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>効果音・BGM が最初からそろう</h3><p>自由に使える効果音と BGM の初期ライブラリを初回起動時にダウンロード。クレジット表記も自動で作ります。</p></li>
         <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-json"/></svg><h3>設定はすべて JSON</h3><p>設定は公開スキーマ付きの JSON ファイル。手で編集しても、エージェントに「変えて」と頼んでもOK。</p></li>
@@ -249,6 +254,7 @@
         <details><summary>編集の知識は必要ですか？</summary><p>いりません。撮って話すだけで、テンプレートとエージェントが編集します。あなたは結果を見て直してほしいところを伝えます。</p></details>
         <details><summary>Remotion は必須ですか？</summary><p>いいえ。書き出しエンジンは FFmpeg です。Remotion はモーショングラフィックス用の追加オプションで、インストール前に利用条件を表示します。代わりに HyperFrames や Revideo も使えます。</p></details>
         <details><summary>どのプラットフォーム向けに書き出せますか？</summary><p>YouTube（16:9、最大 4K）、TikTok・YouTube Shorts・Instagram Reels（9:16）。字幕、チャプター、メタデータも出力します。</p></details>
+        <details><summary>投稿もしてくれますか？</summary><p>はい。YouTube と TikTok への投稿と、X・Instagram・Threads・Facebook での告知ができます。必ずあなたが内容を確認・承認してから投稿します。</p></details>
       </div>
     </div>
   </section>
