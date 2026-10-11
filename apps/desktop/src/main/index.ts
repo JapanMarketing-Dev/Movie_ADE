@@ -12,7 +12,7 @@ import * as platform from './services/platform';
 import * as project from './services/project';
 import { PtyManager } from './services/pty';
 import * as recorder from './services/recorder';
-import { initSentry } from './services/sentry';
+import { initSentry, sentryEnabled } from './services/sentry';
 import { Updater } from './update/updater';
 import * as feedback from './services/feedback';
 import * as thumbs from './services/thumbs';
@@ -225,6 +225,7 @@ function registerIpc(): void {
     language: safe(() => platform.language(), 'ja'),
     cliPath: cliScript(),
     cliAvailable: cliAvailable(),
+    crashReports: sentryEnabled(),
   }));
   handle('app:openExternal', (_e, url) => {
     if (/^(https?:|mailto:)/.test(url)) void shell.openExternal(url);

@@ -2,7 +2,7 @@ import { overlaysToAss } from './ass.js';
 import { sha256Hex } from './hash.js';
 import type { ExportPreset } from './presets.js';
 import { PRESETS, presetBitrate } from './presets.js';
-import type { Canvas, FocusValue, Frame, Mask, Overlay, Segment, Source, Target, Timeline, ZoomKeyframe } from './schema.js';
+import type { Canvas, FocusValue, Frame, Voice, Mask, Overlay, Segment, Source, Target, Timeline, ZoomKeyframe } from './schema.js';
 import { fpsValue, frameToSeconds } from './time.js';
 import { durationFrames, sourceLocalSeconds, sourceRate, takeFrameToSeconds, videoSources } from './timeline.js';
 import type { PatternDef } from './patterns/defs.js';
@@ -563,19 +563,29 @@ export function voiceSource(t: Timeline, seg: Segment): string | null {
     ?? null;
 }
 
-function eqFilter(eq: string): string[] {
-  switch (eq) {
-    case 'off':
-    case 'none':
-    case '':
-      return [];
-    case 'voice-bright':
-      return ['highpass=f=90', 'equalizer=f=3500:t=q:w=1:g=3'];
-    case 'voice-warm':
-      return ['highpass=f=70', 'equalizer=f=200:t=q:w=1:g=2'];
-    default:
-      return ['highpass=f=80'];
+/**
+ * Voice enhancement chain (pure). Order: high-pass (rumble) → denoise → [final: gentle compressor → de-ess EQ →
+ * preset EQ]. Preview keeps only the cheap high-pass + denoise. `eq: 'off'` disables the EQ stages (high-pass,
+ * de-ess, presets) but keeps denoise and compression. Loudness is normalized after the full mix (2-pass on final).
+ */
+export function voiceChain(voice: Pick<Voice, 'denoise' | 'eq'>, quality: 'preview' | 'final'): string[] {
+  const eqOff = voice.eq === 'off' || voice.eq === 'none' || voice.eq === '';
+  const out: string[] = [];
+  if (!eqOff) out.push(voice.eq === 'voice-bright' ? 'highpass=f=90' : voice.eq === 'voice-warm' ? 'highpass=f=70' : 'highpass=f=80');
+  if (voice.denoise !== 'off') {
+    const strong = voice.denoise === 'strong';
+    // final tracks the noise floor (tn=1) for long takes; preview uses a fixed estimate (cheaper)
+    out.push(quality === 'final' ? `afftdn=nr=${strong ? 20 : 10}:nf=${strong ? -40 : -45}:tn=1` : `afftdn=nr=${strong ? 16 : 8}:nf=${strong ? -40 : -45}`);
   }
+  if (quality === 'final') {
+    out.push('acompressor=threshold=0.1:ratio=2.5:attack=10:release=150:knee=4:makeup=1.5');
+    if (!eqOff) {
+      out.push('equalizer=f=6500:t=q:w=1.5:g=-3'); // de-ess: soften sibilance
+      if (voice.eq === 'voice-bright') out.push('equalizer=f=3500:t=q:w=1:g=3');
+      if (voice.eq === 'voice-warm') out.push('equalizer=f=200:t=q:w=1:g=2');
+    }
+  }
+  return out;
 }
 
 function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
@@ -631,11 +641,7 @@ function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
   }
   const voiceRaw = g.label('vc');
   g.filters.push(`${pieces.map((p) => `[${p}]`).join('')}concat=n=${pieces.length}:v=0:a=1[${voiceRaw}]`);
-  const vchain: string[] = [];
-  const v = t.audio.voice;
-  if (v.denoise === 'light') vchain.push('afftdn=nr=10:nf=-45');
-  if (v.denoise === 'strong') vchain.push('afftdn=nr=20:nf=-40');
-  vchain.push(...eqFilter(v.eq));
+  const vchain = voiceChain(t.audio.voice, ctx.opts.quality);
   let voice = voiceRaw;
   if (vchain.length) {
     voice = g.label('vf');

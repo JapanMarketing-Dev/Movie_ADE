@@ -249,7 +249,7 @@ export const BgmSchema = z.strictObject({
 });
 export const SfxSchema = z.strictObject({
   id: idSchema('sfx'), asset: SourceIdSchema, at: FrameSchema, gainDb: z.number(),
-  trigger: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'manual']), ruleRef: z.string().optional(), decided: DecidedSchema,
+  trigger: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in', 'manual']), ruleRef: z.string().optional(), decided: DecidedSchema,
 });
 export const VoiceSchema = z.strictObject({
   denoise: z.enum(['off', 'light', 'strong']),
@@ -372,6 +372,8 @@ export interface CheckFinding {
   note: string;
   ranges?: { start: number; end: number }[];
   measured?: Record<string, number | string | null>;
+  /** Timeline-frame findings (track-based checks): what and where. */
+  items?: { frame: Frame; note: string; ref?: string }[];
 }
 
 export function timelineJsonSchema(): object {

@@ -9,10 +9,37 @@ import { crc32, deflateRawSync } from 'node:zlib';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MANIFEST, ToolchainError, currentPlatform, ensureTool, extractZip, findAsset, resolveTool, resolveToolSync, sha256File,
-  solocutHome, toolStatus, toolsDir, whichSync, type ToolManifest,
+  envPath, solocutHome, spawnSpec, toolStatus, toolsDir, whichSync, type ToolManifest,
 } from '../src/index.js';
 
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
+const WIN = process.platform === 'win32';
+
+/** Point PATH (whatever its case on this OS) at `p` only. */
+function setPath(p: string): void {
+  for (const k of Object.keys(process.env)) if (k.toUpperCase() === 'PATH') delete process.env[k];
+  setPath(p);
+  process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
+}
+
+/** A fake executable printing `out`: a .cmd on Windows, a sh script elsewhere. */
+function fakeExe(dir: string, name: string, out = ''): string {
+  if (WIN) {
+    const p = join(dir, `${name}.cmd`);
+    writeFileSync(p, `@echo off\r\n${out ? `echo ${out}\r\n` : ''}`);
+    return p;
+  }
+  const p = join(dir, name);
+  writeFileSync(p, `#!/bin/sh\n${out ? `echo "${out}"\n` : ''}`);
+  chmodSync(p, 0o755);
+  return p;
+}
+
+/** Restore the environment in place (assigning a plain object to process.env breaks Windows' case-insensitive env). */
+function restoreEnv(saved: NodeJS.ProcessEnv): void {
+  for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+  for (const [k, v] of Object.entries(saved)) process.env[k] = v;
+}
 
 let tmp: string;
 let server: Server;
@@ -47,7 +74,7 @@ beforeEach(() => {
   hits.clear();
 });
 afterEach(() => {
-  process.env = { ...saved };
+  restoreEnv(saved);
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -157,7 +184,8 @@ describe('ensureTool', () => {
     const progress: { received: number; total?: number }[] = [];
     const p = await ensureTool('ffmpeg', { manifest: m, platform: plat, onProgress: (x) => progress.push(x) });
     expect(p).toBe(join(toolsDir(), 'ffmpeg', '9.9.9', 'pkg/bin/ffmpeg'));
-    expect(execFileSync(p).toString()).toContain('9.9.9-test');
+    if (WIN) expect(readFileSync(p, 'utf8')).toContain('9.9.9-test'); // a sh script cannot run on Windows
+    else expect(execFileSync(p).toString()).toContain('9.9.9-test');
     expect(progress.at(-1)).toEqual({ received: body.length, total: body.length });
     // staging is cleaned up
     expect(readdirSync(join(toolsDir(), '.staging'))).toEqual([]);
@@ -232,18 +260,17 @@ describe('ensureTool', () => {
 
   it('falls back to PATH when the platform has no build, else explains how to install', async () => {
     const m: ToolManifest = { schema: 1, tools: {} };
-    process.env.PATH = join(tmp, 'emptybin');
+    setPath(join(tmp, 'emptybin'));
     await expect(ensureTool('whisper-cli', { manifest: m, platform: { os: 'mac', arch: 'arm64' } })).rejects.toThrow(/brew install whisper-cpp/);
     const bin = join(tmp, 'bin');
     mkdirSync(bin);
-    writeFileSync(join(bin, 'whisper-cli'), '#!/bin/sh\n');
-    chmodSync(join(bin, 'whisper-cli'), 0o755);
-    process.env.PATH = bin;
-    expect(await ensureTool('whisper-cli', { manifest: m, platform: { os: 'mac', arch: 'arm64' } })).toBe(join(bin, 'whisper-cli'));
+    const fake = fakeExe(bin, 'whisper-cli');
+    setPath(bin);
+    expect(await ensureTool('whisper-cli', { manifest: m, platform: { os: 'mac', arch: 'arm64' } })).toBe(fake);
   });
 
   it('reports no-asset for a platform the manifest does not cover', async () => {
-    process.env.PATH = join(tmp, 'emptybin');
+    setPath(join(tmp, 'emptybin'));
     await expect(ensureTool('ffmpeg', { platform: { os: 'solaris' as never, arch: 'x64' } })).rejects.toMatchObject({ code: 'no-asset' });
   });
 });
@@ -255,20 +282,19 @@ describe('resolveTool', () => {
     process.env.SOLOCUT_FFMPEG = f;
     expect(await resolveTool('ffmpeg')).toBe(f);
     process.env.SOLOCUT_FFMPEG = join(tmp, 'does-not-exist');
-    process.env.PATH = join(tmp, 'emptybin');
+    setPath(join(tmp, 'emptybin'));
     expect(await resolveTool('ffmpeg', { platform: null })).toBeNull();
   });
 
   it('finds executables on PATH (and the old whisper-cpp name)', async () => {
     const bin = join(tmp, 'bin');
     mkdirSync(bin);
-    writeFileSync(join(bin, 'whisper-cpp'), '#!/bin/sh\n');
-    chmodSync(join(bin, 'whisper-cpp'), 0o755);
-    writeFileSync(join(bin, 'ffprobe'), 'not executable');
-    process.env.PATH = bin;
-    expect(await resolveTool('whisper-cli', { platform: null })).toBe(join(bin, 'whisper-cpp'));
+    const fake = fakeExe(bin, 'whisper-cpp');
+    writeFileSync(join(bin, 'ffprobe'), 'not executable'); // no exec bit / no PATHEXT extension
+    setPath(bin);
+    expect(await resolveTool('whisper-cli', { platform: null })).toBe(fake);
     expect(await resolveTool('ffprobe', { platform: null })).toBeNull();
-    expect(whichSync('whisper-cpp')).toBe(join(bin, 'whisper-cpp'));
+    expect(whichSync('whisper-cpp')).toBe(fake);
   });
 
   it('never looks for models on PATH', async () => {
@@ -286,7 +312,7 @@ describe('resolveTool', () => {
   it('ignores a half-installed directory without a marker', async () => {
     const dir = join(toolsDir(), 'ffmpeg', DEFAULT_MANIFEST.tools.ffmpeg!.version);
     mkdirSync(dir, { recursive: true });
-    process.env.PATH = join(tmp, 'emptybin');
+    setPath(join(tmp, 'emptybin'));
     expect(await resolveTool('ffmpeg', { platform: plat })).toBeNull();
   });
 });
@@ -295,12 +321,11 @@ describe('toolStatus', () => {
   it('reports every tool with its source and version', async () => {
     const bin = join(tmp, 'bin');
     mkdirSync(bin);
-    writeFileSync(join(bin, 'ffmpeg'), '#!/bin/sh\necho "ffmpeg version 7.1-test Copyright"\n');
-    chmodSync(join(bin, 'ffmpeg'), 0o755);
-    process.env.PATH = bin;
+    const fake = fakeExe(bin, 'ffmpeg', 'ffmpeg version 7.1-test Copyright');
+    setPath(bin);
     const s = await toolStatus();
     expect(Object.keys(s).sort()).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small']);
-    expect(s.ffmpeg).toEqual({ installed: true, path: join(bin, 'ffmpeg'), source: 'path', version: '7.1-test' });
+    expect(s.ffmpeg).toEqual({ installed: true, path: fake, source: 'path', version: '7.1-test' });
     expect(s.ffprobe.installed).toBe(false);
   });
 });
@@ -361,12 +386,39 @@ describe('zip', () => {
     serve('/w.zip', body);
     const m: ToolManifest = { schema: 1, tools: { 'whisper-cli': { version: '1.9.5', assets: [{ ...plat, url: `${base}/w.zip`, sha256: sha(body), kind: 'zip', bin: { 'whisper-cli': 'whisper/whisper-cli' } }] } } };
     const p = await ensureTool('whisper-cli', { manifest: m, platform: plat });
-    expect(execFileSync(p).toString()).toBe('whisper\n');
+    if (WIN) expect(readFileSync(p, 'utf8')).toContain('echo whisper');
+    else expect(execFileSync(p).toString()).toBe('whisper\n');
   });
 
   it('refuses an asset whose sha256 is not 64 hex characters (e.g. "TBD")', async () => {
     const m: ToolManifest = { schema: 1, tools: { 'whisper-cli': { version: '1', assets: [{ ...plat, url: `${base}/w.zip`, sha256: 'TBD', kind: 'zip', bin: { 'whisper-cli': 'w' } }] } } };
     await expect(ensureTool('whisper-cli', { manifest: m, platform: plat })).rejects.toThrow(/no valid sha256/);
     expect(hits.get('/w.zip')).toBeUndefined();
+  });
+});
+
+describe('Windows lookup rules (simulated)', () => {
+  it('whichSync: PATHEXT names only, any PATH case, ";" separators', () => {
+    const bin = join(tmp, 'winbin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'claude'), '');
+    writeFileSync(join(bin, 'claude.cmd'), '');
+    writeFileSync(join(bin, 'ffmpeg.exe'), '');
+    const env = { Path: `C:\\nowhere;${bin}`, PATHEXT: '.EXE;.CMD' };
+    expect(whichSync('claude', env, 'win32')).toBe(join(bin, 'claude.cmd'));
+    expect(whichSync('ffmpeg', env, 'win32')).toBe(join(bin, 'ffmpeg.exe'));
+    expect(whichSync('claude.cmd', env, 'win32')).toBe(join(bin, 'claude.cmd'));
+    expect(whichSync('nothing', env, 'win32')).toBeNull();
+    expect(envPath({ path: 'a' })).toBe('a');
+  });
+
+  it('spawnSpec runs .cmd shims through cmd.exe with quoted arguments', () => {
+    const sp = spawnSpec('C:\\Program Files\\nodejs\\codex.cmd', ['exec', '-', '-i', 'C:\\my dir\\f.png', '100%'], 'win32', { ComSpec: 'C:\\Windows\\system32\\cmd.exe' });
+    expect(sp.command).toBe('C:\\Windows\\system32\\cmd.exe');
+    expect(sp.args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
+    expect(sp.args[3]).toBe(String.raw`""C:\Program Files\nodejs\codex.cmd" exec - -i "C:\my dir\f.png" "100"^%"""`);
+    expect(sp.windowsVerbatimArguments).toBe(true);
+    expect(spawnSpec('/usr/bin/codex', ['a'], 'darwin')).toEqual({ command: '/usr/bin/codex', args: ['a'] });
+    expect(spawnSpec('C:\\x\\ffmpeg.exe', ['-version'], 'win32')).toEqual({ command: 'C:\\x\\ffmpeg.exe', args: ['-version'] });
   });
 });

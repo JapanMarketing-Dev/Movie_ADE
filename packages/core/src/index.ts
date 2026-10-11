@@ -13,3 +13,6 @@ export * from './layout.js';
 export * from './variant.js';
 export * from './tracks.js';
 export * from './reframe.js';
+export * from './sfx.js';
+export * from './multicam.js';
+export * from './trackchecks.js';

@@ -225,7 +225,10 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
     expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
     expect(r.json.candidates.length).toBeGreaterThan(0);
     expect(r.json.candidates.length).toBeLessThanOrEqual(3);
-    for (const c of r.json.candidates) expect(existsSync(c.image)).toBe(true);
+    for (const c of r.json.candidates) {
+      expect(c.image).toMatch(/^checks\/thumbs\/cand-\d+\.jpg$/);
+      expect(existsSync(join(dir, c.image))).toBe(true);
+    }
     expect(existsSync(join(dir, 'checks', 'thumbs', 'candidates.json'))).toBe(true);
   }, 120_000);
 
@@ -257,6 +260,11 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
     expect((await run(['thumb', 'gen', '--frame', '30', '--provider', 'dalle'])).code).toBe(2);
     expect((await run(['thumb', 'gen', '--frame', '99999'])).json.error.code).toBe('out-of-range');
     expect((await run(['thumb', 'dance'])).code).toBe(2);
+    const pick = await run(['thumb', 'pick', join(dir, 'renders', 'thumbnails', 'youtube-2.jpg')]);
+    expect(pick.json, pick.stdout).toMatchObject({ ok: true, target: 'youtube', thumbnail: { path: 'renders/thumbnails/youtube-2.jpg' } });
+    expect(timeline().outputs[0].thumbnail.path).toBe('renders/thumbnails/youtube-2.jpg');
+    expect((await run(['thumb', 'pick', join(sb.root, 'gen.png')])).code).toBe(2); // outside the project
+    expect(r.json.images[0]).toMatchObject({ path: 'renders/thumbnails/youtube-1.jpg', provider: 'codex', size: '1280x720' });
   }, 120_000);
 
   it('derive a vertical variant, then render --all and check --all make every video', async () => {
@@ -291,7 +299,9 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
       notes: [{ atMs: 20_000, text: '最後をもう少し短く', frame: 200 }],
     }));
     const r = await run(['feedback', 'import', s, '--organize', 'claude', '--id', 'fb_test1']);
-    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, id: 'fb_test1', items: 2, organizedBy: 'claude' });
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, id: 'fb_test1', dir: 'feedback/fb_test1', count: 2, organizedBy: 'claude' });
+    expect(r.json.items[0]).toMatchObject({ n: 1, frame: 45, timecode: '00:00:01:15', image: 'feedback/fb_test1/01.png', spoken: 'ここ、字幕が顔にかぶってる。', request: '字幕を下へずらす' });
+    expect(r.json.items[0].targets[0]).toMatchObject({ kind: 'segment' });
     const md = readFileSync(join(dir, 'feedback', 'fb_test1', 'feedback.md'), 'utf8');
     expect(md).toContain('## 1. [00:00:01:15] 字幕が顔にかかっている');
     expect(md).toContain('- 要望: 字幕を下へずらす');
@@ -305,9 +315,36 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
     expect((await run(['feedback', 'list'])).json.feedback).toEqual([{ id: 'fb_test1', status: 'open', items: 2, path: 'feedback/fb_test1/feedback.md' }]);
     expect((await run(['feedback', 'show', 'fb_test1'])).json.items).toHaveLength(2);
     expect((await run(['feedback', 'import', s, '--id', 'fb_test1'])).json.error.code).toBe('exists');
+    // the app edits the list: drop item 1, rename item 2 → reindexed with its image
+    writeFileSync(join(sb.root, 'edited.json'), JSON.stringify([{ index: 2, title: '最後を短く', request: '最後の10秒を切る' }]));
+    const set = await run(['feedback', 'set', 'fb_test1', '--items', join(sb.root, 'edited.json')]);
+    expect(set.json, set.stdout).toMatchObject({ ok: true, count: 1, items: [{ n: 1, request: '最後の10秒を切る', image: 'feedback/fb_test1/01.png' }] });
+    expect(existsSync(join(dir, 'feedback', 'fb_test1', '02.png'))).toBe(false);
+    expect(readFileSync(join(dir, 'feedback', 'fb_test1', 'feedback.md'), 'utf8')).toContain('## 1. [00:00:06:20] 最後を短く');
+    expect(timeline().review.feedback[0].items).toBe(1);
+    writeFileSync(join(sb.root, 'bad.json'), JSON.stringify([{ index: 9 }]));
+    expect((await run(['feedback', 'set', 'fb_test1', '--items', join(sb.root, 'bad.json')])).code).toBe(2);
     expect((await run(['feedback', 'done', 'fb_test1'])).json.status).toBe('done');
     expect(timeline().review.openItems.some((o: { ref: string }) => o.ref === 'fb_test1')).toBe(false);
     expect((await run(['feedback', 'list', '--open'])).json.feedback).toEqual([]);
+    // the desktop app's event-list format, on a variant
+    const s2 = join(dir, 'feedback', 'inbox', 'fb_app1');
+    mkdirSync(s2, { recursive: true });
+    writeFileSync(join(s2, 'session.json'), JSON.stringify({
+      schema: 1, id: 'fb_app1', createdAt: '2026-10-11T13:00:00Z', fps: { num: 30, den: 1 }, video: { path: 'renders/preview.mp4' }, micFile: 'mic.wav', micStartMs: 0,
+      events: [
+        { t_ms: 0, kind: 'play', frame: 0, videoTime: 0 },
+        { t_ms: 1000, kind: 'pause', frame: 30, videoTime: 1 },
+        { t_ms: 1200, kind: 'box', frame: 30, videoTime: 1, data: { x: 0.2, y: 0.7, w: 0.6, h: 0.2 } },
+        { t_ms: 1500, kind: 'text', frame: 30, videoTime: 1, data: { x: 0.5, y: 0.5, text: 'ここを明るく' } },
+      ],
+    }));
+    const app = await run(['feedback', 'import', s2]);
+    expect(app.json, app.stdout + app.stderr).toMatchObject({ ok: true, id: 'fb_app1', count: 1, items: [{ n: 1, frame: 30, spoken: '' }] });
+    expect(app.json.items[0].notes).toEqual(['ここを明るく']);
+    expect(existsSync(join(dir, 'feedback', 'fb_app1', '01.png'))).toBe(true);
+    writeFileSync(join(s2, 'session.json'), JSON.stringify({ schema: 1, events: [{ t_ms: 1, kind: 'box', frame: 0, data: { x: 'a' } }] }));
+    expect((await run(['feedback', 'import', s2, '--id', 'fb_app2'])).json.error.code).toBe('invalid-session');
     // broken sessions are rejected
     writeFileSync(join(s, 'session.json'), JSON.stringify({ schema: 1, strokes: [{ startMs: 0, endMs: 1, points: [[0.1]] }] }));
     expect((await run(['feedback', 'import', s])).json.error.code).toBe('invalid-session');

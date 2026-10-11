@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CursorEvent, FaceTrack, Segment, Timeline, TrackSample } from '../src/index.js';
 import {
-  applyOp, applyOps, applyTracks, clickZoom, compile, cursorSamples, deriveVariant, emptyTimeline, faceSamples, fitBubble,
+  applyOp, applyOps, applyTracks, clickZoom, compile, cursorFocusForSegments, cursorSamples, deriveVariant, emptyTimeline, faceSamples, fitBubble,
   focusAt, focusForPoint, focusPath, isShortcut, layoutAt, overlaysFromInputLogs, parseJsonl, sampleAt, segmentFocus,
   textWidthEm, validateTimeline,
 } from '../src/index.js';
@@ -226,5 +226,28 @@ describe('fitBubble', () => {
     for (const l of long.lines) expect(textWidthEm(l) * long.size).toBeLessThanOrEqual(650 * 0.84 + 1);
     const huge = fitBubble('あ'.repeat(200), { w: 500, h: 150 }, { w: 650, h: 320 }, 62, 28);
     expect(huge.size).toBe(28); // falls back to the smallest size
+  });
+});
+
+describe('cursorFocusForSegments', () => {
+  const t = tl([
+    seg('seg_cam', 0, 60, { layout: 'camera-full', camera: 'cam' }),
+    seg('seg_scr', 60, 120, { layout: 'screen-with-wipe', screen: 'scr', camera: 'cam', wipe: { shape: 'circle', corner: 'br', style: 'plain' } }),
+    seg('seg_scr2', 120, 180, { layout: 'screen-full', screen: 'scr' }),
+  ]);
+  const log: CursorEvent[] = [
+    { t_ms: 500, x: 0.1, y: 0.1 }, // camera segment: ignored
+    { t_ms: 2100, x: 0.8, y: 0.5 }, { t_ms: 2500, x: 0.82, y: 0.6 }, { t_ms: 3000, x: 0.05, y: 0.5 }, // median x .8
+  ];
+  it('returns the crop focus around the median cursor of each screen segment', () => {
+    const f = cursorFocusForSegments(t, log);
+    expect(Object.keys(f)).toEqual(['seg_scr']); // seg_scr2 has no events, seg_cam no screen
+    expect(f.seg_scr).toEqual(focusForPoint({ x: 0.8, y: 0.5 }, { width: 1920, height: 1080 }, { width: 1080, height: 960 }));
+    expect(f.seg_scr!.x).toBeGreaterThan(0.8);
+    expect(cursorFocusForSegments(t, { take_1: log })).toEqual(f);
+    expect(cursorFocusForSegments(t, { take_9: log })).toEqual({});
+    // feeds deriveVariant directly
+    const v = deriveVariant(t, 'tiktok', { selection: ['seg_scr'], screenFocus: f });
+    expect(v.segments[0]!.video).toMatchObject({ layout: 'split-v', topFocus: f.seg_scr });
   });
 });

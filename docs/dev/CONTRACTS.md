@@ -178,6 +178,8 @@ export function applyTracks(t, tracks, { followClicks?: boolean | { scale = 1.6,
   // zoom keyframes with focus 'face'/'cursor' become moving canvas points along the track; followClicks (template
   // zoom.followClicks) adds punch-ins toward clicks on screen segments without a hand-made zoom. Record with setSegments.
 export function clickZoom(t, seg, tracks, o?): ZoomKeyframe[];
+export function cursorFocusForSegments(t, cursorLog: CursorEvent[] | Record<takeId, CursorEvent[]>, o?: { region? /* default 1080×960 */ }):
+  Record<segId, Focus>;   // static crop focus from the median cursor per screen segment → deriveVariant({ screenFocus })
 export function overlaysFromInputLogs(t, { cursor?, keys? }, { shortcutsOnly? = true, keyHoldSec? = 1.2, clicks? = true, keys? = true }): Overlay[];
   // click-ring at the mapped frame/position (layout-aware, incl. vertical crops) and keystroke badges for shortcuts
   // (repeats merged), only while the take's screen is shown; ids ov_click_N / ov_key_N, unique. Add with addOverlay ops.

@@ -230,6 +230,35 @@ export function layoutAt(t: Timeline, frame: Frame, o: LayoutOptions = {}): Layo
   }));
 }
 
+/**
+ * Where a box in source pixels appears on the canvas at a timeline frame (one rect per region showing the source,
+ * after the cover/fit crop, focus and zoom), clipped to the region. Empty when the source is not shown then.
+ * Also returns the source-local frame used (for looking up tracks at the same moment).
+ */
+export function sourceBoxToCanvasAt(t: Timeline, frame: Frame, sourceId: string, box: Rect | ((sourceFrame: number) => Rect | null)):
+  { rects: Rect[]; sourceFrame: number | null } {
+  const hit = timelineFrameToTake(t, frame);
+  const src = t.sources[sourceId];
+  if (!hit || !src || (src.kind !== 'screen' && src.kind !== 'camera')) return { rects: [], sourceFrame: null };
+  const seg = hit.segment;
+  const W = t.canvas.width;
+  const H = t.canvas.height;
+  const rel = frame - seg.range.start;
+  const z = zoomAt(seg, rel, W, H, t.canvas);
+  const sourceFrame = sourceLocalSeconds(t, src, takeFrameToSeconds(t, hit.take, hit.frame)) * fpsValue(src.fps);
+  const b = typeof box === 'function' ? box(sourceFrame) : box;
+  if (!b) return { rects: [], sourceFrame };
+  const rects: Rect[] = [];
+  for (const rg of videoRegions(seg, t.canvas)) {
+    if (rg.source !== sourceId) continue;
+    const f = rg.focus === undefined ? undefined : Array.isArray(rg.focus) ? focusAt(rg.focus, rel) : rg.focus;
+    const r = sourceRectToCanvas(b, src.size, rg.rect, rg.fit, f);
+    const zr = r && zoomRect(r, z, W, H);
+    if (zr) rects.push(zr);
+  }
+  return { rects, sourceFrame };
+}
+
 /** Items whose rect contains the point (topmost first). */
 export function hitTest(items: LayoutItem[], x: number, y: number): LayoutItem[] {
   return items.filter((i) => x >= i.rect.x && x < i.rect.x + i.rect.w && y >= i.rect.y && y < i.rect.y + i.rect.h);

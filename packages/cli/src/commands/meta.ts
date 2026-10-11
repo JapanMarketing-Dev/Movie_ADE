@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { frameToSeconds, type LicenseRef, type Output, type Target, type Timeline } from '@solocut/core';
 import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
-import { applyEdit, openProject, readTimeline, setStep, writeAtomic, type Project } from '../project.js';
+import { VARIANTS, applyEdit, openProject, readTimeline, setStep, variantExists, vpaths, writeAtomic, type Project, type Variant } from '../project.js';
+import { allTimelines } from './media.js';
 
 // Publishing text (docs/06 「同時に出すメタデータ」, docs/16 credits): the agent writes titles/description/tags, the CLI
 // stores them in outputs[].metadata and renders renders/<target>/metadata.md + credits.txt.
@@ -125,6 +126,32 @@ function writeFiles(p: Project, tl: Timeline, targets: Target[], lang: 'ja' | 'e
   return files;
 }
 
+/** One post as the publish screen shows it. */
+function outputView(p: Project, tl: Timeline, target: Target) {
+  const o = tl.outputs.find((x) => x.target === target) ?? emptyOutput(tl, target);
+  const fps = tl.canvas.fps;
+  const ch = target === 'youtube' && o.metadata.chapters ? youtubeChapters(tl) : { text: null };
+  const chapters = ch.text
+    ? [...tl.outline].sort((a, b) => a.start - b.start).map((c, i) => ({ at: ch.text!.split('\n')[i]!.split(' ')[0]!, sec: Math.floor(frameToSeconds(c.start, fps)), title: c.title }))
+    : [];
+  const srt = vpaths(p).srt;
+  return {
+    variant: p.variant ?? 'main', target, title: o.metadata.title, titleCandidates: o.metadata.titleCandidates, description: o.metadata.description,
+    tags: o.metadata.tags, chapters, credits: creditLines(tl),
+    ...(o.render ? { render: { path: o.render.path } } : {}), ...(o.thumbnail ? { thumbnail: { path: o.thumbnail.path, frame: o.thumbnail.frame } } : {}),
+    ...(tl.captions.length && existsSync(join(p.dir, srt)) ? { captions: { srt } } : {}), ...(o.publish ? { publish: o.publish } : {}),
+  };
+}
+
+/** Done once every video (main + existing variants) has a title for each of its targets. */
+function updateMetadataStep(p: Project): void {
+  const missing = allTimelines(p).filter((x) => {
+    const tl = readTimeline(x);
+    return (x.variant ? [x.variant] : tl.meta.targets).some((target) => !tl.outputs.find((o) => o.target === target)?.metadata.title.trim());
+  }).map((x) => x.variant ?? 'main');
+  setStep(p, 'metadata', missing.length ? 'running' : 'done', missing.length ? `missing: ${missing.join(', ')}` : undefined);
+}
+
 export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   const p = openProject(ctx);
@@ -133,10 +160,11 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
       target: { type: 'string', multiple: true }, title: { type: 'string' }, description: { type: 'string' }, 'description-file': { type: 'string' },
       tags: { type: 'string' }, candidates: { type: 'string', multiple: true }, chapters: { type: 'boolean' }, 'no-chapters': { type: 'boolean' }, file: { type: 'string' },
     }, { max: 0, usage: 'solocut meta set [--target youtube] --title … [--description …|--description-file f] [--tags a,b] [--candidates …] | --file meta.json' });
-    const tl = readTimeline(p);
-    const targets = (values.target ?? tl.meta.targets) as Target[];
+    const tl0 = readTimeline(p);
+    const targets = (values.target ?? (p.variant ? [p.variant] : tl0.meta.targets)) as Target[];
     for (const x of targets) if (!(TARGETS as readonly string[]).includes(x)) throw new CliError('usage', `unknown target: ${x}`);
     if (!targets.length) throw new CliError('usage', 'no targets (set meta.targets or pass --target)');
+    if (p.variant && targets.some((x) => x !== p.variant)) throw new CliError('usage', `variant ${p.variant} only has the ${p.variant} output`);
     const perTarget: Record<string, MetaInput> = {};
     if (values.file) {
       const raw = readMetaFile(ctx, values.file);
@@ -153,27 +181,46 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
       };
       for (const x of targets) perTarget[x] = m;
     }
-    const ops = targets.map((target) => {
-      const m = perTarget[target]!;
-      checkInput(m, target);
-      const base = tl.outputs.find((o) => o.target === target) ?? emptyOutput(tl, target);
-      const metadata = { ...base.metadata, ...Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined)) } as Output['metadata'];
-      return { op: 'setOutput' as const, output: { ...base, metadata } };
-    });
-    const r = await applyEdit(p, ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: 'meta set' });
-    const files = writeFiles(p, r.timeline, targets, p.file.language);
-    setStep(p, 'metadata', 'done');
-    emit(ctx, { targets, files, metadata: Object.fromEntries(r.timeline.outputs.filter((o) => targets.includes(o.target)).map((o) => [o.target, o.metadata])) }, () =>
+    // a TikTok / Shorts target belongs to its derived variant when it exists (docs/18)
+    const owners = new Map<string, { project: Project; targets: Target[] }>();
+    for (const target of targets) {
+      const owner: Project = !p.variant && (VARIANTS as readonly string[]).includes(target) && variantExists(p.dir, target as Variant) ? { ...p, variant: target as Variant } : p;
+      const key = owner.variant ?? 'main';
+      if (!owners.has(key)) owners.set(key, { project: owner, targets: [] });
+      owners.get(key)!.targets.push(target);
+    }
+    const files: string[] = [];
+    const metadata: Record<string, Output['metadata']> = {};
+    for (const { project, targets: ts } of owners.values()) {
+      const tl = readTimeline(project);
+      const ops = ts.map((target) => {
+        const m = perTarget[target]!;
+        checkInput(m, target);
+        const base = tl.outputs.find((o) => o.target === target) ?? emptyOutput(tl, target);
+        const md = { ...base.metadata, ...Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined)) } as Output['metadata'];
+        return { op: 'setOutput' as const, output: { ...base, metadata: md } };
+      });
+      const r = await applyEdit(project, ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: 'meta set' });
+      files.push(...writeFiles(project, r.timeline, ts, p.file.language));
+      for (const o of r.timeline.outputs) if (ts.includes(o.target)) metadata[o.target] = o.metadata;
+    }
+    updateMetadataStep(p);
+    emit(ctx, { targets, files, metadata }, () =>
       t(ctx, `投稿文を保存しました: ${files.filter((f) => f.endsWith('.md')).join(', ')}`, `saved: ${files.filter((f) => f.endsWith('.md')).join(', ')}`));
     return;
   }
   if (sub === 'show' || sub === undefined) {
     const { values } = opts(rest, { target: { type: 'string' } }, { max: 0 });
-    const tl = readTimeline(p);
-    const outs = tl.outputs.filter((o) => !values.target || o.target === values.target);
-    const chapters = youtubeChapters(tl);
-    emit(ctx, { outputs: outs.map((o) => ({ target: o.target, metadata: o.metadata })), chapters, credits: creditLines(tl), assets: usedAssets(tl) }, () =>
-      outs.length ? outs.map((o) => metadataMarkdown(tl, o, p.file.language)).join('\n---\n') : t(ctx, '投稿文はまだありません（solocut meta set）', 'no metadata yet (solocut meta set)'));
+    // every video unless --variant: the publish screen shows all posts at once (docs/18)
+    const scope = p.variant || ctx.variant ? [p] : allTimelines(p);
+    const outputs = scope.flatMap((x) => {
+      const tl = readTimeline(x);
+      const targets = x.variant ? [x.variant as Target] : tl.meta.targets;
+      return targets.filter((tg) => !values.target || tg === values.target).map((target) => outputView(x, tl, target));
+    });
+    const main = readTimeline({ ...p, variant: null });
+    emit(ctx, { outputs, chapters: youtubeChapters(main), credits: creditLines(main), assets: usedAssets(main) }, () =>
+      outputs.length ? outputs.map((o) => `[${o.variant}] ${o.target}: ${o.title || t(ctx, '（タイトル未設定）', '(no title)')}`).join('\n') : t(ctx, '投稿文はまだありません（solocut meta set）', 'no metadata yet (solocut meta set)'));
     return;
   }
   if (sub === 'write') {

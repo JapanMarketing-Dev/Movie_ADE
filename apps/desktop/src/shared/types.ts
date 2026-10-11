@@ -16,6 +16,7 @@ export interface AppInfo {
   language: Lang;
   cliPath: string;
   cliAvailable: boolean;
+  crashReports: boolean;
 }
 
 export interface ProjectInfo {

@@ -97,18 +97,44 @@ function isExecutable(p: string): boolean {
   }
 }
 
-/** Search PATH for an executable. */
-export function whichSync(cmd: string, env: NodeJS.ProcessEnv = process.env): string | null {
-  const dirs = (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean);
-  const exts = process.platform === 'win32' ? (env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean) : [''];
+/** PATH from an env object, whatever its case ("Path" on Windows when the env is a plain copy). */
+export function envPath(env: NodeJS.ProcessEnv = process.env): string {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+  return (key ? env[key] : '') ?? '';
+}
+
+/** Search PATH for an executable. On Windows only names with a PATHEXT extension count (as cmd.exe does). */
+export function whichSync(cmd: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
+  const dirs = envPath(env).split(platform === 'win32' ? ';' : delimiter).filter(Boolean);
+  const pathextKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATHEXT');
+  const exts = platform === 'win32' ? ((pathextKey ? env[pathextKey] : undefined) ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  // a name that already has an extension (claude.cmd) is looked up as is
+  const names = platform === 'win32' && /\.[A-Za-z0-9]+$/.test(cmd) ? [cmd, ...exts.map((e) => cmd + e)] : exts.map((e) => cmd + e);
   for (const d of dirs) {
-    for (const ext of exts) {
-      const p = join(d, cmd + ext);
-      if (isExecutable(p)) return p;
+    for (const n of names) {
+      const p = join(d, n);
+      if (platform === 'win32' ? isFile(p) && exts.some((e) => p.toUpperCase().endsWith(e.toUpperCase())) : isExecutable(p)) return p;
     }
-    if (process.platform === 'win32' && isFile(join(d, cmd))) return join(d, cmd);
   }
   return null;
+}
+
+/** Quote one argument for cmd.exe (inside a /s /c "…" line). */
+function cmdQuote(a: string): string {
+  if (a !== '' && /^[A-Za-z0-9_\-+=.,/:\\]+$/.test(a)) return a;
+  return `"${a.replace(/"/g, '""').replace(/%/g, '"^%"')}"`;
+}
+
+/**
+ * How to spawn `file` with `args`: npm-installed CLIs on Windows are .cmd/.bat shims, which Node refuses to run
+ * without a shell, so they go through `cmd.exe /d /s /c "…"` with each argument quoted.
+ */
+export function spawnSpec(file: string, args: string[], platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(file)) {
+    const comspec = env.ComSpec ?? env.COMSPEC ?? 'cmd.exe';
+    return { command: comspec, args: ['/d', '/s', '/c', `"${[file, ...args].map(cmdQuote).join(' ')}"`], windowsVerbatimArguments: true };
+  }
+  return { command: file, args };
 }
 
 /** A managed install of `name` (the manifest version first, then any other installed version, newest first). */
@@ -309,8 +335,9 @@ async function install(m: AssetMatch, finalDir: string, o: EnsureOptions): Promi
 export interface ToolState { installed: boolean; path?: string; version?: string; source?: ToolSource }
 
 function execVersion(bin: string): Promise<string | undefined> {
+  const sp = spawnSpec(bin, ['-version']);
   return new Promise((res) => {
-    execFile(bin, ['-version'], { timeout: 5000 }, (err, stdout) => {
+    execFile(sp.command, sp.args, { timeout: 5000, windowsHide: true, ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) }, (err, stdout) => {
       if (err) return res(undefined);
       const m = /version\s+(\S+)/.exec(String(stdout));
       res(m?.[1]);

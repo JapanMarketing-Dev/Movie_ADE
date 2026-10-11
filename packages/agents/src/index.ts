@@ -220,15 +220,22 @@ export function detectUsageLimit(output: string, defs: AgentDef[] = AGENTS): str
   return null;
 }
 
-function which(cmd: string): string | null {
-  const dirs = (process.env.PATH ?? process.env.Path ?? '').split(delimiter).filter(Boolean);
-  const exts = process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';') : [''];
+function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === name);
+  return key ? env[key] : undefined;
+}
+
+/** Find a command on PATH; on Windows only PATHEXT names (claude.cmd from npm, codex.exe…), case-insensitive env. */
+export function which(cmd: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
+  const win = platform === 'win32';
+  const dirs = (envValue(env, 'PATH') ?? '').split(win ? ';' : delimiter).filter(Boolean);
+  const exts = win ? (envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
   for (const d of dirs) {
     for (const ext of exts) {
       const p = join(d, cmd + ext);
       try {
         if (!statSync(p).isFile()) continue;
-        if (process.platform !== 'win32') accessSync(p, fsc.X_OK);
+        if (!win) accessSync(p, fsc.X_OK);
         return p;
       } catch {
         /* next */
@@ -238,9 +245,18 @@ function which(cmd: string): string | null {
   return null;
 }
 
+/** .cmd/.bat shims need cmd.exe on Windows (Node refuses to spawn them directly). */
+export function spawnSpec(file: string, args: string[], platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(file)) {
+    return { command: envValue(env, 'COMSPEC') ?? 'cmd.exe', args: ['/d', '/s', '/c', `"${[file, ...args].map((a) => quoteArg(a, 'cmd')).join(' ')}"`], windowsVerbatimArguments: true };
+  }
+  return { command: file, args };
+}
+
 function runVersion(path: string, args: string[]): Promise<string | undefined> {
+  const sp = spawnSpec(path, args);
   return new Promise((res) => {
-    execFile(path, args, { timeout: 8000, windowsHide: true, shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(path) }, (err, stdout, stderr) => {
+    execFile(sp.command, sp.args, { timeout: 8000, windowsHide: true, ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
       if (err) return res(undefined);
       res(parseVersion(`${stdout}\n${stderr}`));
     });
@@ -256,7 +272,7 @@ export async function detectAgents(o: { defs?: AgentDef[]; versions?: boolean } 
   const defs = o.defs ?? AGENTS;
   return Promise.all(
     defs.map(async (d) => {
-      const path = d.detect.map(which).find((p): p is string => !!p);
+      const path = d.detect.map((c) => which(c)).find((p): p is string => !!p);
       if (!path) return { id: d.id, installed: false };
       const version = o.versions === false ? undefined : await runVersion(path, d.versionArgs);
       return { id: d.id, installed: true, path, ...(version ? { version } : {}) };

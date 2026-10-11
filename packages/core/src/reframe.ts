@@ -2,7 +2,7 @@ import { allIds, freshId, sourceLocalSeconds, takeFrameToSeconds, videoSources }
 import { sourceRectToCanvas, videoRegions } from './layout.js';
 import type { Focus, FocusValue, Overlay, Point, Segment, Timeline, ZoomKeyframe } from './schema.js';
 import { fpsValue } from './time.js';
-import type { FocusKey, FocusPathOptions, Tracks, TrackSample } from './tracks.js';
+import type { CursorEvent, FocusKey, FocusPathOptions, Tracks, TrackSample } from './tracks.js';
 import { cursorSamples, faceSamples, focusAt, focusForPoint, focusPath, isShortcut, sampleAt } from './tracks.js';
 
 type Smoothing = Partial<Omit<FocusPathOptions, 'fromSec' | 'toSec' | 'fps'>>;
@@ -232,4 +232,33 @@ export function overlaysFromInputLogs(t: Timeline, tracks: Pick<Tracks, 'cursor'
     }
   }
   return out.filter((ov) => ov.kind !== 'keystroke' || ov.range.end > ov.range.start);
+}
+
+/**
+ * Static screen-crop focus per segment from a cursor log, ready for `deriveVariant({ screenFocus })`: the median
+ * cursor position while each segment's screen is shown, converted to the cover-crop focus of the region the screen
+ * gets in the vertical layout (default the split-v top half, 1080×960). Accepts one take's events or a map by take id.
+ * Segments without a screen or without cursor events are left out. (For a moving crop, pass `tracks` instead.)
+ */
+export function cursorFocusForSegments(t: Timeline, cursorLog: CursorEvent[] | Record<string, CursorEvent[]>,
+  o: { region?: { width: number; height: number } } = {}): Record<string, Focus> {
+  const region = o.region ?? { width: 1080, height: 960 };
+  const byTake = (take: string): CursorEvent[] => (Array.isArray(cursorLog) ? cursorLog : cursorLog[take] ?? []);
+  const median = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+  };
+  const out: Record<string, Focus> = {};
+  for (const seg of t.segments) {
+    const screen = videoSources(seg.video).find((id) => t.sources[id]?.kind === 'screen');
+    const src = screen ? t.sources[screen] : undefined;
+    if (!src || src.kind !== 'screen') continue;
+    const a = takeFrameToSeconds(t, seg.src.take, seg.src.from) * 1000;
+    const b = takeFrameToSeconds(t, seg.src.take, seg.src.to) * 1000;
+    const ev = cursorSamples(byTake(seg.src.take).filter((e) => e.t_ms >= a && e.t_ms < b));
+    if (!ev.length) continue;
+    out[seg.id] = focusForPoint({ x: median(ev.map((e) => e.x)), y: median(ev.map((e) => e.y)) }, src.size, region);
+  }
+  return out;
 }

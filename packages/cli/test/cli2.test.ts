@@ -189,13 +189,18 @@ describe('progress output', () => {
     expect(lines.at(-1)).toBe('dl 100%');
     expect(err()).not.toContain('\r');
   });
-  it('TTY: redraws one line; --json: silent', () => {
+  it('TTY: redraws one line', () => {
     const t = ctx(true);
     progress(t.c, 'k', 0.5, 'dl');
     progressDone(t.c, 'k');
     expect(t.err()).toMatch(/^\rdl \[#{12}\.{12}\] 50% {3}\n$/);
+  });
+  it('--json: NDJSON on stderr, at most one line per 1 %', () => {
     const j = ctx(false, true);
-    progress(j.c, 'k', 0.5, 'dl');
-    expect(j.err()).toBe('');
+    for (let i = 0; i <= 1000; i++) progress(j.c, 'lib:ffmpeg', i / 1000, 'ffmpeg', { tool: 'ffmpeg', received: i, total: 1000 });
+    progressDone(j.c, 'lib:ffmpeg');
+    const lines = j.err().trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(101);
+    expect(lines[50]).toEqual({ progress: { task: 'lib:ffmpeg', fraction: 0.5, label: 'ffmpeg', tool: 'ffmpeg', received: 500, total: 1000 } });
   });
 });

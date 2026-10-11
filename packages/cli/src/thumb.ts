@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSyn
 import { homedir } from 'node:os';
 import { extname, join } from 'node:path';
 import { assDialogue, assEscape, assHeader, assStyleLine, assTagColor } from '@solocut/core';
+import { spawnSpec, whichSync } from '@solocut/toolchain';
 
 // Thumbnails (docs/10): candidate frames by simple image heuristics, base images from an image-generation provider,
 // and the Japanese title typeset by Solocut itself (SVG layer, or the same layout as ASS when ffmpeg has no SVG decoder).
@@ -144,8 +145,8 @@ export interface GenRequest { frame: string; prompt: string; n: number; format: 
 export interface GenContext {
   env: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
-  /** Runs a command (tests inject a fake). */
-  run?: (cmd: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number }) => Promise<{ code: number | null; stdout: string; stderr: string }>;
+  /** Runs a command (tests inject a fake). `input` is written to stdin. */
+  run?: RunFn;
   model?: string;
 }
 
@@ -156,14 +157,26 @@ export class ThumbError extends Error {
   }
 }
 
-export function defaultRun(cmd: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number }): Promise<{ code: number | null; stdout: string; stderr: string }> {
+export type RunFn = (cmd: string, args: string[], o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; input?: string }) => Promise<{ code: number | null; stdout: string; stderr: string }>;
+
+/**
+ * Run an agent CLI: resolved on PATH (on Windows npm installs .cmd shims, which need cmd.exe), long prompts on stdin
+ * so no shell ever sees them.
+ */
+export const defaultRun: RunFn = (cmd, args, o) => {
+  const file = whichSync(cmd, o.env) ?? cmd;
+  const sp = spawnSpec(file, args, process.platform, o.env);
   return new Promise((res) => {
-    const c = spawn(cmd, args, { cwd: o.cwd, env: o.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    const c = spawn(sp.command, sp.args, { cwd: o.cwd, env: o.env, stdio: [o.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) });
+    if (o.input !== undefined) {
+      c.stdin!.on('error', () => undefined);
+      c.stdin!.end(o.input);
+    }
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => c.kill(), o.timeoutMs);
-    c.stdout.on('data', (d) => (stdout += String(d)));
-    c.stderr.on('data', (d) => (stderr += String(d)));
+    c.stdout!.on('data', (d) => (stdout += String(d)));
+    c.stderr!.on('data', (d) => (stderr += String(d)));
     c.on('error', (e) => {
       clearTimeout(timer);
       res({ code: null, stdout, stderr: stderr + e.message });
@@ -173,7 +186,7 @@ export function defaultRun(cmd: string, args: string[], o: { cwd: string; env: N
       res({ code, stdout, stderr });
     });
   });
-}
+};
 
 const IMG = /\.(png|jpe?g|webp)$/i;
 const mimeOf = (p: string) => (/\.png$/i.test(p) ? 'image/png' : /\.webp$/i.test(p) ? 'image/webp' : 'image/jpeg');
@@ -205,7 +218,8 @@ export async function generateCodex(req: GenRequest, ctx: GenContext): Promise<s
   for (let i = 0; i < req.n; i++) {
     const since = Date.now() - 1000;
     const prompt = `$imagegen ${req.prompt}\nAspect ratio ${aspect}. Use the attached frame as the reference for the person; keep their face unchanged. Do not draw any text or letters.`;
-    const r = await run('codex', ['exec', '--skip-git-repo-check', '-i', req.frame, ...(req.references ?? []).flatMap((x) => ['-i', x]), prompt], { cwd: req.outDir, env: ctx.env, timeoutMs: 10 * 60_000 });
+    // prompt on stdin ("-") and before the images: -i takes several values and would swallow a trailing prompt
+    const r = await run('codex', ['exec', '--skip-git-repo-check', '-', '-i', req.frame, ...(req.references ?? []).flatMap((x) => ['-i', x])], { cwd: req.outDir, env: ctx.env, timeoutMs: 10 * 60_000, input: prompt });
     if (r.code !== 0) {
       const msg = `${r.stderr}\n${r.stdout}`.trim().split('\n').slice(-2).join(' ');
       throw new ThumbError('codex', /429|usage limit|rate limit/i.test(msg) ? `rate limited: ${msg}` : `codex exec failed (${r.code}): ${msg}`);

@@ -108,13 +108,13 @@ async function organize(ctx: Ctx, dir: string, items: FeedbackItem[], lang: 'ja'
   let text: string;
   if (agent === 'codex') {
     writeFileSync(join(dir, '.schema.json'), JSON.stringify(ORGANIZE_SCHEMA));
-    const r = await defaultRun('codex', ['exec', '--skip-git-repo-check', '--output-schema', join(dir, '.schema.json'), '-o', join(dir, '.organized.txt'), prompt], { cwd: dir, env: ctx.io.env, timeoutMs: 5 * 60_000 });
+    const r = await defaultRun('codex', ['exec', '--skip-git-repo-check', '--output-schema', join(dir, '.schema.json'), '-o', join(dir, '.organized.txt'), '-'], { cwd: dir, env: ctx.io.env, timeoutMs: 5 * 60_000, input: prompt });
     rmSync(join(dir, '.schema.json'), { force: true });
     if (r.code !== 0 || !existsSync(join(dir, '.organized.txt'))) throw new CliError('organize-failed', `codex exec failed (${r.code}): ${r.stderr.trim().slice(-200)}`);
     text = readFileSync(join(dir, '.organized.txt'), 'utf8');
     rmSync(join(dir, '.organized.txt'), { force: true });
   } else {
-    const r = await defaultRun('claude', ['-p', '--output-format', 'json', prompt], { cwd: dir, env: ctx.io.env, timeoutMs: 5 * 60_000 });
+    const r = await defaultRun('claude', ['-p', '--output-format', 'json'], { cwd: dir, env: ctx.io.env, timeoutMs: 5 * 60_000, input: prompt });
     if (r.code !== 0) throw new CliError('organize-failed', `claude -p failed (${r.code}): ${r.stderr.trim().slice(-200)}`);
     text = r.stdout;
   }

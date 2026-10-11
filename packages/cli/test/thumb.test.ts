@@ -144,8 +144,10 @@ describe('providers', () => {
     utimesSync(old, new Date(2020, 0, 1), new Date(2020, 0, 1));
     const calls: string[][] = [];
     let k = 0;
-    const run = async (cmd: string, args: string[]) => {
+    const inputs: string[] = [];
+    const run = async (cmd: string, args: string[], o: { input?: string }) => {
       calls.push([cmd, ...args]);
+      inputs.push(o.input ?? '');
       writeFileSync(join(imgs, `gen-${k++}.png`), `img${k}`);
       return { code: 0, stdout: '', stderr: '' };
     };
@@ -153,9 +155,9 @@ describe('providers', () => {
     expect(out).toHaveLength(2);
     expect(readFileSync(out[0]!, 'utf8')).toBe('img1');
     expect(readFileSync(out[1]!, 'utf8')).toBe('img2');
-    expect(calls[0]!.slice(0, 5)).toEqual(['codex', 'exec', '--skip-git-repo-check', '-i', join(dir, 'frame.png')]);
-    expect(calls[0]!.at(-1)).toMatch(/^\$imagegen /);
-    expect(calls[0]!.at(-1)).toContain('Do not draw any text');
+    expect(calls[0]).toEqual(['codex', 'exec', '--skip-git-repo-check', '-', '-i', join(dir, 'frame.png')]);
+    expect(inputs[0]).toMatch(/^\$imagegen /);
+    expect(inputs[0]).toContain('Do not draw any text');
   });
 
   it('codex: failure, rate limit and no new image', async () => {

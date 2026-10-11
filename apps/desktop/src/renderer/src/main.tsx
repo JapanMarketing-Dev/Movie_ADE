@@ -6,7 +6,10 @@ import './styles.css';
 import { App } from './App';
 import { Teleprompter } from './screens/Teleprompter';
 
-Sentry.init({});
+// The renderer SDK forwards to main over IPC; only start it when main has crash reports on.
+void window.solocut.invoke('app:info').then((i) => {
+  if (i.crashReports) Sentry.init({});
+});
 
 const hash = new URLSearchParams(location.hash.slice(1));
 const tele = hash.get('teleprompter');

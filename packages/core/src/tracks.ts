@@ -5,7 +5,8 @@
 
 export interface FaceTrack {
   fps: number;
-  frames: { f: number; faces: { x: number; y: number; w: number; h: number; score: number }[] }[];
+  /** `gaze` (0..1, looking at the lens) and `sharp` (0..1 focus/exposure quality) are optional detector extras. */
+  frames: { f: number; faces: { x: number; y: number; w: number; h: number; score: number; gaze?: number }[]; sharp?: number }[];
 }
 export interface CursorEvent { t_ms: number; x: number; y: number; click?: boolean }
 export interface KeyEvent { t_ms: number; keys: string[] }

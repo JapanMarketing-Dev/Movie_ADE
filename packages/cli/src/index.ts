@@ -15,6 +15,7 @@ import { cmdMeta } from './commands/meta.js';
 import { cmdThumb } from './commands/thumb.js';
 import { cmdFeedback } from './commands/feedback.js';
 import { cmdDerive } from './commands/derive.js';
+import { cmdPublish } from './commands/publish.js';
 
 export { CliError, CLI_VERSION } from './ctx.js';
 export type { IO } from './ctx.js';
@@ -64,6 +65,7 @@ const COMMANDS: Record<string, Handler> = {
   thumb: cmdThumb,
   feedback: cmdFeedback,
   derive: cmdDerive,
+  publish: cmdPublish,
   config: cmdConfig,
   prompts: cmdPrompts,
   templates: cmdTemplates,
@@ -95,14 +97,17 @@ const HELP: Record<Lang, string> = {
   frame --at <frame|timecode>    1フレームの静止画
   check                          機械的チェック（checks/<run>/report.md）
   thumb candidates | thumb gen --frame <tc> --title "見出し"   サムネイル
+  derive --target tiktok|youtube-shorts   本編から縦型の版を作る（--variant で各コマンドの対象に）
+  render --all / check --all     3本まとめて
   meta set --title … --description … --tags a,b | meta show   投稿文（renders/<target>/metadata.md）
+  publish record --target t --status published --url <url>   投稿の結果を記録
   feedback import <dir> | list | show <id> | done <id>        動画フィードバック
 そのほか
   past list|search|show|timeline|compare|reuse|register   過去の動画
   mcp                            MCP サーバー（stdio）
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
-共通: --json（機械向けの出力） --project <dir>（プロジェクトの場所） --by human|agent --agent <名前>`,
+共通: --json（機械向けの出力） --project <dir>（プロジェクトの場所） --variant main|tiktok|youtube-shorts --by human|agent --agent <名前>`,
   en: `solocut ${CLI_VERSION} — edit videos by template (built for agents; every command accepts --json)
 
 Start
@@ -124,14 +129,17 @@ Render and check
   frame --at <frame|timecode>
   check                          machine checks (checks/<run>/report.md)
   thumb candidates | thumb gen --frame <tc> --title "…"
+  derive --target tiktok|youtube-shorts   derive a vertical version (then --variant on any command)
+  render --all / check --all     all three videos
   meta set --title … --description … --tags a,b | meta show
+  publish record --target t --status published --url <url>
   feedback import <dir> | list | show <id> | done <id>
 More
   past list|search|show|timeline|compare|reuse|register
   mcp                            MCP server over stdio
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
-Global: --json  --project <dir>  --by human|agent  --agent <name>`,
+Global: --json  --project <dir>  --variant main|tiktok|youtube-shorts  --by human|agent  --agent <name>`,
 };
 
 const AGENT_ENV: [string, string][] = [['CLAUDECODE', 'claude'], ['CODEX_SANDBOX', 'codex'], ['GEMINI_CLI', 'gemini']];

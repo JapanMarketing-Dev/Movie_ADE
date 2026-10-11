@@ -27,8 +27,18 @@ function file(): string {
   return join(app.getPath('userData'), 'secrets.json');
 }
 
+/**
+ * Whether secrets survive a restart. macOS / Windows always have a keychain; asking safeStorage there would touch
+ * the keychain item, which shows a blocking "allow access" prompt after every ad-hoc-signed update — so we only
+ * touch it when a secret is actually read or written. On Linux, plain-text fallback ("basic_text") does not count.
+ */
 export function persistent(): boolean {
-  return safeStorage.isEncryptionAvailable();
+  if (process.platform === 'darwin' || process.platform === 'win32') return true;
+  try {
+    return safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text';
+  } catch {
+    return false;
+  }
 }
 
 function load(): Record<string, string> {
@@ -53,7 +63,7 @@ export function getSecret(name: SecretName): string | null {
   const m = memory.get(name);
   if (m !== undefined) return m;
   const enc = load()[name];
-  if (!enc || !persistent()) return null;
+  if (!enc || !persistent() || !safeStorage.isEncryptionAvailable()) return null;
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'));
   } catch {
@@ -71,7 +81,7 @@ export function setSecret(name: SecretName, value: string | null): { persisted: 
     save(all);
     return { persisted: true };
   }
-  if (!persistent()) {
+  if (!persistent() || !safeStorage.isEncryptionAvailable()) {
     memory.set(name, v);
     return { persisted: false };
   }
@@ -81,12 +91,13 @@ export function setSecret(name: SecretName, value: string | null): { persisted: 
   return { persisted: true };
 }
 
-/** Which secrets are set (never the values). Shown in the settings screen as masked. */
+/** Which secrets are set (never the values, and without decrypting: no keychain prompt just to open Settings). */
 export function secretStatus(): Record<SecretName, { set: boolean; hint?: string }> {
   const out = {} as Record<SecretName, { set: boolean; hint?: string }>;
+  const stored = load();
   for (const n of SECRET_NAMES) {
-    const v = getSecret(n);
-    out[n] = v ? { set: true, hint: maskHint(v) } : { set: false };
+    const m = memory.get(n);
+    out[n] = m ? { set: true, hint: maskHint(m) } : stored[n] ? { set: true, hint: '••••' } : { set: false };
   }
   return out;
 }

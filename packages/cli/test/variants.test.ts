@@ -159,3 +159,51 @@ describe('--variant on timeline commands', () => {
     expect((await run(['step', 'check:instagram', 'done'])).code).toBe(2);
   });
 });
+
+describe('publish screen data', () => {
+  beforeEach(async () => {
+    expect((await run(['derive', '--target', 'tiktok', '--selection', 'seg_1,seg_2'])).json.ok).toBe(true);
+    expect((await run(['derive', '--target', 'youtube-shorts', '--selection', 'seg_1'])).json.ok).toBe(true);
+  });
+
+  it('meta (no --variant) lists every post; meta set --target routes to the variant', async () => {
+    expect((await run(['meta', 'set', '--target', 'youtube', '--title', '本編'])).json.ok).toBe(true);
+    const r = await run(['meta', 'set', '--target', 'tiktok', '--target', 'youtube-shorts', '--title', '縦', '--tags', 'a,b']);
+    expect(r.json, r.stdout).toMatchObject({ ok: true, metadata: { tiktok: { title: '縦' }, 'youtube-shorts': { title: '縦' } } });
+    expect(read('variants/tiktok/timeline.json').outputs[0].metadata.title).toBe('縦');
+    expect(read('timeline.json').outputs.map((o: { target: string }) => o.target)).toEqual(['youtube']);
+    const all = await run(['meta']);
+    expect(all.json.outputs.map((o: { variant: string; target: string; title: string }) => [o.variant, o.target, o.title])).toEqual([
+      ['main', 'youtube', '本編'], ['tiktok', 'tiktok', '縦'], ['youtube-shorts', 'youtube-shorts', '縦'],
+    ]);
+    expect(all.json.outputs[1]).toMatchObject({ tags: ['a', 'b'], chapters: [], captions: { srt: 'captions/tiktok.srt' } });
+    const st = read('.solocut/status.json');
+    expect(st.find((x: { step: string }) => x.step === 'metadata').state).toBe('done');
+    expect((await sb.run(['meta', 'set', '--variant', 'tiktok', '--target', 'youtube', '--title', 'x', '--json'], { cwd: dir })).code).toBe(2);
+  });
+
+  it('publish record writes outputs[].publish per video; the publish step is done when all are out', async () => {
+    const yt = await run(['publish', 'record', '--target', 'youtube', '--status', 'published', '--url', 'https://youtu.be/abc', '--at', '2026-10-11T12:00:00Z']);
+    expect(yt.json, yt.stdout).toMatchObject({ ok: true, variant: 'main', publish: { status: 'published', url: 'https://youtu.be/abc', at: '2026-10-11T12:00:00Z' }, pending: ['tiktok', 'youtube-shorts'] });
+    expect(read('timeline.json').outputs[0].publish.url).toBe('https://youtu.be/abc');
+    await run(['publish', 'record', '--target', 'tiktok', '--status', 'scheduled', '--url', 'https://tiktok.com/@me/video/1']);
+    expect(read('variants/tiktok/timeline.json').outputs[0].publish.status).toBe('scheduled');
+    let st = read('.solocut/status.json');
+    expect(st.find((x: { step: string }) => x.step === 'publish').state).toBe('needs-human');
+    const last = await run(['publish', 'record', '--target', 'youtube-shorts', '--status', 'published', '--url', 'https://youtube.com/shorts/x']);
+    expect(last.json.pending).toEqual([]);
+    st = read('.solocut/status.json');
+    expect(st.find((x: { step: string }) => x.step === 'publish').state).toBe('done');
+    expect((await run(['meta'])).json.outputs[2].publish.url).toBe('https://youtube.com/shorts/x');
+  });
+
+  it('publish record validates its input', async () => {
+    expect((await run(['publish', 'record', '--target', 'myspace', '--status', 'published', '--url', 'https://x'])).code).toBe(2);
+    expect((await run(['publish', 'record', '--target', 'youtube', '--status', 'published'])).code).toBe(2);
+    expect((await run(['publish', 'record', '--target', 'youtube', '--status', 'gone'])).code).toBe(2);
+    expect((await run(['publish', 'record', '--target', 'youtube', '--status', 'failed', '--url', 'not a url'])).code).toBe(2);
+    expect((await run(['publish', 'record', '--target', 'youtube', '--status', 'failed', '--at', 'yesterday'])).code).toBe(2);
+    expect((await run(['publish', 'record', '--target', 'youtube', '--status', 'failed'])).json.ok).toBe(true);
+    expect((await run(['publish', 'dance'])).code).toBe(2);
+  });
+});

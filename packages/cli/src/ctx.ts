@@ -55,13 +55,18 @@ export function info(ctx: Ctx, s: string): void {
 const lastBucket = new Map<string, number>();
 
 /**
- * Progress on stderr (silent with --json). On a TTY one line is redrawn; otherwise (logs, the desktop app) at most one
- * line per 10 %, so logs stay short. `fraction` in 0..1; call `progressDone` at the end.
+ * Progress on stderr. TTY: one redrawn line. Not a TTY (logs): at most one line per 10 %. With --json: NDJSON lines
+ * `{"progress":{"task","fraction","label",…extra}}` at most once per 1 %, for the app's progress bars.
  */
-export function progress(ctx: Ctx, key: string, fraction: number, label: string): void {
-  if (ctx.json) return;
+export function progress(ctx: Ctx, key: string, fraction: number, label: string, extra: Record<string, unknown> = {}): void {
   const f = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0));
   const pct = Math.floor(f * 100);
+  if (ctx.json) {
+    if ((lastBucket.get(key) ?? -1) >= pct) return;
+    lastBucket.set(key, pct);
+    ctx.io.stderr(JSON.stringify({ progress: { task: key, fraction: Math.round(f * 1000) / 1000, label, ...extra } }) + '\n');
+    return;
+  }
   if (ctx.io.isTTY) {
     const bar = `[${'#'.repeat(Math.round(f * 24)).padEnd(24, '.')}]`;
     ctx.io.stderr(`\r${label} ${bar} ${pct}%   `);

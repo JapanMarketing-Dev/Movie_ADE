@@ -322,7 +322,7 @@ export async function cmdLib(ctx: Ctx, args: string[]): Promise<void> {
       for (const tool of tools) {
         const mb = (x: number) => (x / 1e6).toFixed(1);
         const path = await ensureTool(tool, {
-          onProgress: ({ received, total }) => progress(ctx, `lib:${tool}`, total ? received / total : 0, total ? `${tool} ${mb(received)}/${mb(total)} MB` : `${tool} ${mb(received)} MB`),
+          onProgress: ({ received, total }) => progress(ctx, `lib:${tool}`, total ? received / total : 0, total ? `${tool} ${mb(received)}/${mb(total)} MB` : `${tool} ${mb(received)} MB`, { tool, received, ...(total ? { total } : {}) }),
         });
         progressDone(ctx, `lib:${tool}`);
         installed[tool] = path;
