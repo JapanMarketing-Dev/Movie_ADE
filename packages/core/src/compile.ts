@@ -203,6 +203,48 @@ function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: num
   return out;
 }
 
+/** Wipe size and position on a W×H canvas (shared with layout.ts). */
+export function wipeGeometry(w: { corner: 'tl' | 'tr' | 'bl' | 'br'; size?: number | undefined }, W: number, H: number): { d: number; x: number; y: number } {
+  const d = even(Math.min(W, H) * (w.size ?? 0.3));
+  const m = Math.round(Math.min(W, H) * 0.04);
+  return { d, x: w.corner.endsWith('l') ? m : W - d - m, y: w.corner.startsWith('t') ? m : H - d - m };
+}
+
+/** Signed distance (negative inside) to the wipe shape centred in a canvas of side `side`, for geq. */
+function shapeSdf(shape: 'circle' | 'rounded', side: number, d: number, dy = 0): string {
+  const c = side / 2;
+  if (shape === 'circle') return `(hypot(X-${num(c)},Y-${num(c + dy)})-${num(d / 2)})`;
+  const r = Math.round(d * 0.18);
+  const half = d / 2 - r;
+  return `(hypot(max(0,abs(X-${num(c)})-${num(half)}),max(0,abs(Y-${num(c + dy)})-${num(half)}))-${r})`;
+}
+
+/**
+ * Wipe decoration as a lavfi source: 'ring-gradient' = orange→red ring drawn over the camera; 'shadow' = soft shadow
+ * under it. Null for plain. `pad` = how far the decoration extends beyond the wipe on each side.
+ */
+function wipeDecoration(w: { shape: 'circle' | 'rounded'; style: string }, d: number, durSec: number, fps: { num: number; den: number }):
+  { source: string; pad: number; below: boolean } | null {
+  if (w.style === 'ring-gradient') {
+    const rw = Math.max(2, Math.round(d * 0.035));
+    const side = d + 2 * rw;
+    const outer = shapeSdf(w.shape, side, side);
+    const inner = shapeSdf(w.shape, side, d - 1);
+    const src = `color=c=black@0:s=${side}x${side}:r=${fps.num}/${fps.den}:d=${num(durSec)},format=rgba,`
+      + `geq=r='255':g='138-93*X/W':b='85*X/W':a='255*lte(${outer},0)*gt(${inner},0)'`;
+    return { source: src, pad: rw, below: false };
+  }
+  if (w.style === 'shadow') {
+    const s = Math.max(4, Math.round(d * 0.12));
+    const side = d + 2 * s;
+    const sdf = shapeSdf(w.shape, side, d, s * 0.3);
+    const src = `color=c=black@0:s=${side}x${side}:r=${fps.num}/${fps.den}:d=${num(durSec)},format=rgba,`
+      + `geq=r='0':g='0':b='0':a='150*clip(1-${sdf}/${s},0,1)'`;
+    return { source: src, pad: s, below: true };
+  }
+  return null;
+}
+
 function wipeAlpha(shape: 'circle' | 'rounded', d: number): string {
   if (shape === 'circle') return `if(lte(hypot(X-W/2,Y-H/2),W/2),255,0)`;
   const r = Math.round(d * 0.18);
@@ -234,15 +276,25 @@ function pieceVideo(g: Graph, ctx: Ctx, seg: Segment, o: number, n: number): str
       break;
     case 'screen-with-wipe': {
       const scr = sourceStream(g, ctx, v.screen, takeSec, n, W, H, 'fit');
-      const d = even(Math.min(W, H) * 0.3);
+      const { d, x, y } = wipeGeometry(v.wipe, W, H);
       const cam = sourceStream(g, ctx, v.camera, takeSec, n, d, d, 'cover');
       const shaped = g.label('w');
       g.filters.push(`[${cam}]format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='${wipeAlpha(v.wipe.shape, d)}'[${shaped}]`);
-      const m = Math.round(Math.min(W, H) * 0.04);
-      const x = v.wipe.corner.endsWith('l') ? `${m}` : `${W - d - m}`;
-      const y = v.wipe.corner.startsWith('t') ? `${m}` : `${H - d - m}`;
+      let under = scr;
+      const deco = wipeDecoration(v.wipe, d, n / F + 1, rc.fps);
+      if (deco && deco.below) {
+        const lbl = g.label('wd');
+        under = g.label('c');
+        g.filters.push(`${deco.source}[${lbl}]`, `[${scr}][${lbl}]overlay=x=${x - deco.pad}:y=${y - deco.pad}:format=auto:shortest=0:eof_action=pass[${under}]`);
+      }
       base = g.label('c');
-      g.filters.push(`[${scr}][${shaped}]overlay=x=${x}:y=${y}:format=auto[${base}]`);
+      g.filters.push(`[${under}][${shaped}]overlay=x=${x}:y=${y}:format=auto[${base}]`);
+      if (deco && !deco.below) {
+        const lbl = g.label('wd');
+        const out = g.label('c');
+        g.filters.push(`${deco.source}[${lbl}]`, `[${base}][${lbl}]overlay=x=${x - deco.pad}:y=${y - deco.pad}:format=auto:eof_action=pass[${out}]`);
+        base = out;
+      }
       break;
     }
     case 'split-v': {
@@ -434,6 +486,8 @@ function sceneLayers(g: Graph, ctx: Ctx, cur: string, seg: Segment, o: number, s
       if (m.crop && (src.kind === 'screen' || src.kind === 'camera')) {
         chain.push(`scale=${src.size.width}:${src.size.height}`, `crop=${even(m.crop.w)}:${even(m.crop.h)}:${Math.round(m.crop.x)}:${Math.round(m.crop.y)}`);
       }
+      const drift = src.kind === 'camera' && src.drift ? src.drift : 1;
+      if (drift !== 1) chain.push(`setpts=(PTS-STARTPTS)/${num(drift)}`);
       chain.push(`fps=${rc.fps.num}/${rc.fps.den}`);
       if (local < 0) chain.push(`tpad=start_mode=add:start_duration=${num(-local)}:color=black`);
       chain.push(delay > 0 ? `setpts=PTS-STARTPTS+${num(delay)}/TB` : 'setpts=PTS-STARTPTS');
@@ -444,7 +498,13 @@ function sceneLayers(g: Graph, ctx: Ctx, cur: string, seg: Segment, o: number, s
     chain.push('setsar=1', 'format=yuva420p');
     const alpha = shapeAlpha(m.shape, w, h);
     if (alpha) chain.push(`geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='${alpha}'`);
-    if (m.fadeInFrames > 0) chain.push(`fade=t=in:st=${num(a)}:d=${num(m.fadeInFrames / F)}:alpha=1`);
+    // Fade-in measured from the media's own start (absolute), so a chunk starting mid-fade or later does not restart it.
+    if (m.fadeInFrames > 0 && m.start + m.fadeInFrames > start) {
+      const rel = (m.start - start) / F;
+      if (rel >= 0) chain.push(`fade=t=in:st=${num(rel)}:d=${num(m.fadeInFrames / F)}:alpha=1`);
+      // started before this chunk: continue the ramp (fade's st cannot be negative)
+      else chain.push(`geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='alpha(X,Y)*clip((T-(${num(rel)}))/${num(m.fadeInFrames / F)},0,1)'`);
+    }
     const lbl = g.label('sm');
     const out = g.label('so');
     g.filters.push(`[${idx}:v]${chain.join(',')}[${lbl}]`);
@@ -455,7 +515,7 @@ function sceneLayers(g: Graph, ctx: Ctx, cur: string, seg: Segment, o: number, s
   return cur;
 }
 
-function chunkArgs(ctx: Ctx, seg: Segment, o: number, n: number): string[] {
+function chunkArgs(ctx: Ctx, seg: Segment, o: number, n: number, encode: string[] = encodeArgs(ctx, n)): string[] {
   const { t, rc, opts } = ctx;
   const F = fpsValue(rc.fps);
   const g = new Graph();
@@ -469,7 +529,7 @@ function chunkArgs(ctx: Ctx, seg: Segment, o: number, n: number): string[] {
   cur = assPass(g, ctx, cur, subs, start);
   const outLabel = 'vout';
   g.filters.push(`[${cur}]format=yuv420p[${outLabel}]`);
-  return [...g.inputs, '-filter_complex', g.filters.join(';'), '-map', `[${outLabel}]`, ...encodeArgs(ctx, n)];
+  return [...g.inputs, '-filter_complex', g.filters.join(';'), '-map', `[${outLabel}]`, ...encode];
 }
 
 /**
@@ -543,10 +603,12 @@ function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
       const b = sourceLocalSeconds(t, s, takeEnd);
       const drift = s.kind === 'camera' && s.drift ? s.drift : 1;
       const chain = [`atrim=start=${num(Math.max(0, a))}:end=${num(Math.max(0, b))}`, 'asetpts=PTS-STARTPTS'];
-      if (drift !== 1) chain.push(`atempo=${num(drift)}`);
       chain.push(fmt);
+      // Drift: the source clock runs `drift`× the take clock. Re-time by resampling (pitch-neutral at ppm scale,
+      // sample-accurate unlike atempo): reinterpret at 192 kHz·drift, then back to 48 kHz.
+      if (drift !== 1) chain.push('aresample=192000', `asetrate=${Math.round(192000 * drift)}`, fmt);
       if (a < 0) {
-        const ms = Math.round(-a * 1000);
+        const ms = Math.round((-a / drift) * 1000);
         chain.push(`adelay=${ms}|${ms}`);
       }
       const fadeD = Math.min(0.005, d / 4);
@@ -647,14 +709,15 @@ function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
 /** Placeholder for the measured loudnorm filter in 2-pass audio args. */
 export const LOUDNORM_TOKEN = '{LOUDNORM}';
 
-/** Compile a timeline into a RenderPlan (pure; no I/O). Throws on an empty timeline or missing references. */
-export function compile(t: Timeline, opts: CompileOptions): RenderPlan {
+interface Setup { ctx: Ctx; rc: Canvas; preset: ExportPreset; writes: RenderPlan['writes']; warnings: string[]; total: Frame }
+
+/** Shared by compile and compileFrame: render canvas, preset, generated ASS files. */
+function setup(t: Timeline, opts: CompileOptions): Setup {
   const total = durationFrames(t);
   if (t.segments.length === 0 || total <= 0) throw new Error('nothing to render: the timeline has no segments');
   const warnings: string[] = [];
   const preset = opts.quality === 'preview' ? PRESETS.preview : PRESETS[opts.target ?? 'youtube'];
   const rc = renderCanvas(t, opts, preset, warnings);
-  const F = fpsValue(rc.fps);
   const writes: RenderPlan['writes'] = [];
   const genDir = (opts.generatedDir ?? 'derived/cache/generated').replace(/\/+$/, '');
   const ctx: Ctx = { t, opts, rc, preset };
@@ -679,7 +742,35 @@ export function compile(t: Timeline, opts: CompileOptions): RenderPlan {
       warnings.push(`scene ${id}: unknown pattern "${s.pattern.id}"; it is not rendered`);
     }
   }
+  return { ctx, rc, preset, writes, warnings, total };
+}
 
+export interface FramePlan {
+  frame: Frame;
+  canvas: Canvas;
+  /** ffmpeg args (cwd = project dir) ending in `{out}` (an image; format from its extension). */
+  args: string[];
+  writes: RenderPlan['writes'];
+  warnings: string[];
+}
+
+/**
+ * One timeline frame through the same graph as `compile` (default: final quality), as a still image.
+ * Audio is not involved. Throws RangeError outside [0, duration).
+ */
+export function compileFrame(t: Timeline, frame: Frame, opts: Omit<CompileOptions, 'quality' | 'maxChunkFrames'> & { quality?: 'preview' | 'final' }): FramePlan {
+  const o: CompileOptions = { ...opts, quality: opts.quality ?? 'final' };
+  const { ctx, rc, writes, warnings, total } = setup(t, o);
+  if (!Number.isInteger(frame) || frame < 0 || frame >= total) throw new RangeError(`frame ${frame} is outside the timeline [0, ${total})`);
+  const seg = t.segments.find((s) => frame >= s.range.start && frame < s.range.end)!;
+  const args = chunkArgs(ctx, seg, frame - seg.range.start, 1, ['-frames:v', '1', '-update', '1', '{out}']);
+  return { frame, canvas: rc, args, writes, warnings };
+}
+
+/** Compile a timeline into a RenderPlan (pure; no I/O). Throws on an empty timeline or missing references. */
+export function compile(t: Timeline, opts: CompileOptions): RenderPlan {
+  const { ctx, rc, preset, writes, warnings, total } = setup(t, opts);
+  const F = fpsValue(rc.fps);
   const maxChunk = Math.max(1, Math.floor(opts.maxChunkFrames ?? Math.round(F * 30)));
   const chunks: RenderPlan['chunks'] = [];
   for (const seg of t.segments) {

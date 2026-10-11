@@ -15,7 +15,7 @@ import {
   stripJsonComments,
 } from '@solocut/settings';
 import { listTemplates } from '@solocut/templates';
-import { ensureTool, solocutHome, toolStatus } from '@solocut/toolchain';
+import { solocutHome, toolStatus } from '@solocut/toolchain';
 import type {
   AgentStatus,
   ArchiveDetail,
@@ -217,7 +217,6 @@ export function agentCommand(id: string): string | null {
 
 // ---------- toolchain ----------
 
-import { TOOL_NAMES, type ToolName } from '@solocut/toolchain';
 
 export async function tools(): Promise<ToolState[]> {
   const st = (await toolStatus()) as Record<string, { installed: boolean; path?: string; version?: string }>;
@@ -227,11 +226,6 @@ export async function tools(): Promise<ToolState[]> {
     if (v.version) t.version = v.version;
     return t;
   });
-}
-
-export async function installTool(name: string, onProgress: (received: number, total?: number) => void): Promise<string> {
-  if (!(TOOL_NAMES as readonly string[]).includes(name)) throw new Error(`unknown tool: ${name}`);
-  return ensureTool(name as ToolName, { onProgress: (p) => onProgress(p.received, p.total) });
 }
 
 // ---------- archive ----------

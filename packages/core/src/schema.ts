@@ -115,7 +115,10 @@ export const ChapterSchema = z.strictObject({
 export const WipeSchema = z.strictObject({
   shape: z.enum(['circle', 'rounded']),
   corner: CornerSchema,
+  /** 'ring-gradient' (orange→red ring), 'shadow' (soft drop shadow), 'plain'; other values render as plain. */
   style: z.string(),
+  /** Diameter / side as a fraction of the canvas short side (default 0.3). */
+  size: z.number().min(0.15).max(0.5).optional(),
 });
 
 export const VideoChoiceSchema = z.discriminatedUnion('layout', [
@@ -187,6 +190,8 @@ export const SceneSchema = z.strictObject({
   id: idSchema('scn'),
   pattern: z.strictObject({ id: z.string(), version: z.string() }),
   range: RangeSchema,
+  /** Optional: keep the scene at `offset` frames into a segment; its range moves when segments move or are trimmed. */
+  anchor: z.strictObject({ segment: idSchema('seg'), offset: nonNegInt() }).optional(),
   slots: z.record(z.string(), SlotValueSchema),
   animation: z.strictObject({ in: z.string(), out: z.string() }).optional(),
   decided: DecidedSchema,

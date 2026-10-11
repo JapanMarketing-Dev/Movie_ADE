@@ -8,6 +8,15 @@ import type {
   ArchiveListItem,
   CaptureSource,
   CliResult,
+  FeedbackImport,
+  FeedbackItem,
+  FeedbackSession,
+  PublishDraft,
+  SecretInfo,
+  ThumbCandidate,
+  ThumbImage,
+  YouTubeForm,
+  YouTubeProgress,
   MediaPermissionState,
   ProjectInfo,
   ProjectSnapshot,
@@ -81,6 +90,30 @@ export interface InvokeMap {
   'update:state': { args: []; result: UpdateState };
   'update:check': { args: []; result: UpdateState };
   'update:restart': { args: []; result: void };
+
+  'feedback:begin': { args: [dir: string]; result: { id: string; dir: string } };
+  'feedback:finish': { args: [dir: string, id: string, session: FeedbackSession]; result: CliResult<FeedbackImport> };
+  'feedback:update': { args: [dir: string, id: string, items: FeedbackItem[]]; result: CliResult<FeedbackImport> };
+
+  'thumbs:candidates': { args: [dir: string]; result: CliResult<ThumbCandidate[]> };
+  'thumbs:existing': { args: [dir: string]; result: ThumbImage[] };
+  'thumbs:generate': { args: [dir: string, o: { frame: number; n: number; provider?: string; title?: string }]; result: CliResult<ThumbImage[]> };
+  'thumbs:favorite': { args: [dir: string, path: string, on: boolean]; result: string[] };
+  'thumbs:providers': { args: []; result: string[] };
+
+  'publish:draft': { args: [dir: string]; result: PublishDraft };
+  'publish:youtubeStatus': { args: []; result: { clientSet: boolean; connected: boolean } };
+  'publish:youtubeConnect': { args: []; result: { ok: boolean; error?: string } };
+  'publish:youtubeDisconnect': { args: []; result: void };
+  'publish:youtubeUpload': {
+    args: [dir: string, form: YouTubeForm];
+    result: { ok: boolean; url?: string; videoId?: string; warnings: string[]; error?: string };
+  };
+  'publish:openIntent': { args: [dir: string, platform: 'x' | 'threads' | 'facebook', text: string, url: string]; result: void };
+  'publish:manual': { args: [dir: string, target: 'tiktok' | 'instagram', file: string]; result: void };
+
+  'secrets:status': { args: []; result: { persistent: boolean; items: Record<string, SecretInfo> } };
+  'secrets:set': { args: [name: string, value: string | null]; result: { persisted: boolean } };
 }
 
 /** renderer -> main, fire and forget (ipcRenderer.send / ipcMain.on) */
@@ -104,6 +137,7 @@ export interface EventMap {
   'update:state': [state: UpdateState];
   'app:navigate': [screen: string];
   'project:openRequest': [dir: string];
+  'publish:progress': [p: YouTubeProgress];
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -127,13 +161,18 @@ const invoke: Record<InvokeChannel, true> = {
   'record:append': true, 'record:closeTrack': true, 'record:writeMeta': true, 'record:end': true,
   'record:teleprompter': true,
   'update:state': true, 'update:check': true, 'update:restart': true,
+  'feedback:begin': true, 'feedback:finish': true, 'feedback:update': true,
+  'thumbs:candidates': true, 'thumbs:existing': true, 'thumbs:generate': true, 'thumbs:favorite': true, 'thumbs:providers': true,
+  'publish:draft': true, 'publish:youtubeStatus': true, 'publish:youtubeConnect': true, 'publish:youtubeDisconnect': true,
+  'publish:youtubeUpload': true, 'publish:openIntent': true, 'publish:manual': true,
+  'secrets:status': true, 'secrets:set': true,
 };
 const send: Record<SendChannel, true> = {
   'pty:write': true, 'pty:resize': true, 'pty:paste': true, 'project:watch': true, 'renderer:ready': true,
 };
 const events: Record<EventChannel, true> = {
   'pty:data': true, 'pty:exit': true, 'pty:activity': true, 'project:changed': true, 'settings:changed': true,
-  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true,
+  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true,
 };
 
 export const INVOKE_CHANNELS = Object.freeze(Object.keys(invoke) as InvokeChannel[]);

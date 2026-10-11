@@ -14,6 +14,12 @@ import { PtyManager } from './services/pty';
 import * as recorder from './services/recorder';
 import { initSentry } from './services/sentry';
 import { Updater } from './update/updater';
+import * as feedback from './services/feedback';
+import * as thumbs from './services/thumbs';
+import * as secrets from './services/secrets';
+import * as publish from './publish/publish';
+import * as youtube from './publish/youtube';
+import { intentUrl, libNameFor, parseProgress, UPLOAD_PAGES } from '../shared/publish';
 
 const log = (msg: string) => console.log(`[solocut] ${msg}`);
 
@@ -120,7 +126,7 @@ async function captureScreens(outDir: string): Promise<void> {
   if (!wc) return;
   mkdirSync(outDir, { recursive: true });
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const screens = (process.env.SOLOCUT_CAPTURE_SCREENS ?? 'home,workspace,record,archive,library,settings').split(',');
+  const screens = (process.env.SOLOCUT_CAPTURE_SCREENS ?? 'home,workspace,record,thumbnails,publish,archive,library,settings').split(',');
   await wait(2500);
   for (const s of screens) {
     emit(wc, 'app:navigate', s);
@@ -129,6 +135,10 @@ async function captureScreens(outDir: string): Promise<void> {
       await wc.executeJavaScript(
         `window.dispatchEvent(new CustomEvent('solocut:run-in-terminal', { detail: ${JSON.stringify(process.env.SOLOCUT_CAPTURE_CMD)} }))`,
       );
+    }
+    if (s === 'workspace' && process.env.SOLOCUT_CAPTURE_JS) {
+      const out = await wc.executeJavaScript(process.env.SOLOCUT_CAPTURE_JS).catch((e: unknown) => `error: ${String(e)}`);
+      log(`capture js: ${JSON.stringify(out)}`);
     }
     await wait(s === 'workspace' ? 4000 : 1800);
     const img = await wc.capturePage();
@@ -261,13 +271,17 @@ function registerIpc(): void {
   handle('prompts:render', (_e, id, dir, vars) => platform.renderPromptText(id, dir, project.promptVars(dir, vars)));
 
   handle('tools:status', () => safeAsync(() => platform.tools(), []));
+  // `solocut lib install ffmpeg|whisper|whisper-small` keeps the CLI the single installer; progress from its output
   handle('tools:install', async (_e, name) => {
-    try {
-      const path = await platform.installTool(name, (rec, total) => emit(mainWc(), 'tools:progress', name, rec, total));
-      return { ok: true, path };
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
+    const lib = libNameFor(name) ?? name;
+    const r = await runCli(['lib', 'install', lib], {
+      timeoutMs: 60 * 60_000,
+      onLine: (line) => {
+        const f = parseProgress(line);
+        if (f !== null) emit(mainWc(), 'tools:progress', name, f, 1);
+      },
+    });
+    return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'install failed' };
   });
 
   handle('archive:list', (_e, q) => {
@@ -294,6 +308,7 @@ function registerIpc(): void {
   });
 
   handle('record:sources', async (): Promise<CaptureSource[]> => {
+    if (process.env.SOLOCUT_CAPTURE) return []; // screenshots must not show the real desktop
     const list = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: false });
     return list
       .filter((s) => !s.name.startsWith('Solocut'))
@@ -327,6 +342,64 @@ function registerIpc(): void {
   handle('update:state', () => updater.getState());
   handle('update:check', () => updater.check());
   handle('update:restart', () => updater.restartToUpdate());
+
+  handle('feedback:begin', (_e, dir) => {
+    if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
+    return feedback.beginFeedback(dir);
+  });
+  handle('feedback:finish', (_e, dir, id, session) => feedback.finishFeedback(dir, id, session));
+  handle('feedback:update', (_e, dir, id, items) => feedback.updateFeedback(dir, id, items));
+
+  handle('thumbs:candidates', (_e, dir) => thumbs.candidates(dir));
+  handle('thumbs:existing', (_e, dir) => thumbs.existing(dir));
+  handle('thumbs:generate', (_e, dir, o) => thumbs.generate(dir, o));
+  handle('thumbs:favorite', (_e, dir, path, on) => thumbs.setFavorite(dir, path, on));
+  handle('thumbs:providers', () => {
+    const order = platform.getPath(platform.settingsObject(), 'imageGen.order');
+    const list = Array.isArray(order) ? order.filter((x): x is string => typeof x === 'string') : [];
+    return list.length > 0 ? list : ['codex', 'openai', 'gemini'];
+  });
+
+  handle('publish:draft', (_e, dir) => publish.loadDraft(dir));
+  handle('publish:youtubeStatus', () => ({ clientSet: Boolean(secrets.getSecret('youtube.clientId')), connected: youtube.youtubeConnected() }));
+  handle('publish:youtubeConnect', async () => {
+    try {
+      await youtube.connectYouTube();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  handle('publish:youtubeDisconnect', () => youtube.disconnectYouTube());
+  handle('publish:youtubeUpload', async (_e, dir, form) => {
+    const base = { at: new Date().toISOString(), project: dir, target: 'youtube', method: 'api-byo' as const, privacy: form.publishAt ? 'private' : form.privacy,
+      disclosures: { madeForKids: form.madeForKids === true, containsSyntheticMedia: form.containsSyntheticMedia } };
+    try {
+      const r = await youtube.uploadToYouTube(form, (p) => emit(mainWc(), 'publish:progress', p));
+      publish.appendHistory({ ...base, status: form.publishAt ? 'scheduled' : 'published', url: r.url, remoteId: r.videoId });
+      return { ok: true, url: r.url, videoId: r.videoId, warnings: r.warnings };
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      emit(mainWc(), 'publish:progress', { phase: 'error', message: error });
+      publish.appendHistory({ ...base, status: 'failed', error });
+      return { ok: false, warnings: [], error };
+    }
+  });
+  handle('publish:openIntent', (_e, dir, p, text, url) => {
+    void shell.openExternal(intentUrl(p, text, url));
+    publish.appendHistory({ at: new Date().toISOString(), project: dir, target: p, method: 'intent', status: 'opened', ...(url ? { url } : {}) });
+  });
+  handle('publish:manual', (_e, dir, target, file) => {
+    if (file) shell.showItemInFolder(file);
+    void shell.openExternal(UPLOAD_PAGES[target]);
+    publish.appendHistory({ at: new Date().toISOString(), project: dir, target, method: 'manual', status: 'opened' });
+  });
+
+  handle('secrets:status', () => ({ persistent: secrets.persistent(), items: secrets.secretStatus() }));
+  handle('secrets:set', (_e, name, value) => {
+    if (!secrets.isSecretName(name) || name === 'youtube.refreshToken') throw new Error(`unknown secret: ${name}`);
+    return secrets.setSecret(name, value);
+  });
 
   on('project:watch', (_e, dir) => {
     if (dir) allowMediaRoot(dir);

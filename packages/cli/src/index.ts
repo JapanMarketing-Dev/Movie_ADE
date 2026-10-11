@@ -1,4 +1,6 @@
+import { createInterface } from 'node:readline';
 import { loadSettings } from '@solocut/settings';
+import { createMcpServer } from './mcp.js';
 import { CliError, CLI_VERSION, type Ctx, type IO, type Lang } from './ctx.js';
 import {
   cmdConfig, cmdDoctor, cmdInit, cmdLib, cmdNext, cmdPrompts, cmdStatus, cmdStep, cmdTemplates, cmdValidate, cmdVersion,
@@ -8,11 +10,30 @@ import {
   cmdAnalyze, cmdCaptions, cmdCheck, cmdFrame, cmdImport, cmdIngest, cmdPropose, cmdRender, cmdSync, cmdTakes, cmdTranscribe,
 } from './commands/media.js';
 import { cmdPast } from './commands/past.js';
+import { cmdMeta } from './commands/meta.js';
+import { cmdThumb } from './commands/thumb.js';
+import { cmdFeedback } from './commands/feedback.js';
 
 export { CliError, CLI_VERSION } from './ctx.js';
 export type { IO } from './ctx.js';
 
 type Handler = (ctx: Ctx, args: string[]) => Promise<void>;
+
+/** `solocut mcp`: serve the CLI as MCP tools over stdio until stdin closes. */
+async function cmdMcp(ctx: Ctx, args: string[]): Promise<void> {
+  if (args.length) throw new CliError('usage', 'usage: solocut mcp [--project <dir>]');
+  if (!ctx.io.stdinLines) throw new CliError('usage', 'stdin is not available');
+  const server = createMcpServer(async (argv) => {
+    let stdout = '';
+    let stderr = '';
+    const code = await main(argv, { cwd: ctx.io.cwd, env: ctx.io.env, stdout: (x) => (stdout += x), stderr: (x) => (stderr += x) });
+    return { code, stdout, stderr };
+  }, ctx.projectFlag ? { defaultProject: ctx.projectFlag } : {});
+  for await (const line of ctx.io.stdinLines()) {
+    const out = await server.handleLine(line);
+    if (out) ctx.io.stdout(out + '\n');
+  }
+}
 
 const COMMANDS: Record<string, Handler> = {
   init: cmdInit,
@@ -37,12 +58,16 @@ const COMMANDS: Record<string, Handler> = {
   check: cmdCheck,
   tl: cmdTl,
   past: cmdPast,
+  meta: cmdMeta,
+  thumb: cmdThumb,
+  feedback: cmdFeedback,
   config: cmdConfig,
   prompts: cmdPrompts,
   templates: cmdTemplates,
   lib: cmdLib,
   doctor: cmdDoctor,
   version: cmdVersion,
+  mcp: cmdMcp,
 };
 
 const HELP: Record<Lang, string> = {
@@ -66,8 +91,12 @@ const HELP: Record<Lang, string> = {
   render --preview | --final [--target youtube]
   frame --at <frame|timecode>    1フレームの静止画
   check                          機械的チェック（checks/<run>/report.md）
+  thumb candidates | thumb gen --frame <tc> --title "見出し"   サムネイル
+  meta set --title … --description … --tags a,b | meta show   投稿文（renders/<target>/metadata.md）
+  feedback import <dir> | list | show <id> | done <id>        動画フィードバック
 そのほか
-  past list|search|show|timeline|compare|register   過去の動画
+  past list|search|show|timeline|compare|reuse|register   過去の動画
+  mcp                            MCP サーバー（stdio）
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
 共通: --json（機械向けの出力） --project <dir>（プロジェクトの場所） --by human|agent --agent <名前>`,
@@ -91,8 +120,12 @@ Render and check
   render --preview | --final [--target youtube]
   frame --at <frame|timecode>
   check                          machine checks (checks/<run>/report.md)
+  thumb candidates | thumb gen --frame <tc> --title "…"
+  meta set --title … --description … --tags a,b | meta show
+  feedback import <dir> | list | show <id> | done <id>
 More
-  past list|search|show|timeline|compare|register
+  past list|search|show|timeline|compare|reuse|register
+  mcp                            MCP server over stdio
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
 Global: --json  --project <dir>  --by human|agent  --agent <name>`,
@@ -136,6 +169,8 @@ function defaultIO(): IO {
     stdout: (s) => process.stdout.write(s),
     stderr: (s) => process.stderr.write(s),
     env: process.env,
+    isTTY: !!process.stderr.isTTY,
+    stdinLines: () => createInterface({ input: process.stdin, crlfDelay: Infinity }),
     readStdin: async () => {
       const chunks: Buffer[] = [];
       for await (const c of process.stdin) chunks.push(c as Buffer);

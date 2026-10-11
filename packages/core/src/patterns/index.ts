@@ -3,5 +3,5 @@ export { DEFAULT_THEME, PATTERNS, resolvePattern } from './defs.js';
 export type { MediaPlacement, SceneRender, ScenesAss } from './render.js';
 export { PATTERN_RENDERERS, renderScene, renderScenes, validateSceneSlots } from './render.js';
 export {
-  circlePath, fitText, mixColor, polygonPath, rectPath, roundedRectPath, textWidthEm, waveBandPath, wrapText,
+  circlePath, fitText, jaPhrases, mixColor, polygonPath, rectPath, roundedRectPath, textWidthEm, waveBandPath, wrapText,
 } from './draw.js';

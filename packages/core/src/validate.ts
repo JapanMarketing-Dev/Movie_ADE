@@ -152,6 +152,13 @@ export function semanticIssues(t: Timeline, o: { patterns?: Record<string, Patte
   // Scenes.
   t.scenes.forEach((s, i) => {
     inTimeline(`scenes[${i}].range`, s.range, `scene "${s.id}"`);
+    if (s.anchor) {
+      const seg = t.segments.find((x) => x.id === s.anchor!.segment);
+      if (!seg) warn(`scenes[${i}].anchor.segment`, `anchor segment "${s.anchor.segment}" does not exist; the scene keeps its last range`);
+      else if (s.range.start !== seg.range.start + s.anchor.offset) {
+        warn(`scenes[${i}].range.start`, `range does not follow its anchor (expected start ${seg.range.start + s.anchor.offset})`);
+      }
+    }
     issues.push(...validateSceneSlots(s, t, `scenes[${i}]`, o.patterns).filter((x) => !/unknown source/.test(x.message)));
     for (const [k, v] of Object.entries(s.slots)) {
       if (v.kind === 'image') assetRef(`scenes[${i}].slots.${k}.asset`, v.asset);

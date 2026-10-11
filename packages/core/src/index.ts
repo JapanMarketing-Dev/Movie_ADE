@@ -9,3 +9,4 @@ export * from './hash.js';
 export * from './ass.js';
 export * from './compile.js';
 export * from './patterns/index.js';
+export * from './layout.js';

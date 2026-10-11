@@ -196,51 +196,48 @@ type Op = Record<string, unknown> & { op: string };
 /**
  * Ops (CONTRACTS.md `Op`) that resolve one needs-review item as a human decision.
  * accept = keep the element and clear needsReview; reject = remove it. Also drops the matching review.openItems.
- * Returns [] when the item cannot be found.
+ * With `setDecided` (default) accept is a single `setDecided` op; `legacy` re-creates the element instead, for CLIs
+ * that do not know `setDecided` yet. Returns [] when the item cannot be found.
  */
-export function reviewOps(t: unknown, item: ReviewItem, decision: ReviewDecision): Op[] {
+export function reviewOps(t: unknown, item: ReviewItem, decision: ReviewDecision, mode: 'setDecided' | 'legacy' = 'setDecided'): Op[] {
   const tl = isObj(t) ? t : {};
   const reason = decision === 'accept' ? 'accepted in review' : 'rejected in review';
   const decided = { by: 'human', reason, needsReview: false };
   const ops: Op[] = [];
   const find = (arr: unknown) =>
     (Array.isArray(arr) ? arr : []).find((x): x is Record<string, unknown> => isObj(x) && x.id === item.id);
+  const audio = isObj(tl.audio) ? tl.audio : {};
+  const el =
+    item.lane === 'segments' ? find(tl.segments)
+    : item.lane === 'captions' ? find(tl.captions)
+    : item.lane === 'scenes' ? find(tl.scenes)
+    : item.lane === 'sfx' ? find(audio.sfx)
+    : undefined;
+  if (item.lane !== 'open' && item.lane !== 'markers' && !el) return [];
+  const merged = el ? { ...(decidedOf(el) ?? {}), ...decided } : decided;
 
-  switch (item.lane) {
-    case 'segments': {
-      if (!find(tl.segments)) return [];
-      ops.push(decision === 'accept' ? { op: 'trimSegment', id: item.id, decided } : { op: 'removeSegment', id: item.id, decided });
-      break;
+  if (el && decision === 'accept' && mode === 'setDecided') {
+    ops.push({ op: 'setDecided', target: item.id, decided: merged });
+  } else if (el) {
+    switch (item.lane) {
+      case 'segments':
+        ops.push(decision === 'accept' ? { op: 'trimSegment', id: item.id, decided } : { op: 'removeSegment', id: item.id, decided });
+        break;
+      case 'captions':
+        if (decision === 'accept') ops.push({ op: 'updateCaption', id: item.id, patch: { decided: merged } });
+        else ops.push({ op: 'setCaptions', captions: (tl.captions as unknown[]).filter((x) => !(isObj(x) && x.id === item.id)) });
+        break;
+      case 'scenes':
+        ops.push({ op: 'removeScene', id: item.id });
+        if (decision === 'accept') ops.push({ op: 'addScene', scene: { ...el, decided: merged } });
+        break;
+      case 'sfx':
+        ops.push({ op: 'removeSfx', id: item.id });
+        if (decision === 'accept') ops.push({ op: 'addSfx', sfx: { ...el, decided: merged } });
+        break;
+      default:
+        break;
     }
-    case 'captions': {
-      const c = find(tl.captions);
-      if (!c) return [];
-      if (decision === 'accept') {
-        ops.push({ op: 'updateCaption', id: item.id, patch: { decided: { ...(decidedOf(c) ?? {}), ...decided } } });
-      } else {
-        const rest = (tl.captions as unknown[]).filter((x) => !(isObj(x) && x.id === item.id));
-        ops.push({ op: 'setCaptions', captions: rest });
-      }
-      break;
-    }
-    case 'scenes': {
-      const s = find(tl.scenes);
-      if (!s) return [];
-      ops.push({ op: 'removeScene', id: item.id });
-      if (decision === 'accept') ops.push({ op: 'addScene', scene: { ...s, decided: { ...(decidedOf(s) ?? {}), ...decided } } });
-      break;
-    }
-    case 'sfx': {
-      const audio = isObj(tl.audio) ? tl.audio : {};
-      const s = find(audio.sfx);
-      if (!s) return [];
-      ops.push({ op: 'removeSfx', id: item.id });
-      if (decision === 'accept') ops.push({ op: 'addSfx', sfx: { ...s, decided: { ...(decidedOf(s) ?? {}), ...decided } } });
-      break;
-    }
-    case 'open':
-    case 'markers':
-      break;
   }
 
   const rv = isObj(tl.review) ? tl.review : {};
@@ -248,6 +245,12 @@ export function reviewOps(t: unknown, item: ReviewItem, decision: ReviewDecision
   const remaining = open.filter((o) => !(isObj(o) && o.ref === item.id));
   if (remaining.length !== open.length) ops.push({ op: 'setReview', patch: { openItems: remaining } });
   return ops;
+}
+
+/** True when a CLI error means the op is unknown to this CLI (then the app retries with legacy ops). */
+export function isUnknownOpError(err: unknown): boolean {
+  const text = typeof err === 'string' ? err : JSON.stringify(err ?? '');
+  return /setDecided/.test(text) && /(unknown|invalid|unsupported|not supported|unrecognized|invalid_union|Invalid input)/i.test(text);
 }
 
 /** Timecode for display, from frames and fps. HH:MM:SS:FF, dropping hours when zero. */

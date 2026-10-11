@@ -2,8 +2,8 @@ import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Decided, Segment, Timeline } from '@solocut/core';
-import { applyOp, applyOps, compile, emptyTimeline } from '@solocut/core';
-import { executeRenderPlan, measureLoudness, MediaError, probe } from '../src/index.js';
+import { applyOp, applyOps, compile, compileFrame, emptyTimeline } from '@solocut/core';
+import { executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
 import { countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
 
 const D: Decided = { by: 'agent', reason: 'test' };
@@ -140,6 +140,22 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     expect(l.truePeak).toBeLessThan(-0.3);
     const pr = await probe(r.output);
     expect(pr.streams.find((s) => s.type === 'video')!.profile).toBe('High');
+  });
+
+  it('renderFrame produces the exact timeline frame as an image', async () => {
+    // timeline frame 15 = seg_a source frame 45
+    const r = await renderFrame(compileFrame(base, 15, { projectDir: dir }), { projectDir: dir, output: 'frames/f15.png' });
+    expect(r.output).toBe(p('frames/f15.png'));
+    expect((await probe(r.output)).streams[0]).toMatchObject({ width: 320, height: 240 });
+    const lum = frameLuma(r.output, 0);
+    const d = (k: number) => Math.abs(frameLuma(p('cam.mp4'), k) - lum);
+    expect(d(45)).toBeLessThan(Math.min(d(44), d(46)));
+    // frame 30 is the first frame of the screen segment: not the flat camera gray
+    const s = await renderFrame(compileFrame(base, 30, { projectDir: dir, quality: 'preview' }), { projectDir: dir, output: 'frames/f30.jpg' });
+    expect((await probe(s.output)).streams[0]!.codec).toBe('mjpeg');
+    await expect(renderFrame(compileFrame(applyOp(base, { op: 'updateSource', id: 'cam', patch: { path: 'gone.mp4' } }).timeline, 0, { projectDir: dir }), { projectDir: dir, output: 'frames/x.png' }))
+      .rejects.toThrow(/input not found: gone\.mp4/);
+    expect(existsSync(p('frames/x.png'))).toBe(false);
   });
 
   it('fails clearly on a missing input', async () => {

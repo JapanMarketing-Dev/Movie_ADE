@@ -7,6 +7,8 @@ export interface CaptionStyle {
   /** Font size as a fraction of the canvas short side. */
   size: number;
   bold: boolean;
+  /** Font weight (100–900) applied with \b<weight>; overrides `bold` when set (Noto Sans JP ships 400/700/900). */
+  weight?: number;
   /** Text color (#RRGGBB or #RRGGBBAA). With karaoke: the not-yet-spoken color. */
   color: string;
   /** Karaoke: color of spoken words. */
@@ -36,6 +38,7 @@ export const CAPTION_STYLES: Record<string, CaptionStyle> = {
     font: 'Noto Sans JP',
     size: 0.075,
     bold: true,
+    weight: 900,
     color: '#FFFFFF',
     highlight: '#FFE600',
     outline: '#000000',
@@ -53,6 +56,7 @@ export const CAPTION_STYLES: Record<string, CaptionStyle> = {
     font: 'Noto Sans JP',
     size: 0.05,
     bold: true,
+    weight: 700,
     color: '#FFFFFF',
     highlight: '#FFFFFF',
     outline: '#000000',

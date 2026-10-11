@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, FolderOpen, Play, RefreshCw, Sparkles, Video, X } from 'lucide-react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Check, FolderOpen, Pause, Play, RefreshCw, Sparkles, Video, X } from 'lucide-react';
 import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, TimelineOverview } from '@shared/types';
 import { formatFrames, progressOf, stepMark } from '@shared/project';
-import { useT, type TKey } from '../i18n';
+import { LangContext, useT, type TKey } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { terminals } from '../lib/terminals';
 import { Terminals } from '../components/Terminals';
+import { FeedbackLayer } from '../components/Feedback';
 
 const RIGHT_W_KEY = 'solocut.ws.rightWidth';
 
@@ -21,6 +22,8 @@ export function Workspace({
   onRecord: () => void;
 }) {
   const t = useT();
+  const lang = useContext(LangContext);
+  const [fbActive, setFbActive] = useState(false);
   const [snap, setSnap] = useState<ProjectSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -159,7 +162,21 @@ export function Workspace({
         <div className="ws-left">
           <div className="player">
             {snap?.preview ? (
-              <video ref={videoRef} key={snap.preview.url} src={snap.preview.url} controls preload="metadata" />
+              <>
+                <video ref={videoRef} key={snap.preview.url} src={snap.preview.url} controls={!fbActive} preload="metadata" />
+                <FeedbackLayer
+                  dir={project.dir}
+                  videoRef={videoRef}
+                  previewPath={snap.preview.path}
+                  fpsNum={snap.overview?.fpsNum ?? 30}
+                  fpsDen={snap.overview?.fpsDen ?? 1}
+                  lang={lang}
+                  toast={toast}
+                  active={fbActive}
+                  onActiveChange={setFbActive}
+                />
+                {fbActive && <MiniTransport videoRef={videoRef} />}
+              </>
             ) : (
               <div className="placeholder">
                 <span>{t('ws.noPreview')}</span>
@@ -308,6 +325,41 @@ function Lanes({ ov, selected, onSelect }: { ov: TimelineOverview; selected: str
         <span>00:00:00</span>
         <span>{formatFrames(total, ov.fpsNum, ov.fpsDen)}</span>
       </div>
+    </div>
+  );
+}
+
+/** Play/pause and a seek bar while drawing (native controls would steal pointer events from the canvas). */
+function MiniTransport({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement | null> }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const f = () => force((n) => n + 1);
+    v.addEventListener('timeupdate', f);
+    v.addEventListener('play', f);
+    v.addEventListener('pause', f);
+    return () => {
+      v.removeEventListener('timeupdate', f);
+      v.removeEventListener('play', f);
+      v.removeEventListener('pause', f);
+    };
+  }, [videoRef]);
+  const v = videoRef.current;
+  if (!v) return null;
+  return (
+    <div className="fb-transport">
+      <button className="btn small icon" onClick={() => (v.paused ? void v.play() : v.pause())}>
+        {v.paused ? <Play size={13} /> : <Pause size={13} />}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={Number.isFinite(v.duration) ? v.duration : 0}
+        step={0.01}
+        value={v.currentTime}
+        onChange={(e) => (v.currentTime = Number(e.target.value))}
+      />
     </div>
   );
 }

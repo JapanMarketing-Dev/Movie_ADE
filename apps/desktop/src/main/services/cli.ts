@@ -7,6 +7,7 @@ import { parseCliJson } from '../../shared/project';
 import { cliBinDir, cliScript, templatesDir } from '../paths';
 import { prependPath } from '../../shared/terminal';
 import { delimiter } from 'node:path';
+import { secretEnv } from './secrets';
 
 export function cliAvailable(): boolean {
   return existsSync(cliScript());
@@ -20,10 +21,14 @@ export function solocutEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proces
     SOLOCUT_ELECTRON: process.execPath,
     SOLOCUT_TEMPLATES_DIR: base.SOLOCUT_TEMPLATES_DIR ?? templatesDir(),
     SOLOCUT_APP: '1',
+    ...secretEnv(),
   };
 }
 
-export function runCli<T = unknown>(args: string[], o: { cwd?: string; timeoutMs?: number; json?: boolean } = {}): Promise<CliResult<T>> {
+export function runCli<T = unknown>(
+  args: string[],
+  o: { cwd?: string; timeoutMs?: number; json?: boolean; onLine?: (line: string, stream: 'stdout' | 'stderr') => void } = {},
+): Promise<CliResult<T>> {
   const script = cliScript();
   if (!existsSync(script)) {
     return Promise.resolve({ ok: false, code: null, stdout: '', stderr: '', error: `solocut CLI not found at ${script}` });
@@ -38,8 +43,20 @@ export function runCli<T = unknown>(args: string[], o: { cwd?: string; timeoutMs
     });
     let stdout = '';
     let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d));
-    child.stderr.setEncoding('utf8').on('data', (d: string) => (stderr += d));
+    const lines = (stream: 'stdout' | 'stderr') => {
+      let rest = '';
+      return (d: string) => {
+        if (stream === 'stdout') stdout += d;
+        else stderr += d;
+        if (!o.onLine) return;
+        rest += d;
+        const parts = rest.split(/\r?\n|\r/);
+        rest = parts.pop() ?? '';
+        for (const l of parts) if (l.trim()) o.onLine(l, stream);
+      };
+    };
+    child.stdout.setEncoding('utf8').on('data', lines('stdout'));
+    child.stderr.setEncoding('utf8').on('data', lines('stderr'));
     const timer = setTimeout(() => child.kill(), o.timeoutMs ?? 120_000);
     child.on('error', (e) => {
       clearTimeout(timer);

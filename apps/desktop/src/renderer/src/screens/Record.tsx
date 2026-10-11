@@ -63,7 +63,19 @@ function useLevel(stream: MediaStream | null): { level: number; clip: boolean } 
   return v;
 }
 
-export function Record({ project, info, visible, toast }: { project: ProjectInfo | null; info: AppInfo | null; visible: boolean; toast: (m: string) => void }) {
+export function Record({
+  project,
+  info,
+  visible,
+  toast,
+  onIngested,
+}: {
+  project: ProjectInfo | null;
+  info: AppInfo | null;
+  visible: boolean;
+  toast: (m: string) => void;
+  onIngested: () => void;
+}) {
   const t = useT();
   const [status, setStatus] = useState<RecStatus>(recorder.get());
   const [perm, setPerm] = useState<MediaPermissionState | null>(null);
@@ -220,9 +232,21 @@ export function Record({ project, info, visible, toast }: { project: ProjectInfo
     }
   };
 
+  const [ingesting, setIngesting] = useState(false);
+  // Stop -> `solocut ingest` registers the take as sources (clock offsets, NG/important markers) -> workspace
   const stop = async () => {
     await recorder.stop();
+    if (!project) return;
+    setIngesting(true);
+    toast(t('rec.ingesting'));
+    const r = await api.invoke('project:cli', project.dir, ['ingest']);
+    setIngesting(false);
+    if (!r.ok) {
+      toast(`${t('rec.ingestFailed')}: ${r.error ?? ''}`);
+      return;
+    }
     toast(t('rec.saved'));
+    onIngested();
   };
 
   const askAccess = async () => {
@@ -401,8 +425,8 @@ export function Record({ project, info, visible, toast }: { project: ProjectInfo
               <Square size={16} fill="currentColor" /> {t('rec.stop')}
             </button>
           ) : (
-            <button className="recbtn" disabled={count !== null || (!screenStream && camStreams.length === 0 && !micStream)} onClick={() => void start()}>
-              <Circle size={16} fill="currentColor" /> {t('rec.start')}
+            <button className="recbtn" disabled={ingesting || count !== null || (!screenStream && camStreams.length === 0 && !micStream)} onClick={() => void start()}>
+              <Circle size={16} fill="currentColor" /> {ingesting ? t('rec.ingesting') : t('rec.start')}
             </button>
           )}
         </aside>

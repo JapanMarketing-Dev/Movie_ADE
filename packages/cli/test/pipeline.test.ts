@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { whichSync } from '@solocut/toolchain';
@@ -170,7 +170,7 @@ describe.skipIf(!hasFfmpeg)('media pipeline (ffmpeg)', () => {
 });
 
 // Real transcription needs whisper-cli and a model; set SOLOCUT_WHISPER_MODEL to run it.
-const hasWhisper = hasFfmpeg && !!process.env.SOLOCUT_WHISPER_MODEL && !!(process.env.SOLOCUT_WHISPER_CLI ?? whichSync('whisper-cli'));
+const hasWhisper = hasFfmpeg && !!process.env.SOLOCUT_WHISPER_MODEL && existsSync(process.env.SOLOCUT_WHISPER_MODEL) && process.env.SOLOCUT_WHISPER_MODEL.endsWith('.bin') && !!(process.env.SOLOCUT_WHISPER_CLI ?? whichSync('whisper-cli'));
 describe.skipIf(!hasWhisper)('transcribe (whisper.cpp)', () => {
   it('writes derived/transcripts/main.json in take time', async () => {
     const sb = new Sandbox();
@@ -187,4 +187,111 @@ describe.skipIf(!hasWhisper)('transcribe (whisper.cpp)', () => {
       sb.dispose();
     }
   }, 300_000);
+});
+
+describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
+  let sb: Sandbox;
+  let dir: string;
+  let bin: string;
+  let env: Record<string, string>;
+  const run = (args: string[], extra: Record<string, string> = {}) => sb.run([...args, '--json'], { cwd: dir, env: { ...env, ...extra } });
+  const timeline = () => JSON.parse(readFileSync(join(dir, 'timeline.json'), 'utf8'));
+  const filters = execFileSync(ffmpeg!, ['-hide_banner', '-filters']).toString();
+  const decoders = execFileSync(ffmpeg!, ['-hide_banner', '-decoders']).toString();
+  const canTypeset = /\sass\s/.test(filters) || /\s(svg|librsvg)\s/.test(decoders);
+  const probeSize = (f: string) => execFileSync(process.env.SOLOCUT_FFPROBE ?? whichSync('ffprobe')!, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', f]).toString().trim();
+
+  beforeAll(async () => {
+    sb = new Sandbox();
+    dir = join(sb.root, 'p');
+    bin = join(sb.root, 'fakebin');
+    mkdirSync(bin);
+    // fake `codex`: drops a generated image into $CODEX_HOME/generated_images
+    execFileSync(ffmpeg!, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1536x1024', '-frames:v', '1', join(sb.root, 'gen.png')]);
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nmkdir -p "$CODEX_HOME/generated_images/s"\ncp "${join(sb.root, 'gen.png')}" "$CODEX_HOME/generated_images/s/img-$$.png"\necho done\n`);
+    // fake `claude -p --output-format json`: organizes feedback item 1
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho '{"type":"result","result":"{\\\\"items\\\\":[{\\\\"index\\\\":1,\\\\"title\\\\":\\\\"字幕が顔にかかっている\\\\",\\\\"request\\\\":\\\\"字幕を下へずらす\\\\"}]}"}'\n`);
+    for (const f of ['codex', 'claude']) execFileSync('chmod', ['+x', join(bin, f)]);
+    env = { PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: join(sb.root, 'codexhome') };
+    await sb.run(['init', dir, '--template', 'talk-youtube', '--title', 'Thumbs', '--no-git', '--json']);
+    makeClip(join(sb.root, 'cam.mp4'), { audio: true, size: '1280x720' });
+    await run(['import', join(sb.root, 'cam.mp4')]);
+    expect((await run(['propose', 'cuts'])).json.ok).toBe(true);
+  }, 120_000);
+  afterAll(() => sb?.dispose());
+
+  it('thumb candidates scores frames and keeps the best ones apart', async () => {
+    const r = await run(['thumb', 'candidates', '--n', '3']);
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
+    expect(r.json.candidates.length).toBeGreaterThan(0);
+    expect(r.json.candidates.length).toBeLessThanOrEqual(3);
+    for (const c of r.json.candidates) expect(existsSync(c.image)).toBe(true);
+    expect(existsSync(join(dir, 'checks', 'thumbs', 'candidates.json'))).toBe(true);
+  }, 120_000);
+
+  it('thumb gen --provider frame --no-title: 1280x720 JPEG ≤ 2 MB, recorded on the output', async () => {
+    const r = await run(['thumb', 'gen', '--provider', 'frame', '--no-title', '--n', '1']);
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, typeset: 'none' });
+    const f = join(dir, 'renders', 'thumbnails', 'youtube-1.jpg');
+    expect(probeSize(f)).toBe('1280,720');
+    expect(statSync(f).size).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(timeline().outputs[0].thumbnail).toMatchObject({ path: 'renders/thumbnails/youtube-1.jpg', generatedBy: 'frame' });
+  }, 120_000);
+
+  it('thumb gen with a title typesets it (or explains the missing ffmpeg feature)', async () => {
+    const r = await run(['thumb', 'gen', '--frame', '00:00:01:00', '--provider', 'frame', '--title', '設定は3つだけ', '--n', '1', '--formats', 'youtube,shorts']);
+    if (!canTypeset) {
+      expect(r.json.error.code).toBe('ffmpeg-features');
+      return;
+    }
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, frame: 30 });
+    expect(probeSize(join(dir, 'renders', 'thumbnails', 'shorts-1.jpg'))).toBe('1080,1920');
+    expect(readFileSync(join(dir, 'renders', 'thumbnails', 'title-youtube.svg'), 'utf8')).toContain('設定は3つだけ');
+  }, 120_000);
+
+  it('thumb gen via codex (fake) uses the generated image; unknown providers are rejected', async () => {
+    const r = await run(['thumb', 'gen', '--frame', '30', '--provider', 'codex', '--no-title', '--n', '2']);
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
+    expect(r.json.thumbnails.map((x: { provider: string }) => x.provider)).toEqual(['codex', 'codex']);
+    expect(existsSync(join(dir, 'renders', 'thumbnails', 'youtube-2.jpg'))).toBe(true);
+    expect((await run(['thumb', 'gen', '--frame', '30', '--provider', 'dalle'])).code).toBe(2);
+    expect((await run(['thumb', 'gen', '--frame', '99999'])).json.error.code).toBe('out-of-range');
+    expect((await run(['thumb', 'dance'])).code).toBe(2);
+  }, 120_000);
+
+  it('feedback import → feedback.md + images + review state; organize via claude; list/show/done', async () => {
+    const s = join(sb.root, 'session');
+    mkdirSync(s);
+    writeFileSync(join(s, 'session.json'), JSON.stringify({
+      schema: 1, createdAt: '2026-10-11T12:00:00Z', audioStartMs: 0,
+      playback: [{ atMs: 0, state: 'playing', frame: 0 }, { atMs: 1500, state: 'paused', frame: 45 }],
+      words: [{ w: 'ここ、', start: 1.6, end: 2.0 }, { w: '字幕が', start: 2.0, end: 2.4 }, { w: '顔に', start: 2.4, end: 2.7 }, { w: 'かぶってる。', start: 2.7, end: 3.2 }],
+      strokes: [{ startMs: 2000, endMs: 2600, points: [[0.3, 0.8], [0.5, 0.95], [0.7, 0.85]] }],
+      notes: [{ atMs: 20_000, text: '最後をもう少し短く', frame: 200 }],
+    }));
+    const r = await run(['feedback', 'import', s, '--organize', 'claude', '--id', 'fb_test1']);
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, id: 'fb_test1', items: 2, organizedBy: 'claude' });
+    const md = readFileSync(join(dir, 'feedback', 'fb_test1', 'feedback.md'), 'utf8');
+    expect(md).toContain('## 1. [00:00:01:15] 字幕が顔にかかっている');
+    expect(md).toContain('- 要望: 字幕を下へずらす');
+    expect(md).toContain('- 発話（原文）: 「ここ、字幕が顔にかぶってる。」');
+    expect(md).toContain('区間 seg_');
+    expect(md).toContain('## 2. [00:00:06:20] 最後をもう少し短く');
+    for (const f of ['01.png', '02.png', 'items.json', 'session.json']) expect(existsSync(join(dir, 'feedback', 'fb_test1', f)), f).toBe(true);
+    const tl = timeline();
+    expect(tl.review.feedback).toEqual([{ id: 'fb_test1', status: 'open', items: 2 }]);
+    expect(tl.review.openItems.some((o: { ref: string }) => o.ref === 'fb_test1')).toBe(true);
+    expect((await run(['feedback', 'list'])).json.feedback).toEqual([{ id: 'fb_test1', status: 'open', items: 2, path: 'feedback/fb_test1/feedback.md' }]);
+    expect((await run(['feedback', 'show', 'fb_test1'])).json.items).toHaveLength(2);
+    expect((await run(['feedback', 'import', s, '--id', 'fb_test1'])).json.error.code).toBe('exists');
+    expect((await run(['feedback', 'done', 'fb_test1'])).json.status).toBe('done');
+    expect(timeline().review.openItems.some((o: { ref: string }) => o.ref === 'fb_test1')).toBe(false);
+    expect((await run(['feedback', 'list', '--open'])).json.feedback).toEqual([]);
+    // broken sessions are rejected
+    writeFileSync(join(s, 'session.json'), JSON.stringify({ schema: 1, strokes: [{ startMs: 0, endMs: 1, points: [[0.1]] }] }));
+    expect((await run(['feedback', 'import', s])).json.error.code).toBe('invalid-session');
+    writeFileSync(join(s, 'session.json'), JSON.stringify({ schema: 1 }));
+    expect((await run(['feedback', 'import', s])).json.error.code).toBe('empty');
+    expect((await run(['feedback', 'show', 'fb_none'])).json.error.code).toBe('not-found');
+  }, 120_000);
 });

@@ -1,8 +1,30 @@
 import { parseFrameRange, query, summarize } from '@solocut/core';
 import { compareStats, computeStats, getArchive, listArchive, registerProject, searchArchive, type ArchiveEntry } from '@solocut/archive';
 import { loadSettings } from '@solocut/settings';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { deepMerge } from '@solocut/templates';
 import { CliError, emit, intOpt, opts, t, type Ctx } from '../ctx.js';
-import { openProject, readTimeline } from '../project.js';
+import { applyEdit, openProject, readTimeline, writeAtomic, type Project } from '../project.js';
+import { REUSE_PARTS, planReuse, type ReusePart } from '../reuse.js';
+
+/** Merge a patch into <project>/templates/<id>/template.yaml (written as JSON, which is valid YAML). */
+function writeTemplateOverride(p: Project, patch: Record<string, unknown>): string {
+  const id = p.file.template.id;
+  const file = join(p.dir, 'templates', id, 'template.yaml');
+  let current: Record<string, unknown> = { id, extends: id };
+  if (existsSync(file)) {
+    const text = readFileSync(file, 'utf8').replace(/^#.*\n/gm, '');
+    try {
+      current = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new CliError('template-override', `${file} exists and is not machine-written; merge this by hand: ${JSON.stringify(patch)}`);
+    }
+  }
+  const next = deepMerge(current, patch);
+  writeAtomic(file, `# project-only template override (solocut past reuse). JSON is valid YAML.\n${JSON.stringify(next, null, 2)}\n`);
+  return `templates/${id}/template.yaml`;
+}
 
 function row(e: ArchiveEntry): string {
   const m = Math.floor(e.durationSec / 60);
@@ -89,6 +111,31 @@ export async function cmdPast(ctx: Ctx, args: string[]): Promise<void> {
     ]);
     return;
   }
+  if (sub === 'reuse') {
+    const { values, positionals } = opts(rest, { what: { type: 'string' }, apply: { type: 'boolean' }, out: { type: 'string' } }, { min: 1, max: 1, usage: `solocut past reuse <id> --what ${REUSE_PARTS.join(',')} [--apply] [--out ops.json]` });
+    const what = (values.what ?? REUSE_PARTS.join(',')).split(',').map((x) => x.trim()).filter(Boolean) as ReusePart[];
+    for (const w of what) if (!(REUSE_PARTS as readonly string[]).includes(w)) throw new CliError('usage', `unknown part: ${w} (${REUSE_PARTS.join(', ')})`);
+    const past = wrapArchive(ctx, () => getArchive(positionals[0]!));
+    const p = openProject(ctx);
+    const cur = readTimeline(p.dir);
+    const plan = planReuse(past, cur, computeStats(cur), what, { lang: ctx.lang, by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}) });
+    if (values.out) writeAtomic(resolve(ctx.io.cwd, values.out), JSON.stringify(plan.ops, null, 2) + '\n');
+    let applied = false;
+    let templateFile: string | undefined;
+    if (values.apply) {
+      await applyEdit(p, plan.ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: `past reuse ${past.entry.id}` });
+      applied = true;
+      if (Object.keys(plan.templatePatch).length) templateFile = writeTemplateOverride(p, plan.templatePatch);
+    }
+    emit(ctx, { archive: past.entry.id, what, ops: plan.ops, templatePatch: plan.templatePatch, notes: plan.notes, skipped: plan.skipped, applied, ...(templateFile ? { templateFile } : {}) }, () => [
+      ...plan.notes,
+      ...plan.skipped.map((x) => `- ${x}`),
+      applied ? t(ctx, `${plan.ops.length} 件の操作を適用しました${templateFile ? `。テンプレートの上書き: ${templateFile}` : ''}`, `applied ${plan.ops.length} operation(s)${templateFile ? `; template override: ${templateFile}` : ''}`)
+        : t(ctx, `${plan.ops.length} 件の操作の案です。--apply で適用、--out で保存`, `${plan.ops.length} proposed operation(s); --apply to apply, --out to save`),
+      ...(Object.keys(plan.templatePatch).length && !applied ? [`template: ${JSON.stringify(plan.templatePatch)}`] : []),
+    ]);
+    return;
+  }
   if (sub === 'register') {
     opts(rest, {}, { max: 0 });
     const p = openProject(ctx);
@@ -98,5 +145,5 @@ export async function cmdPast(ctx: Ctx, args: string[]): Promise<void> {
     emit(ctx, { entry }, () => t(ctx, `アーカイブに登録しました: ${entry.id}`, `registered: ${entry.id}`));
     return;
   }
-  throw new CliError('usage', 'usage: solocut past list | search <q> | show <id> | timeline <id> | compare <id> | register');
+  throw new CliError('usage', 'usage: solocut past list | search <q> | show <id> | timeline <id> | compare <id> | reuse <id> | register');
 }

@@ -231,3 +231,109 @@ export interface MediaPermissionState {
   microphone: string;
   screen: string;
 }
+
+// ---------- feedback ----------
+export interface FeedbackTarget {
+  kind: string;
+  id: string;
+  label?: string;
+}
+export interface FeedbackItem {
+  n: number;
+  frame: number;
+  timecode: string;
+  image?: string; // project-relative
+  spoken: string;
+  request: string;
+  targets: FeedbackTarget[];
+}
+export interface FeedbackImport {
+  id: string;
+  dir: string; // project-relative, e.g. feedback/<id>
+  items: FeedbackItem[];
+}
+export type FeedbackEventKind = 'play' | 'pause' | 'seek' | 'stroke' | 'box' | 'text';
+export interface FeedbackEvent {
+  t_ms: number; // since the mic started
+  kind: FeedbackEventKind;
+  frame: number; // timeline frame shown when the event happened
+  videoTime: number;
+  data?: { points?: [number, number][]; x?: number; y?: number; w?: number; h?: number; text?: string };
+}
+export interface FeedbackSession {
+  schema: 1;
+  id: string;
+  createdAt: string;
+  fps: { num: number; den: number };
+  video: { path: string; durationSec: number };
+  micFile: string | null;
+  micStartMs: number;
+  events: FeedbackEvent[];
+}
+
+// ---------- thumbnails / publish ----------
+export interface ThumbCandidate {
+  frame: number;
+  timecode: string;
+  image: string; // absolute path
+  score?: number;
+}
+export interface ThumbImage {
+  path: string; // absolute
+  provider?: string;
+  favorite?: boolean;
+}
+export interface PublishTarget {
+  target: string;
+  title: string;
+  titleCandidates: string[];
+  description: string;
+  tags: string[];
+  render?: string; // absolute
+  thumbnail?: string; // absolute
+  captions?: string; // absolute srt
+}
+export interface PublishDraft {
+  targets: PublishTarget[];
+  videos: string[];
+  images: string[];
+  captions: string[];
+  history: PublishRecord[];
+  metaSource: 'cli' | 'timeline';
+}
+export interface PublishRecord {
+  at: string;
+  project: string;
+  target: string;
+  method: 'api-byo' | 'api' | 'intent' | 'manual';
+  status: 'published' | 'scheduled' | 'uploaded' | 'opened' | 'failed';
+  url?: string;
+  remoteId?: string;
+  privacy?: string;
+  disclosures?: Record<string, boolean>;
+  error?: string;
+}
+export interface YouTubeForm {
+  videoPath: string;
+  title: string;
+  description: string;
+  tags: string[];
+  categoryId: string;
+  privacy: 'public' | 'unlisted' | 'private';
+  publishAt?: string; // ISO; requires private
+  madeForKids: boolean | null; // must be chosen
+  containsSyntheticMedia: boolean;
+  language: string;
+  thumbnailPath?: string;
+  captionsPath?: string;
+}
+export interface YouTubeProgress {
+  phase: 'auth' | 'upload' | 'thumbnail' | 'captions' | 'done' | 'error';
+  sent?: number;
+  total?: number;
+  message?: string;
+}
+export interface SecretInfo {
+  set: boolean;
+  hint?: string;
+}

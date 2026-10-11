@@ -11,7 +11,7 @@ import { loadSettings } from '@solocut/settings';
 import type { Template } from '@solocut/templates';
 import { resolveTool } from '@solocut/toolchain';
 import { registerProject } from '@solocut/archive';
-import { CliError, emit, info, intOpt, opts, t, type Ctx } from '../ctx.js';
+import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
 import {
@@ -21,14 +21,14 @@ import {
 type Media = typeof import('@solocut/media');
 type Captions = typeof import('@solocut/captions');
 
-async function media(): Promise<Media> {
+export async function media(): Promise<Media> {
   try {
     return await import('@solocut/media');
   } catch (e) {
     throw new CliError('engine-unavailable', `@solocut/media is not available: ${(e as Error).message}`);
   }
 }
-async function captionsLib(): Promise<Captions> {
+export async function captionsLib(): Promise<Captions> {
   try {
     return await import('@solocut/captions');
   } catch (e) {
@@ -220,12 +220,12 @@ export async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
 
 // ---------- sync ----------
 
-function takesOf(tl: Timeline): string[] {
+export function takesOf(tl: Timeline): string[] {
   return [...new Set(Object.values(tl.sources).map((s) => ('take' in s ? s.take : undefined)).filter((x): x is string => !!x))].sort();
 }
 
 /** The voice track of a take: its mic, else a camera with audio. */
-function voiceOf(tl: Timeline, take: string): [string, Source] | null {
+export function voiceOf(tl: Timeline, take: string): [string, Source] | null {
   const entries = Object.entries(tl.sources).filter(([, s]) => 'take' in s && s.take === take).sort(([a], [b]) => a.localeCompare(b));
   return entries.find(([, s]) => s.kind === 'mic') ?? entries.find(([, s]) => s.kind === 'camera' && s.audio !== false) ?? entries.find(([, s]) => s.kind === 'screen' && s.audio !== false) ?? null;
 }
@@ -307,7 +307,7 @@ export function readTranscript(p: Project): TranscriptFile | null {
   }
 }
 
-function runProcess(bin: string, args: string[], o: { cwd?: string; env?: NodeJS.ProcessEnv; onLine?: (l: string) => void } = {}): Promise<{ code: number | null; stderr: string }> {
+export function runProcess(bin: string, args: string[], o: { cwd?: string; env?: NodeJS.ProcessEnv; onLine?: (l: string) => void } = {}): Promise<{ code: number | null; stderr: string }> {
   return new Promise((res, rej) => {
     const c = spawn(bin, args, { cwd: o.cwd, env: o.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     let stderr = '';
@@ -328,6 +328,37 @@ const INITIAL_PROMPT: Record<'ja' | 'en', string> = {
   en: 'Um, so, uh, today I want to, you know, talk about this setting.',
 };
 
+/** whisper.cpp word timestamps (seconds in the file) for any audio/video file. */
+export async function whisperWords(ctx: Ctx, p: Project, file: string, o: { lang: string; model?: string; threads?: string; name: string }): Promise<{ words: { w: string; start: number; end: number; conf?: number; speaker?: string }[]; model: string }> {
+  const settings = loadSettings();
+  const modelKey = (o.model ?? settings.transcription.model) === 'small' ? 'whisper-model-small' : 'whisper-model';
+  const [cli, model] = await Promise.all([resolveTool('whisper-cli'), resolveTool(modelKey)]);
+  if (!cli) throw new CliError('tool-missing', t(ctx, 'whisper-cli がありません。`solocut lib install whisper`', 'whisper-cli not found: `solocut lib install whisper`'));
+  if (!model) throw new CliError('tool-missing', t(ctx, '文字起こしのモデルがありません。`solocut lib install whisper`', 'whisper model not found: `solocut lib install whisper`'));
+  const m = await media();
+  const wav = join(paths(p.dir).cache, `${o.name}.wav`);
+  mkdirSync(dirname(wav), { recursive: true });
+  info(ctx, t(ctx, '音声を取り出しています…', 'extracting audio…'));
+  await m.runFfmpeg(['-hide_banner', '-nostdin', '-y', '-i', file, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
+  const outBase = join(paths(p.dir).cache, `${o.name}.whisper`);
+  const whisperArgs = ['-m', model, '-f', wav, '-l', o.lang, '-ml', '1', '-sow', '-ojf', '-of', outBase, '-np', '--prompt', INITIAL_PROMPT[p.file.language]];
+  if (o.threads) whisperArgs.push('-t', o.threads);
+  info(ctx, t(ctx, '文字起こししています（長い素材では数分かかります）…', 'transcribing (may take minutes for long media)…'));
+  const env = { ...process.env };
+  if (process.platform === 'linux') env.LD_LIBRARY_PATH = [dirname(cli), env.LD_LIBRARY_PATH].filter(Boolean).join(':');
+  const r = await runProcess(cli, whisperArgs, { env, onLine: (l) => {
+    const mm = /progress\s*=\s*(\d+)%/.exec(l);
+    if (mm) progress(ctx, 'whisper', Number(mm[1]) / 100, t(ctx, '文字起こし', 'transcribing'));
+  } });
+  progressDone(ctx, 'whisper');
+  rmSync(wav, { force: true });
+  if (r.code !== 0 || !existsSync(`${outBase}.json`)) throw new CliError('whisper-failed', `whisper-cli failed (${r.code}): ${r.stderr.trim().split('\n').slice(-3).join(' ')}`);
+  const cap = await captionsLib();
+  const words = cap.wordsFromWhisperJson(JSON.parse(readFileSync(`${outBase}.json`, 'utf8')));
+  rmSync(`${outBase}.json`, { force: true });
+  return { words, model };
+}
+
 export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { take: { type: 'string' }, source: { type: 'string' }, model: { type: 'string' }, language: { type: 'string' }, threads: { type: 'string' }, 'no-align': { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
@@ -338,31 +369,9 @@ export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
   const voice = values.source ? ([values.source, tl.sources[values.source]] as const) : voiceOf(tl, take);
   if (!voice || !voice[1]) throw new CliError('no-audio', t(ctx, `テイク ${take} に音声の素材がありません`, `take ${take} has no audio source`));
   const [sourceId, src] = voice as [string, Source];
-  const modelKey = (values.model ?? settings.transcription.model) === 'small' ? 'whisper-model-small' : 'whisper-model';
-  const [cli, model] = await Promise.all([resolveTool('whisper-cli'), resolveTool(modelKey)]);
-  if (!cli) throw new CliError('tool-missing', t(ctx, 'whisper-cli がありません。`solocut lib install whisper`（macOS は `brew install whisper-cpp`）', 'whisper-cli not found: `solocut lib install whisper` (macOS: `brew install whisper-cpp`)'));
-  if (!model) throw new CliError('tool-missing', t(ctx, '文字起こしのモデルがありません。`solocut lib install whisper`', 'whisper model not found: `solocut lib install whisper`'));
   const lang = values.language ?? (settings.transcription.language === 'auto' ? 'auto' : p.file.language);
   const m = await media();
-  const work = join(p.dir, 'derived', 'transcripts');
-  mkdirSync(work, { recursive: true });
-  const wav = join(paths(p.dir).cache, `transcribe-${sourceId.replace(/[^A-Za-z0-9_.-]/g, '_')}.wav`);
-  mkdirSync(dirname(wav), { recursive: true });
-  info(ctx, t(ctx, '音声を取り出しています…', 'extracting audio…'));
-  await m.runFfmpeg(['-hide_banner', '-nostdin', '-y', '-i', abs(p, src.path), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
-  const outBase = join(work, 'main.whisper');
-  const whisperArgs = ['-m', model, '-f', wav, '-l', lang, '-ml', '1', '-sow', '-ojf', '-of', outBase, '-np', '--prompt', INITIAL_PROMPT[p.file.language]];
-  if (values.threads) whisperArgs.push('-t', values.threads);
-  info(ctx, t(ctx, '文字起こししています（長い素材では数分かかります）…', 'transcribing (may take minutes for long media)…'));
-  const env = { ...process.env };
-  if (process.platform === 'linux') env.LD_LIBRARY_PATH = [dirname(cli), env.LD_LIBRARY_PATH].filter(Boolean).join(':');
-  const r = await runProcess(cli, whisperArgs, { env, onLine: (l) => {
-    const mm = /progress\s*=\s*(\d+)%/.exec(l);
-    if (mm) info(ctx, `\r${mm[1]}%`);
-  } });
-  if (r.code !== 0 || !existsSync(`${outBase}.json`)) throw new CliError('whisper-failed', `whisper-cli failed (${r.code}): ${r.stderr.trim().split('\n').slice(-3).join(' ')}`);
-  const cap = await captionsLib();
-  const words = cap.wordsFromWhisperJson(JSON.parse(readFileSync(`${outBase}.json`, 'utf8')));
+  const { words, model } = await whisperWords(ctx, p, abs(p, src.path), { lang, ...(values.model ? { model: values.model } : {}), ...(values.threads ? { threads: values.threads } : {}), name: `transcribe-${sourceId.replace(/[^A-Za-z0-9_.-]/g, '_')}` });
   // whisper times are local to the source file; convert to the take clock (local = take·drift + offset/rate)
   const rate = sourceRate(tl, src);
   const offsetSec = src.kind === 'asset' ? 0 : src.offset * rate.den / rate.num;
@@ -383,7 +392,6 @@ export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
     words: takeWords, createdAt: new Date().toISOString(),
   };
   writeAtomic(paths(p.dir).transcript, JSON.stringify(file) + '\n');
-  rmSync(wav, { force: true });
   await applyEdit(p, [{ op: 'setTranscript', transcript: { path: 'derived/transcripts/main.json', engine: 'whisper.cpp', model: file.model, summary: tl.transcript?.summary ?? '' } }], by(ctx));
   setStep(p, 'transcribe', 'done');
   const text = textIn(file.words, 0, Number.POSITIVE_INFINITY, p.file.language);
@@ -704,9 +712,9 @@ async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 
   }
   const r = await m.executeRenderPlan(plan, {
     projectDir: p.dir, cacheDir: join('derived', 'cache', 'render'), output: o.output,
-    onProgress: ({ done, total }) => info(ctx, `\r${t(ctx, '書き出し中', 'rendering')} ${done}/${total}`),
+    onProgress: ({ done, total }) => progress(ctx, 'render', total ? done / total : 1, `${t(ctx, '書き出し中', 'rendering')} ${done}/${total}`),
   });
-  info(ctx, '');
+  progressDone(ctx, 'render');
   return { ...r, warnings: plan.warnings };
 }
 
@@ -746,7 +754,7 @@ export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
 }
 
 /** The preview, re-rendered when timeline.json is newer. */
-async function freshPreview(ctx: Ctx, p: Project, tl: Timeline): Promise<string> {
+export async function freshPreview(ctx: Ctx, p: Project, tl: Timeline): Promise<string> {
   const prev = paths(p.dir).preview;
   if (existsSync(prev) && statSync(prev).mtimeMs >= statSync(paths(p.dir).timeline).mtimeMs) return prev;
   info(ctx, t(ctx, 'プレビューを書き出しています…', 'rendering the preview…'));

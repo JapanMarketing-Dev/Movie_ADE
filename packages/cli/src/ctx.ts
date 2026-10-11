@@ -9,6 +9,10 @@ export interface IO {
   env: NodeJS.ProcessEnv;
   /** stdin text for `--ops -` (tests inject it). */
   readStdin?: () => Promise<string>;
+  /** stdin as lines (for `solocut mcp`). */
+  stdinLines?: () => AsyncIterable<string>;
+  /** stderr is a terminal: progress may redraw one line with \r. */
+  isTTY?: boolean;
 }
 
 export class CliError extends Error {
@@ -44,6 +48,32 @@ export function emit(ctx: Ctx, data: Record<string, unknown>, human: () => strin
 /** Human-only progress/info line on stderr (silent in --json mode). */
 export function info(ctx: Ctx, s: string): void {
   if (!ctx.json) ctx.io.stderr(s.endsWith('\n') || s.endsWith('\r') ? s : s + '\n');
+}
+
+const lastBucket = new Map<string, number>();
+
+/**
+ * Progress on stderr (silent with --json). On a TTY one line is redrawn; otherwise (logs, the desktop app) at most one
+ * line per 10 %, so logs stay short. `fraction` in 0..1; call `progressDone` at the end.
+ */
+export function progress(ctx: Ctx, key: string, fraction: number, label: string): void {
+  if (ctx.json) return;
+  const f = Math.max(0, Math.min(1, Number.isFinite(fraction) ? fraction : 0));
+  const pct = Math.floor(f * 100);
+  if (ctx.io.isTTY) {
+    const bar = `[${'#'.repeat(Math.round(f * 24)).padEnd(24, '.')}]`;
+    ctx.io.stderr(`\r${label} ${bar} ${pct}%   `);
+    return;
+  }
+  const bucket = Math.floor(pct / 10);
+  if ((lastBucket.get(key) ?? -1) >= bucket) return;
+  lastBucket.set(key, bucket);
+  ctx.io.stderr(`${label} ${pct}%\n`);
+}
+
+export function progressDone(ctx: Ctx, key: string): void {
+  lastBucket.delete(key);
+  if (!ctx.json && ctx.io.isTTY) ctx.io.stderr('\n');
 }
 
 export const t = (ctx: Pick<Ctx, 'lang'>, ja: string, en: string): string => (ctx.lang === 'ja' ? ja : en);

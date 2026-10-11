@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, Clapperboard, Home as HomeIcon, Package, Settings as SettingsIcon, Video } from 'lucide-react';
+import { Archive, Clapperboard, Home as HomeIcon, Image, Package, Send, Settings as SettingsIcon, Video } from 'lucide-react';
 import type { AppInfo, Lang, ProjectInfo } from '@shared/types';
 import { LangContext, translate, type TKey } from './i18n';
 import { api, errMsg } from './lib/api';
@@ -11,15 +11,19 @@ import { Record } from './screens/Record';
 import { ArchiveScreen } from './screens/Archive';
 import { Library } from './screens/Library';
 import { Settings } from './screens/Settings';
+import { Thumbnails } from './screens/Thumbnails';
+import { Publish } from './screens/Publish';
 import { UpdatePill } from './components/UpdatePill';
 import { Toast, useToast } from './components/Toast';
 
-export type Screen = 'home' | 'workspace' | 'record' | 'archive' | 'library' | 'settings';
+export type Screen = 'home' | 'workspace' | 'record' | 'thumbnails' | 'publish' | 'archive' | 'library' | 'settings';
 
 const NAV: { id: Screen; icon: typeof HomeIcon; key: TKey }[] = [
   { id: 'home', icon: HomeIcon, key: 'nav.home' },
   { id: 'workspace', icon: Clapperboard, key: 'nav.workspace' },
   { id: 'record', icon: Video, key: 'nav.record' },
+  { id: 'thumbnails', icon: Image, key: 'nav.thumbnails' },
+  { id: 'publish', icon: Send, key: 'nav.publish' },
   { id: 'archive', icon: Archive, key: 'nav.archive' },
   { id: 'library', icon: Package, key: 'nav.library' },
 ];
@@ -102,8 +106,18 @@ export function App() {
             <Workspace project={project} visible={screen === 'workspace'} toast={toast.show} onRecord={() => setScreen('record')} />
           </div>
           <div className={`screen ${screen === 'record' ? '' : 'hidden'}`}>
-            <Record project={project} info={info} visible={screen === 'record'} toast={toast.show} />
+            <Record project={project} info={info} visible={screen === 'record'} toast={toast.show} onIngested={() => setScreen('workspace')} />
           </div>
+          {screen === 'thumbnails' && (
+            <div className="screen">
+              <Thumbnails project={project} toast={toast.show} />
+            </div>
+          )}
+          {screen === 'publish' && (
+            <div className="screen">
+              <Publish project={project} toast={toast.show} onOpenSettings={() => setScreen('settings')} />
+            </div>
+          )}
           {screen === 'archive' && (
             <div className="screen">
               <ArchiveScreen project={project} toast={toast.show} />

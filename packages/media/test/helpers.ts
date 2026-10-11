@@ -33,6 +33,11 @@ if (HAVE_FFMPEG) {
 
 export const HAVE_LIBASS = HAVE_FFMPEG && /\bsubtitles\b/.test(execFileSync(FFMPEG!, ['-hide_banner', '-filters'], { encoding: 'utf8' }));
 
+/** Major version of the ffmpeg in use (0 when unknown, e.g. git builds "N-12345-…"). */
+export const FFMPEG_MAJOR = HAVE_FFMPEG
+  ? Number(/ffmpeg version n?(\d+)\./.exec(execFileSync(FFMPEG!, ['-version'], { encoding: 'utf8' }))?.[1] ?? 0)
+  : 0;
+
 export function tempDir(prefix: string): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), `solocut-${prefix}-`));
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };

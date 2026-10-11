@@ -23,7 +23,7 @@ export function newTakeId(now = new Date()): string {
   return `take_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
 }
 
-const SAFE_FILE = /^(screen|camera-\d+|mic-\d+|system)\.(mp4|webm|wav)$/;
+const SAFE_FILE = /^(screen|camera-\d+|mic-\d+|mic|system)\.(mp4|webm|wav)$/;
 
 export function beginTake(projectDir: string): { takeId: string; takeDir: string } {
   let takeId = newTakeId();
@@ -35,6 +35,17 @@ export function beginTake(projectDir: string): { takeId: string; takeDir: string
   mkdirSync(dir, { recursive: true });
   takes.set(takeId, { dir, tracks: new Map() });
   return { takeId, takeDir: dir };
+}
+
+/** Registers an arbitrary session folder (e.g. a feedback recording) so the track functions can write into it. */
+export function beginSession(id: string, dir: string): void {
+  if (takes.has(id)) throw new Error(`session already open: ${id}`);
+  mkdirSync(dir, { recursive: true });
+  takes.set(id, { dir, tracks: new Map() });
+}
+
+export function sessionDir(id: string): string {
+  return take(id).dir;
 }
 
 function take(id: string): Take {

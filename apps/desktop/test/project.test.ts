@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatFrames, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
+import { formatFrames, isUnknownOpError, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
 
 const decidedReview = { by: 'decision-model', reason: 'mid-word cut', confidence: 0.55, needsReview: true };
 
@@ -92,37 +92,57 @@ describe('timelineOverview', () => {
   });
 });
 
-describe('reviewOps', () => {
+describe('reviewOps (setDecided)', () => {
   const item = (lane: string, id: string) => ({ id, lane, label: '' }) as never;
+  it('accept is a single setDecided keeping earlier decided fields', () => {
+    const a = reviewOps(timeline, item('captions', 'cap_2'), 'accept');
+    expect(a).toEqual([{ op: 'setDecided', target: 'cap_2', decided: { ...decidedReview, by: 'human', reason: 'accepted in review', needsReview: false } }]);
+    const s = reviewOps(timeline, item('segments', 'seg_2'), 'accept');
+    expect(s.map((o) => o.op)).toEqual(['setDecided', 'setReview']);
+  });
+  it('reject still removes', () => {
+    expect(reviewOps(timeline, item('sfx', 'sfx_1'), 'reject').map((o) => o.op)).toEqual(['removeSfx']);
+    expect(reviewOps(timeline, item('segments', 'seg_2'), 'reject')[0]).toMatchObject({ op: 'removeSegment', id: 'seg_2' });
+  });
+  it('detects unknown-op errors for the legacy fallback', () => {
+    expect(isUnknownOpError({ code: 'invalid-op', message: 'unknown op setDecided' })).toBe(true);
+    expect(isUnknownOpError('ops[0].op: Invalid input (setDecided)')).toBe(true);
+    expect(isUnknownOpError({ code: 'not-found', message: 'seg_9 not found' })).toBe(false);
+  });
+});
+
+describe('reviewOps (legacy)', () => {
+  const item = (lane: string, id: string) => ({ id, lane, label: '' }) as never;
+  const reviewOpsL = (t: unknown, i: never, d: 'accept' | 'reject') => reviewOps(t, i, d, 'legacy');
   it('segment accept keeps it and marks human decision; reject removes it; both clear the open item', () => {
-    const a = reviewOps(timeline, item('segments', 'seg_2'), 'accept');
+    const a = reviewOpsL(timeline, item('segments', 'seg_2'), 'accept');
     expect(a[0]).toMatchObject({ op: 'trimSegment', id: 'seg_2', decided: { by: 'human', needsReview: false } });
     expect(a[1]).toEqual({ op: 'setReview', patch: { openItems: [{ ref: 'chk_1', kind: 'check', summary: 'loudness -16 LUFS' }] } });
-    const r = reviewOps(timeline, item('segments', 'seg_2'), 'reject');
+    const r = reviewOpsL(timeline, item('segments', 'seg_2'), 'reject');
     expect(r[0]).toMatchObject({ op: 'removeSegment', id: 'seg_2', decided: { by: 'human' } });
   });
   it('caption accept patches decided; reject rewrites captions without it', () => {
-    const a = reviewOps(timeline, item('captions', 'cap_2'), 'accept');
+    const a = reviewOpsL(timeline, item('captions', 'cap_2'), 'accept');
     expect(a).toEqual([{ op: 'updateCaption', id: 'cap_2', patch: { decided: { ...decidedReview, by: 'human', reason: 'accepted in review', needsReview: false } } }]);
-    const r = reviewOps(timeline, item('captions', 'cap_2'), 'reject');
+    const r = reviewOpsL(timeline, item('captions', 'cap_2'), 'reject');
     expect(r[0]).toMatchObject({ op: 'setCaptions' });
     expect((r[0] as unknown as { captions: { id: string }[] }).captions.map((c) => c.id)).toEqual(['cap_1']);
   });
   it('scene and sfx accept re-add with human decision; reject only removes', () => {
-    const a = reviewOps(timeline, item('scenes', 'scn_1'), 'accept');
+    const a = reviewOpsL(timeline, item('scenes', 'scn_1'), 'accept');
     expect(a.map((o) => o.op)).toEqual(['removeScene', 'addScene']);
     expect((a[1] as unknown as { scene: { decided: { needsReview: boolean } } }).scene.decided.needsReview).toBe(false);
-    expect(reviewOps(timeline, item('sfx', 'sfx_1'), 'reject').map((o) => o.op)).toEqual(['removeSfx']);
+    expect(reviewOpsL(timeline, item('sfx', 'sfx_1'), 'reject').map((o) => o.op)).toEqual(['removeSfx']);
   });
   it('does nothing for unknown ids; open items are only dropped', () => {
-    expect(reviewOps(timeline, item('segments', 'seg_x'), 'accept')).toEqual([]);
-    expect(reviewOps({}, item('captions', 'cap_1'), 'reject')).toEqual([]);
-    expect(reviewOps(timeline, item('open', 'chk_1'), 'accept')).toEqual([{ op: 'setReview', patch: { openItems: [{ ref: 'seg_2', kind: 'decision', summary: 'dup' }] } }]);
+    expect(reviewOpsL(timeline, item('segments', 'seg_x'), 'accept')).toEqual([]);
+    expect(reviewOpsL({}, item('captions', 'cap_1'), 'reject')).toEqual([]);
+    expect(reviewOpsL(timeline, item('open', 'chk_1'), 'accept')).toEqual([{ op: 'setReview', patch: { openItems: [{ ref: 'seg_2', kind: 'decision', summary: 'dup' }] } }]);
   });
   it('does not mutate the input timeline', () => {
     const before = JSON.stringify(timeline);
-    reviewOps(timeline, item('captions', 'cap_2'), 'reject');
-    reviewOps(timeline, item('scenes', 'scn_1'), 'accept');
+    reviewOpsL(timeline, item('captions', 'cap_2'), 'reject');
+    reviewOpsL(timeline, item('scenes', 'scn_1'), 'accept');
     expect(JSON.stringify(timeline)).toBe(before);
   });
 });

@@ -1,3 +1,4 @@
+import { loadDefaultJapaneseParser } from 'budoux';
 // ASS vector-drawing helpers for scene patterns. Coordinates are canvas pixels (PlayRes = canvas size).
 import { assColor, assEscape, assTagColor } from '../ass.js';
 
@@ -94,17 +95,37 @@ export function textWidthEm(s: string): number {
 }
 
 const NO_LINE_START = /^[、。，．・：；？！ー）」』】〉》〕｝”’,.!?)\]}…]/u;
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/;
 
-/** Greedy wrap to `maxEm` per line: words for spaced text, characters (with simple kinsoku) otherwise. */
+type Parser = ReturnType<typeof loadDefaultJapaneseParser>;
+let parser: Parser | null = null;
+
+/** BudouX phrases for Japanese text (concatenation gives back the input). */
+export function jaPhrases(text: string): string[] {
+  if (text === '') return [];
+  parser ??= loadDefaultJapaneseParser();
+  return parser.parse(text);
+}
+
+/**
+ * Greedy wrap to `maxEm` per line. Japanese breaks only between BudouX phrases (a phrase wider than a line is split by
+ * characters, keeping closing punctuation off line starts); other text breaks at spaces.
+ */
 export function wrapText(text: string, maxEm: number): string[] {
   const out: string[] = [];
   for (const para of text.split(/\r?\n/)) {
-    const spaced = /\s/.test(para.trim()) && !/[぀-ヿ一-鿿]/.test(para);
-    const atoms = spaced ? para.trim().split(/(?<=\s)/) : [...para.trim()];
+    const p = para.trim();
+    if (p === '') {
+      out.push('');
+      continue;
+    }
+    const ja = CJK.test(p);
+    let atoms: string[] = ja ? jaPhrases(p) : p.split(/(?<=\s)/);
+    atoms = atoms.flatMap((a) => (textWidthEm(a.trim()) > maxEm ? [...a] : [a]));
     let line = '';
     for (const a of atoms) {
       if (line !== '' && textWidthEm((line + a).trimEnd()) > maxEm) {
-        if (!spaced && NO_LINE_START.test(a)) {
+        if (NO_LINE_START.test(a)) {
           line += a; // keep closing punctuation on the previous line
           continue;
         }
@@ -112,7 +133,7 @@ export function wrapText(text: string, maxEm: number): string[] {
         line = a.trimStart();
       } else line += a;
     }
-    if (line.trim() !== '' || para.trim() === '') out.push(line.trimEnd());
+    out.push(line.trimEnd());
   }
   return out.filter((l, i, arr) => l !== '' || (i > 0 && i < arr.length - 1));
 }
@@ -140,8 +161,8 @@ export function fitText(text: string, boxW: number, boxH: number, maxSize: numbe
 }
 
 /** Text event body. */
-export function textAt(x: number, y: number, align: number, o: { font: string; size: number; color: string; bold?: boolean;
+export function textAt(x: number, y: number, align: number, o: { font: string; size: number; color: string; bold?: boolean; weight?: number;
   outline?: { color: string; width: number }; extra?: string }, lines: string[]): string {
   const bord = o.outline ? `\\3c${assTagColor(o.outline.color)}\\bord${Math.round(o.outline.width)}` : '\\bord0';
-  return `{\\an${align}\\pos(${r1(x)},${r1(y)})\\fn${o.font}\\fs${Math.round(o.size)}\\b${o.bold ? 1 : 0}\\1c${assTagColor(o.color)}\\1a&H00&${bord}\\shad0\\q2${o.extra ?? ''}}${lines.map(assEscape).join('\\N')}`;
+  return `{\\an${align}\\pos(${r1(x)},${r1(y)})\\fn${o.font}\\fs${Math.round(o.size)}\\b${o.weight ?? (o.bold ? 700 : 400)}\\1c${assTagColor(o.color)}\\1a&H00&${bord}\\shad0\\q2${o.extra ?? ''}}${lines.map(assEscape).join('\\N')}`;
 }

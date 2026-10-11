@@ -13,7 +13,7 @@ import {
   type NextContext, type StepId, type StepState,
 } from '@solocut/templates';
 import { DEFAULT_MANIFEST, ensureTool, resolveToolSync, solocutHome, toolStatus, whichSync, type ToolName } from '@solocut/toolchain';
-import { CLI_VERSION, CliError, emit, info, opts, t, type Ctx } from '../ctx.js';
+import { CLI_VERSION, CliError, emit, info, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import {
   listDirs, openProject, paths, projectTemplate, readStatus, readTimeline, readTimelineRaw, setStep, writeAtomic, writeStatus,
   writeTimeline, type Project, type ProjectFile,
@@ -308,19 +308,11 @@ export async function cmdLib(ctx: Ctx, args: string[]): Promise<void> {
       const tools = LIB_TOOLS[n];
       if (!tools) throw new CliError('usage', `unknown library: ${n} (${Object.keys(LIB_TOOLS).join(', ')})`);
       for (const tool of tools) {
-        let last = 0;
+        const mb = (x: number) => (x / 1e6).toFixed(1);
         const path = await ensureTool(tool, {
-          onProgress: ({ received, total }) => {
-            if (ctx.json) return;
-            const now = Date.now();
-            if (now - last < 200 && received !== total) return;
-            last = now;
-            const mb = (x: number) => (x / 1e6).toFixed(1);
-            const bar = total ? `[${'#'.repeat(Math.round((received / total) * 24)).padEnd(24, '.')}] ${Math.floor((received / total) * 100)}%` : '';
-            ctx.io.stderr(`\r${tool} ${bar} ${mb(received)}${total ? `/${mb(total)}` : ''} MB   `);
-          },
+          onProgress: ({ received, total }) => progress(ctx, `lib:${tool}`, total ? received / total : 0, total ? `${tool} ${mb(received)}/${mb(total)} MB` : `${tool} ${mb(received)} MB`),
         });
-        if (!ctx.json) ctx.io.stderr('\n');
+        progressDone(ctx, `lib:${tool}`);
         installed[tool] = path;
       }
     }

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, promises as fsp, readFileSync, readdirSync, stat
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem } from '../../shared/types';
-import { parseNext, parseSteps, reviewOps, timelineOverview } from '../../shared/project';
+import { isUnknownOpError, parseNext, parseSteps, reviewOps, timelineOverview } from '../../shared/project';
 import { mediaUrl } from '../../shared/ipc';
 import { runCli } from './cli';
 import { allowMediaRoot } from './media-protocol';
@@ -107,15 +107,17 @@ export async function snapshot(dir: string): Promise<ProjectSnapshot> {
   const project = readProject(dir);
   allowMediaRoot(dir);
 
-  const [status, next] = await Promise.all([runCli(['status'], { cwd: dir, timeoutMs: 30_000 }), runCli(['next'], { cwd: dir, timeoutMs: 30_000 })]);
+  // `status --json` carries both steps and next (CONTRACTS.md)
+  const status = await runCli(['status'], { cwd: dir, timeoutMs: 30_000 });
   let steps = status.ok ? parseSteps(status.data) : [];
   if (steps.length === 0) steps = parseSteps(readJson(join(dir, '.solocut', 'status.json')));
   if (!status.ok && status.error) errors.push(`status: ${status.error}`);
+  const sd = status.data as { timelineError?: unknown } | undefined;
+  if (status.ok && typeof sd?.timelineError === 'string') errors.push(`timeline.json: ${sd.timelineError}`);
 
   const snap: ProjectSnapshot = { project, steps, errors };
-  const n = next.ok ? parseNext(next.data) : undefined;
+  const n = status.ok ? parseNext(status.data) : undefined;
   if (n) snap.next = n;
-  else if (!next.ok && next.error && next.error !== status.error) errors.push(`next: ${next.error}`);
 
   const tlPath = join(dir, 'timeline.json');
   if (existsSync(tlPath)) {
@@ -133,7 +135,7 @@ export async function applyOps(dir: string, ops: unknown[]): Promise<CliResult> 
   const file = join(tmpdir(), `solocut-ops-${process.pid}-${Date.now()}.json`);
   writeFileSync(file, JSON.stringify(ops));
   try {
-    return await runCli(['edit', '--ops', file], { cwd: dir });
+    return await runCli(['edit', '--ops', file, '--by', 'human'], { cwd: dir });
   } finally {
     await fsp.rm(file, { force: true });
   }
@@ -141,7 +143,9 @@ export async function applyOps(dir: string, ops: unknown[]): Promise<CliResult> 
 
 export async function review(dir: string, item: ReviewItem, decision: 'accept' | 'reject'): Promise<CliResult> {
   const t = readJson(join(dir, 'timeline.json'));
-  return applyOps(dir, reviewOps(t, item, decision));
+  const r = await applyOps(dir, reviewOps(t, item, decision, 'setDecided'));
+  if (!r.ok && isUnknownOpError(r.data ?? r.error)) return applyOps(dir, reviewOps(t, item, decision, 'legacy'));
+  return r;
 }
 
 export async function useAsReference(dir: string, archiveId: string): Promise<CliResult> {

@@ -18,7 +18,11 @@ export async function atomicOutput(out: string, run: (tmp: string) => Promise<vo
     if (!existsSync(tmp) || statSync(tmp).size === 0) throw new MediaError(`ffmpeg produced no output for ${out}`);
     renameSync(tmp, out);
   } finally {
-    rmSync(tmp, { force: true });
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // still locked by a process being killed (Windows); it is a dot-file and harmless
+    }
   }
 }
 

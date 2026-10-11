@@ -3,9 +3,9 @@
 // second and are appended to disk immediately (crash-safe). take.json is rewritten on start, on every marker
 // and on stop.
 import type { TakeMarker, TakeMeta, TakeTrackMeta } from '@shared/types';
-import { pickVideoMime, toInt16Interleaved } from '@shared/pcm';
+import { pickVideoMime } from '@shared/pcm';
 import { api } from './api';
-import workletSource from './pcm-worklet.js?raw';
+import { SAMPLE_RATE, ensureWorklet, startPcmCapture } from './pcm-capture';
 
 export interface CameraChoice {
   deviceId: string;
@@ -36,7 +36,6 @@ export interface RecStatus {
 type Listener = (s: RecStatus) => void;
 
 const CHUNK_MS = 1000;
-const SAMPLE_RATE = 48000;
 
 interface Writer {
   file: string;
@@ -177,67 +176,19 @@ class Recorder {
   private async startAudio(takeId: string, file: string, kind: 'mic' | 'system', stream: MediaStream, label: string, device?: string): Promise<void> {
     const track = stream.getAudioTracks()[0];
     if (!track) return;
-    const ctx = this.audioCtx ?? new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' });
-    if (!this.audioCtx) {
-      this.audioCtx = ctx;
-      // Loaded from a blob URL: worklet module fetches from file:// are not reliable in packaged apps.
-      const url = URL.createObjectURL(new Blob([workletSource], { type: 'text/javascript' }));
-      try {
-        await ctx.audioWorklet.addModule(url);
-      } finally {
-        URL.revokeObjectURL(url);
-      }
-    }
+    const ctx = (this.audioCtx ??= new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' }));
+    await ensureWorklet(ctx);
     const channels = Math.min(2, Math.max(1, track.getSettings().channelCount ?? 1));
     await api.invoke('record:openTrack', { takeId, file, kind, wav: { sampleRate: ctx.sampleRate, channels } });
     const meta: TakeTrackMeta = { file, kind, label, sampleRate: ctx.sampleRate, channels };
     if (device) meta.device = device;
-    const srcNode = ctx.createMediaStreamSource(new MediaStream([track]));
-    const node = new AudioWorkletNode(ctx, 'pcm-tap', { channelCount: channels, channelCountMode: 'explicit' });
-    // keep the node pulled by the graph without making it audible
-    const mute = ctx.createGain();
-    mute.gain.value = 0;
-    srcNode.connect(node);
-    node.connect(mute).connect(ctx.destination);
     const w: Writer = { file, queue: Promise.resolve(), meta, stop: async () => undefined };
-    let pending: Uint8Array[] = [];
-    let pendingBytes = 0;
-    const flush = () => {
-      if (pendingBytes === 0) return;
-      const out = new Uint8Array(pendingBytes);
-      let o = 0;
-      for (const p of pending) {
-        out.set(p, o);
-        o += p.byteLength;
-      }
-      pending = [];
-      pendingBytes = 0;
-      this.append(w, out);
-    };
-    node.port.onmessage = (ev: MessageEvent<{ first?: boolean; t?: number; data?: Float32Array[] }>) => {
-      const m = ev.data;
-      if (m.first && m.t !== undefined) {
-        const ts = ctx.getOutputTimestamp();
-        if (ts.contextTime !== undefined && ts.performanceTime !== undefined) {
-          meta.firstFrameMs = ts.performanceTime + (m.t - ts.contextTime) * 1000;
-        }
-        return;
-      }
-      if (m.data && m.data.length > 0) {
-        const pcm = toInt16Interleaved(m.data.slice(0, channels));
-        pending.push(pcm);
-        pendingBytes += pcm.byteLength;
-      }
-    };
     meta.recorderStartMs = performance.now();
-    const timer = window.setInterval(flush, CHUNK_MS);
+    const cap = await startPcmCapture(ctx, track, (pcm) => this.append(w, pcm), { maxChannels: channels });
     w.stop = async () => {
-      window.clearInterval(timer);
-      srcNode.disconnect();
-      node.disconnect();
-      mute.disconnect();
-      node.port.onmessage = null;
-      flush();
+      cap.stop();
+      const f = cap.firstSampleMs();
+      if (f !== undefined) meta.firstFrameMs = f;
       await w.queue;
       await api.invoke('record:closeTrack', takeId, file);
     };

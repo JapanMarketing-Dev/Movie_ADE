@@ -13,7 +13,7 @@ export type Op =
   | { op: 'addSource'; id: string; source: Source }
   | { op: 'removeSource'; id: string }
   | { op: 'updateSource'; id: string; patch: Record<string, unknown> }
-  | { op: 'setTranscript'; transcript: TranscriptRef | null }
+  | { op: 'setTranscript'; transcript?: TranscriptRef | null }
   | { op: 'setDecided'; target: string; decided: Decided }
   | { op: 'addSegment'; segment: Segment; index?: number }
   | { op: 'removeSegment'; id: string; decided: Decided }
@@ -90,7 +90,26 @@ function patchObject<T extends object>(obj: T, patch: Partial<T>): { next: T; in
 }
 
 function withSegments(t: Timeline, segments: Segment[]): Timeline {
-  return { ...t, segments: repackSegments(t, segments) };
+  return reanchor({ ...t, segments: repackSegments(t, segments) });
+}
+
+/**
+ * Move anchored scenes to `segment.start + offset` (keeping their length). Scenes whose segment no longer exists keep
+ * their last range (validation warns).
+ */
+export function reanchor(t: Timeline): Timeline {
+  if (!t.scenes.some((s) => s.anchor)) return t;
+  const starts = new Map(t.segments.map((s) => [s.id, s.range.start]));
+  let changed = false;
+  const scenes = t.scenes.map((sc) => {
+    const base = sc.anchor ? starts.get(sc.anchor.segment) : undefined;
+    if (base === undefined) return sc;
+    const start = base + sc.anchor!.offset;
+    if (start === sc.range.start) return sc;
+    changed = true;
+    return { ...sc, range: { start, end: start + (sc.range.end - sc.range.start) } };
+  });
+  return changed ? { ...t, scenes } : t;
 }
 
 function checkRange(op: OpName, from: number, to: number): void {
@@ -151,7 +170,7 @@ function applyOne(t: Timeline, op: Op): { timeline: Timeline; inverse: Op[] } {
     }
     case 'setTranscript': {
       const tl = { ...t };
-      if (op.transcript) tl.transcript = clone(op.transcript);
+      if (op.transcript) tl.transcript = clone(op.transcript); // null or undefined clears
       else delete tl.transcript;
       return { timeline: tl, inverse: [{ op: 'setTranscript', transcript: t.transcript ? clone(t.transcript) : null }] };
     }
@@ -319,7 +338,7 @@ function applyOne(t: Timeline, op: Op): { timeline: Timeline; inverse: Op[] } {
     case 'addScene': {
       if (t.scenes.some((s) => s.id === op.scene.id)) throw new OpError(op.op, `duplicate scene id: ${op.scene.id}`);
       return {
-        timeline: { ...t, scenes: insertAt(t.scenes, clone(op.scene), op.index) },
+        timeline: reanchor({ ...t, scenes: insertAt(t.scenes, clone(op.scene), op.index) }),
         inverse: [{ op: 'removeScene', id: op.scene.id }],
       };
     }

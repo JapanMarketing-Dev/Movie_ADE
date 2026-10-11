@@ -267,6 +267,9 @@ describe('setDecided / setTranscript / updateSource', () => {
     expect(t.transcript).toEqual(tr);
     const cleared = expectUndo(t, { op: 'setTranscript', transcript: null });
     expect('transcript' in cleared).toBe(false);
+    // the CLI may send no transcript at all (undefined) to clear
+    const cleared2 = expectUndo(t, { op: 'setTranscript' });
+    expect(cleared2.transcript).toBeUndefined();
   });
   it('updateSource patches sync results and re-packs when the take clock changes', () => {
     let t = expectUndo(fixture(), { op: 'updateSource', id: 'cam', patch: { offset: -12, drift: 1.00002, sync: { method: 'xcorr', confidence: 0.97 } } });

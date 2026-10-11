@@ -27,7 +27,9 @@ export interface PatternTheme {
   bubbleFill: string;
   bubbleText: string;
   panel: string;
+  /** Text font family (bundled OFL: Noto Sans JP, weights 400/700/900). */
   font: string;
+  /** Code font family (bundled OFL: JetBrains Mono). */
   mono: string;
 }
 
@@ -57,7 +59,7 @@ export const DEFAULT_THEME: PatternTheme = {
   bubbleText: '#111111',
   panel: '#161B26',
   font: 'Noto Sans JP',
-  mono: 'monospace',
+  mono: 'JetBrains Mono',
 };
 
 const BOTH = ['16:9', '9:16'] as ('16:9' | '9:16')[];

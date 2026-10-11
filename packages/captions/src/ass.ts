@@ -145,7 +145,8 @@ export function toAss(captions: Caption[], style: CaptionStyle, canvas: Canvas, 
     const y = Math.round(c.position.y * canvas.height);
     const runs = lineRuns(c, fps, style.karaoke);
     const body = runs.map((line) => line.map((r) => renderRun(r, style, sizePx)).join('')).join('\\N');
-    events.push(assDialogue(0, c.range.start, c.range.end, fps, 'Caption', `{\\an${align}\\pos(${x},${y})}${body}`));
+    const weight = style.weight ? `\\b${style.weight}` : '';
+    events.push(assDialogue(0, c.range.start, c.range.end, fps, 'Caption', `{\\an${align}\\pos(${x},${y})${weight}}${body}`));
   }
   return `${assHeader(canvas, [styleLine])}\n${events.join('\n')}\n`;
 }

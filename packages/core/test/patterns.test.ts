@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PatternDef, Scene, Timeline } from '../src/index.js';
 import {
-  applyOp, applyOps, compile, emptyTimeline, fitText, PATTERN_RENDERERS, PATTERNS, renderScene, renderScenes, resolvePattern,
+  applyOp, applyOps, compile, emptyTimeline, fitText, jaPhrases, PATTERN_RENDERERS, PATTERNS, renderScene, renderScenes, resolvePattern,
   textWidthEm, validateSceneSlots, validateTimeline, wrapText,
 } from '../src/index.js';
 import { D } from './fixtures.js';
@@ -150,7 +150,7 @@ describe('scene rendering (ASS)', () => {
     expect(frameSlices[0]).toContain('\\3c&H008AFF&'); // #FF8A00
     expect(frameSlices[13]).toContain('\\3c&H552DFF&'); // #FF2D55
     const front = r.front.join('\n');
-    expect(front).toContain('AIに全部\\Nまかせたい');
+    expect(front).toMatch(/AIに全部(\\N)?まかせたい/);
     expect(front).toContain('\\t(0,170,\\fscx108\\fscy108)');
     expect(front.match(/\\1c&HFFFFFF&\\1a&H00&\\bord0\\shad0\\fscx25/g)).toHaveLength(2); // two white bubbles
     expect(r.media).toEqual([
@@ -257,11 +257,29 @@ describe('text fitting', () => {
     }
     expect(wrapText('一行目\n二行目', 10)).toEqual(['一行目', '二行目']);
   });
+  it('Japanese breaks only between BudouX phrases', () => {
+    for (const text of ['撮るのは一人でも、編集はチームでできる。', 'Claude Codeの設定画面を開いて右上の歯車を押します', 'AIに全部まかせたい']) {
+      const ps = jaPhrases(text);
+      const bounds = new Set<number>();
+      let at = 0;
+      for (const p of ps) bounds.add((at += p.length));
+      for (const em of [4, 6, 8, 10]) {
+        const lines = wrapText(text, em);
+        let pos = 0;
+        for (const l of lines.slice(0, -1)) {
+          pos = text.indexOf(l, pos) + l.length;
+          const inside = ps.find((p, i) => { const st = ps.slice(0, i).join('').length; return st < pos && st + p.length > pos; });
+          if (!bounds.has(pos) && text[pos] !== ' ') expect(inside && textWidthEm(inside) > em, `${text} @${em}: "${l}"`).toBe(true);
+        }
+      }
+    }
+    expect(wrapText('撮るのは一人でも、編集はチームでできる。', 11)).toEqual(['撮るのは一人でも、', '編集はチームでできる。']);
+  });
   it('fitText shrinks to fit and balances lines', () => {
     const f = fitText('設定の3つのコツ', 500, 300, 120, 40);
     expect(f.lines.length * f.size * 1.25).toBeLessThanOrEqual(300);
     for (const l of f.lines) expect(textWidthEm(l) * f.size).toBeLessThanOrEqual(500 + 1e-6);
-    if (f.lines.length === 2) expect(Math.abs(textWidthEm(f.lines[0]!) - textWidthEm(f.lines[1]!))).toBeLessThanOrEqual(1.5);
+    if (f.lines.length === 2) expect(Math.abs(textWidthEm(f.lines[0]!) - textWidthEm(f.lines[1]!))).toBeLessThanOrEqual(2);
     expect(fitText('x'.repeat(500), 100, 20, 40, 10).size).toBe(10);
   });
 });

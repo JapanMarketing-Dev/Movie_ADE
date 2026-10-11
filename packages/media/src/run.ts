@@ -90,19 +90,41 @@ export function runTool(tool: Tool, bin: string, args: string[], o: RunOptions =
       if (!o.captureStderr && stderr.length > TAIL * 2) stderr = stderr.slice(-TAIL);
     });
     child.stdout.on('data', (d: Buffer) => o.onStdout?.(d));
-    const onAbort = () => child.kill('SIGKILL');
+    let settled = false;
+    const onAbort = () => {
+      killTree(child.pid, () => child.kill('SIGKILL'));
+      // Settle right away: on Windows the process may take a moment to go after taskkill.
+      settled = true;
+      reject(abortError());
+    };
     o.signal?.addEventListener('abort', onAbort, { once: true });
     child.on('error', (e) => {
       o.signal?.removeEventListener('abort', onAbort);
-      reject(new MediaError(`could not start ${tool} (${bin}): ${e.message}`));
+      if (!settled) reject(new MediaError(`could not start ${tool} (${bin}): ${e.message}`));
     });
     child.on('close', (code) => {
       o.signal?.removeEventListener('abort', onAbort);
+      if (settled) return;
       if (o.signal?.aborted) reject(abortError());
       else if (code === 0) resolve({ stderr });
       else reject(new FfmpegError(tool, code, stderr.slice(-TAIL), args));
     });
   });
+}
+
+/**
+ * Kill a process and its children. On Windows a signal does not stop ffmpeg (or its children), so use
+ * `taskkill /T /F`; elsewhere SIGKILL. `fallback` runs if taskkill cannot be started.
+ */
+export function killTree(pid: number | undefined, fallback: () => void, platform: NodeJS.Platform = process.platform): void {
+  if (pid === undefined) return fallback();
+  if (platform === 'win32') {
+    const k = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    k.on('error', fallback);
+    k.on('exit', (code) => { if (code !== 0) fallback(); });
+    return;
+  }
+  fallback();
 }
 
 function abortError(): Error {

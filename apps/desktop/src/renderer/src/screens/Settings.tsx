@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RotateCcw, Save } from 'lucide-react';
 import type { AppInfo, SettingsDoc, UpdateState } from '@shared/types';
 import { useT } from '../i18n';
+import { ApiKeys } from '../components/ApiKeys';
 import { api, errMsg } from '../lib/api';
 
 type Which = 'settings' | 'prompts';
@@ -147,6 +148,8 @@ export function Settings({ info, toast, onSaved }: { info: AppInfo | null; toast
             </select>
           </div>
         </div>
+        <h2 style={{ margin: '10px 0 0' }}>{t('keys.title')}</h2>
+        <ApiKeys toast={toast} />
         <div style={{ flex: 1 }} />
         <div className="dim" style={{ fontSize: 12 }}>
           {t('set.version')} {info?.version} · {info?.os}/{info?.arch}

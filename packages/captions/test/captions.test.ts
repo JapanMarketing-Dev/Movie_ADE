@@ -223,7 +223,7 @@ describe('toAss', () => {
     expect(ass).toContain('PlayResY: 1920');
     expect(ass).toMatch(/Style: Caption,Noto Sans JP,81,&H0000E6FF,&H00FFFFFF,&H00000000/);
     const line = ass.split('\n').find((l) => l.startsWith('Dialogue:'))!;
-    expect(line).toBe('Dialogue: 0,0:00:01.00,0:00:03.00,Caption,,0,0,0,,{\\an2\\pos(540,1344)}{\\k50}設定{\\k17}を\\N{\\k133}開きます');
+    expect(line).toBe('Dialogue: 0,0:00:01.00,0:00:03.00,Caption,,0,0,0,,{\\an2\\pos(540,1344)\\b900}{\\k50}設定{\\k17}を\\N{\\k133}開きます');
   });
   it('karaoke durations add up to the caption length', () => {
     const ass = toAss([cap()], style, V, F30);
