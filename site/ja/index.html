@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ja" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solocut — 1人で撮る。編集はテンプレどおりにAIが。</title>
+  <meta name="description" content="Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07070a">
+  <link rel="canonical" href="https://solocut.app/ja">
+  <link rel="alternate" hreflang="en" href="https://solocut.app">
+  <link rel="alternate" hreflang="ja" href="https://solocut.app/ja">
+  <link rel="alternate" hreflang="x-default" href="https://solocut.app">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Solocut">
+  <meta property="og:title" content="Solocut — 1人で撮る。編集はテンプレどおりにAIが。">
+  <meta property="og:description" content="Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。">
+  <meta property="og:url" content="https://solocut.app/ja">
+  <meta property="og:image" content="https://solocut.app/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://solocut.app/assets/og.png">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/js/app.js"></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut は、YouTube・TikTok 向けの無料・オープンソースの動画編集ADE。画面とカメラを同時に収録し、Claude Code や Codex がテンプレートどおりにターミナルで編集。判定モデルがフレーム単位で最終チェックします。"}</script>
+</head>
+<body data-page="home" data-lang="ja">
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z"/><path d="M4 21a2 2 0 0 1 2-2h13v2H6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="5" rx="1"/><path d="M5 13v8h14v-8M12 8v13M12 8S10.5 3 8 3.8C5.7 4.6 7.5 8 12 8zM12 8s1.5-5 4-4.2C18.3 4.6 16.5 8 12 8z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.1-8 9-4.6-.9-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 6V4h16v2M12 4v16M9 20h6"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+  <symbol id="i-json" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+</svg>
+<a class="skip" href="#main">本文へ移動</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#how">使い方</a>
+      <a href="#templates">テンプレート</a>
+      <a href="#checks">フレームチェック</a>
+      <a href="#faq">よくある質問</a>
+    </nav>
+    <div class="header-actions">
+      <a class="lang-switch" href="/" hreflang="en" lang="en">English</a>
+      <a class="btn btn-sm btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label-hide">GitHub</span></a>
+      <a class="btn btn-sm btn-primary" href="/ja/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="btn-label-hide">ダウンロード</span></a>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="dot"></span>動画編集ADE · 無料・オープンソース · 開発中</p>
+        <h1>1人で撮る。<br>編集は<em>テンプレどおりにAIが。</em></h1>
+        <p class="lede">技術動画と語り動画のために。画面・カメラ・マイクを同時に収録。あとは Claude Code や Codex などのターミナルのAIエージェントが、決めておいたテンプレートどおりにカット・字幕・レイアウトを仕上げます。判定モデルがカットの境目をフレーム単位でチェックし、修正はプレビューを見ながら喋って囲むだけ。</p>
+        <div class="hero-actions">
+          <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
+          <a class="btn btn-lg btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>設計を読む</a>
+        </div>
+        <p class="hero-meta">macOS · Windows · Linux · MIT ライセンス · YouTube / TikTok / Shorts / Reels</p>
+      </div>
+      <div class="mock reveal" aria-hidden="true">
+  <div class="mock-bar"><i></i><i></i><i></i><span>solocut — tiktok-talk</span></div>
+  <div class="mock-body">
+    <div class="mock-preview">
+      <div class="phone">
+        <svg class="person" viewBox="0 0 120 150"><circle cx="60" cy="52" r="30" fill="#5d6687"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z" fill="#454d6b"/></svg>
+        <div class="safe"></div>
+        <div class="mosaic"></div><span class="tag">自動モザイク · メール</span>
+        <div class="cap" data-cap><span>この</span><span>設定で</span><span>全部</span><span>変わります</span></div>
+      </div>
+    </div>
+    <div class="mock-tl">
+      <div class="tl-head"><span>timeline.json</span><span>1080×1920 · 30fps</span></div>
+      <div class="tl-row"><span>画面</span><div class="tl-track"><i class="seg" style="left:2%;width:26%"></i><i class="seg cut" data-cut style="left:28%;width:6%"></i><i class="seg" style="left:35%;width:30%"></i><i class="seg cut" data-cut style="left:66%;width:5%"></i><i class="seg" style="left:72%;width:26%"></i><div class="playhead"></div></div></div>
+      <div class="tl-row"><span>カメラ</span><div class="tl-track"><i class="seg cam" style="left:2%;width:26%"></i><i class="seg cut" data-cut style="left:28%;width:6%"></i><i class="seg cam" style="left:35%;width:30%"></i><i class="seg cut" data-cut style="left:66%;width:5%"></i><i class="seg cam" style="left:72%;width:26%"></i></div></div>
+      <div class="tl-row"><span>字幕</span><div class="tl-track"><i class="seg cap" style="left:4%;width:10%"></i><i class="seg cap" style="left:16%;width:10%"></i><i class="seg cap" style="left:37%;width:12%"></i><i class="seg cap" style="left:51%;width:12%"></i><i class="seg cap" style="left:74%;width:11%"></i><i class="seg cap" style="left:87%;width:9%"></i></div></div>
+      <div class="tl-row"><span>マイク</span><div class="tl-track"><div class="wave"></div></div></div>
+      <div class="checks"><div class="chk" data-s="0.94"><span class="fn">00:12:04</span></div><div class="chk" data-s="0.91"><span class="fn">00:18:22</span></div><div class="chk warn" data-s="0.62"><span class="fn">00:41:07</span></div><div class="chk" data-s="0.97"><span class="fn">00:52:15</span></div></div>
+    </div>
+    <div class="mock-term">
+      <div class="term-tabs"><span class="on">claude</span><span>codex</span><span>gemini</span></div>
+      <div class="term-lines" data-term><div class="t-p">$ solocut next --json</div><div class="t-d">→ 手順 rough-cut：カット候補 23 件</div><div>$ solocut propose cuts</div><div class="t-ok">✓ 19 件を判定モデルが決定</div><div class="t-w">? 4 件はあなたの確認へ（0.42〜0.61）</div><div>$ solocut captions build &amp;&amp; solocut render --preview</div><div>$ solocut check</div><div class="t-ok">✓ 312 フレーム · カット境目 · セーフエリア · 個人情報</div><div class="t-w">! 00:00:41:07 字幕が顔にかかっている（0.62）</div><div>$ solocut edit move-caption c52 --y 1420</div><div class="t-ok">✓ すべてのチェックに合格</div></div>
+    </div>
+  </div>
+</div>
+    </div>
+  </section>
+
+  <section class="works" aria-label="対応エージェント">
+    <div class="wrap works-row"><strong>対応エージェント</strong><span>Claude Code</span><span>Codex</span><span>Gemini CLI</span><span>OpenCode</span><span>Cursor</span><span>GitHub Copilot</span><span>独自のCLI</span></div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">使い方</p><h2>撮ったテイクから完成まで。タイムラインは触らない。</h2><p>すべての手順は、エージェントが実行するコマンドです。順番はテンプレートが決め、<code>solocut next</code> が「今やること」を常にエージェントへ伝えます。</p></div>
+      <ol class="flow reveal">
+        <li><h3>テンプレートを選ぶ</h3><p>TikTok 縦型トーク、YouTube 解説、長尺からショート…。フォーマット、レイアウト、カット方針、字幕スタイルが決まります。</p></li>
+        <li><h3>撮る</h3><p>画面・カメラ・マイクを同時に、それぞれ別トラックで。別のカメラの素材もあとから足せます。</p></li>
+        <li><h3>エージェントに頼む</h3><p>「編集して」。Claude Code や Codex がテンプレートどおりに、同期・文字起こし・粗カット・字幕・レイアウトを進めます。</p></li>
+        <li><h3>判定モデルが決める</h3><p>切るか残すか、どのテイクを使うか、字幕をどこで改行するか。迷うものだけがあなたに届きます。</p></li>
+        <li><h3>全フレームをチェック</h3><p>カットの境目、黒コマ、字幕のセーフエリア、顔との重なり、画面に映った個人情報、モザイクの追跡。</p></li>
+        <li><h3>プレビューに喋る</h3><p>気になるところを囲んで話すだけ。タイムコード付きの指示になってエージェントへ。あとは書き出し。</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="record">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">撮影</p><h2>画面とカメラを同時に。別カメラは、あとから自動で同期。</h2><p class="lede" style="font-size:17px">入力ごとに別トラックで保存するので、ワイプ、上下分割、カメラのみ、画面のみを、テンプレートで区間ごとに切り替えられます。</p><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>画面・カメラ・マイク・PCの音声を、同じ時計で同時に収録</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>ミラーレスや iPhone で撮った素材を取り込むと、音声でフレーム単位に自動同期。長尺の時計のズレも補正</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>カンペ、カウントダウン、話しながら「今のNG」「ここ重要」を残すホットキー</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>1秒ごとにファイルへ書き込むので、落ちても消えない</span></li></ul></div>
+      <div class="card reveal"><div class="tracks"><div class="trk"><span>画面</span><div class="bar"><i style="left:4%;width:92%;background:#3b4a8a"></i></div></div><div class="trk"><span>カメラ</span><div class="bar"><i style="left:4%;width:92%;background:#2f6e5a"></i></div></div><div class="trk"><span>カメラB</span><div class="bar"><i style="left:22%;width:70%;background:#5a3f7d"></i></div></div><div class="trk"><span>マイク</span><div class="bar"><div class="wavebar"></div></div></div></div><p class="sync-note">✓ カメラB を同期 · オフセット −128 フレーム · 信頼度 0.97</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="templates">
+    <div class="wrap split rev">
+      <div class="reveal"><p class="kicker">テンプレート</p><h2>動画の作り方は、一度決めておく。</h2><p class="lede" style="font-size:17px">テンプレートは、見た目・プロンプトで書いた編集方針・作業手順をまとめた定義です。Solocut がテンプレートからエージェントへの指示書を生成するので、どのエージェントでも同じ手順・同じ品質基準で仕上がります。</p><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>組み込み：技術解説、技術ショート、語り（YouTube）、語り（TikTok）、長尺からショート</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>技術動画用は、クリックした場所への自動ズーム、押したキーの表示、カーソルの強調つき</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>複数カメラの画角の切り替えも、方針を言葉で書いたプロンプトどおりにエージェントが行います</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><code>solocut next</code> が手順と合格条件を守らせます</span></li></ul></div>
+      <div class="card reveal"><pre class="code"><span class="c"># templates/tiktok-talk/template.yaml</span>
+<span class="k">id</span>: tiktok-talk
+<span class="k">canvas</span>: { width: 1080, height: 1920, fps: 30 }
+<span class="k">layouts</span>: [camera-full, screen-top-camera-bottom]
+<span class="k">cut</span>:
+  <span class="k">silence</span>: { minMs: 300, padMs: 80 }
+  <span class="k">fillers</span>: [<span class="s">えー, えっと, あのー</span>]
+  <span class="k">retakes</span>: keep-last
+<span class="k">captions</span>: { style: tiktok-bold, highlight: word, safeArea: tiktok }
+<span class="k">audio</span>: { loudness: -14, truePeak: -1 }
+<span class="k">checks</span>: [cut-boundaries, caption-safe-area, pii-on-screen]
+<span class="k">pipeline</span>:
+  [ingest, sync, transcribe, rough-cut, captions,
+   layout, preview, check, review, final]</pre></div>
+    </div>
+  </section>
+
+  <section class="section" id="terminal">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">ターミナル</p><h2>エージェントも、サブスクも、ターミナルも、いつものまま。</h2><p>アプリの中で、エージェントのCLIを本物のターミナルとして動かします。タブで切り替えても、状態はプロジェクトのファイルにあるので、別のエージェントがそのまま続きを進められます。</p></div>
+      <ul class="feat-grid reveal">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><h3>どのCLIエージェントでも</h3><p>Claude Code、Codex、Gemini CLI、OpenCode、Cursor、GitHub Copilot、独自のコマンドも。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-swap"/></svg><h3>切り替えと引き継ぎ</h3><p>使用量の上限に達したら、次のエージェントが引き継ぎメモを読んで続けます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><h3>いつも最新</h3><p>Solocut 自体は Cloudflare から署名付きで自動更新。エージェントCLIの新しい版もお知らせします。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><h3>CLIだけでも動く</h3><p><code>solocut</code> はアプリなしでも、手元のターミナルや CI で使えます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-undo"/></svg><h3>すべての編集を戻せる</h3><p>編集は操作のログとして残ります。誰が・何を・なぜ変えたかが分かり、いつでも戻せます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><h3>元の素材は書き換えない</h3><p>撮った素材は読み取り専用。それ以外はすべて作り直せます。</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="checks">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">判定モデル</p><h2>大事なフレームは、すべて最終チェック。</h2><p>まず機械的なチェック（黒コマ、フリーズ、ラウドネス、仕様）。次に判定モデルが、すべてのカットの前後、字幕の切り替わり、モザイクのフレームを見て、型の決まった問いに確率で答えます。自信があるものは自動で反映、迷うものだけがあなたに届きます。</p></div>
+      <div class="frames reveal"><div class="frame ok"><div class="img"></div><div class="meta"><b>カット 00:12:04</b>目は開いている · 合格 0.94</div></div><div class="frame ok"><div class="img"></div><div class="meta"><b>字幕 c18</b>セーフエリア内</div></div><div class="frame ask"><div class="img"></div><div class="meta"><b>カット 00:41:07</b>言葉の途中？ 0.58 → 確認へ</div></div><div class="frame ng"><div class="img"></div><div class="meta"><b>フレーム 01:02:11</b>メールが見える → モザイク</div></div></div>
+      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Ollama で完全ローカル、または自分の API キーで（TypeSafe、OpenAI、Anthropic、Gemini、Workers AI）</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>プロジェクトごと・1日ごとの費用の上限と、すべての呼び出しの記録</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>送るのはフレーム画像と文字起こしだけ。同意してからのみ</span></li></ul></div>
+    </div>
+  </section>
+
+  <section class="section" id="mosaic">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">モザイク</p><h2>個人情報は、自動で隠して追いかける。</h2><p class="lede" style="font-size:17px">メールアドレス、通知、APIキー、電話番号、映り込んだ他人の顔やナンバープレートを検出・追跡して、モザイク・ぼかし・塗りつぶしをかけます。範囲は元の素材の座標で持つので、レイアウトを変えても 9:16 に切り出しても、ずれません。</p></div>
+      <div class="card reveal"><pre class="code"><span class="c">// timeline.json</span>
+<span class="k">"masks"</span>: [{
+  <span class="k">"kind"</span>: <span class="s">"pixelate"</span>,
+  <span class="k">"reason"</span>: <span class="s">"pii:email"</span>,
+  <span class="k">"source"</span>: <span class="s">"t1.screen"</span>,
+  <span class="k">"track"</span>: [
+    { <span class="k">"frame"</span>: 120, <span class="k">"box"</span>: [412, 88, 260, 28] },
+    { <span class="k">"frame"</span>: 180, <span class="k">"box"</span>: [412, 40, 260, 28] }
+  ],
+  <span class="k">"confidence"</span>: 0.93
+}]</pre></div>
+    </div>
+  </section>
+
+  <section class="section" id="feedback">
+    <div class="wrap split rev">
+      <div class="reveal"><p class="kicker">動画でフィードバック</p><h2>直してほしいところは、書かずに指す。</h2><p class="lede" style="font-size:17px">プレビューを再生して、喋る・止める・囲む。端末内で文字起こしして、指摘ごとに「タイムコード、ペン入りのフレーム、あなたの言葉、指した字幕やクリップ」にまとめます。ワンクリックでエージェントへ。</p></div>
+      <div class="fb reveal" aria-hidden="true">
+        <span class="bubble"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>「この字幕、顔にかぶってる。下にずらして」</span>
+        <span class="tc">00:00:41:07</span>
+        <svg class="pen" viewBox="0 0 400 250" preserveAspectRatio="none"><path d="M120 196c-30-14-22-40 30-46 70-8 150-6 168 14 14 18-30 34-110 36-50 2-90-2-110-10"/></svg>
+        <span class="fbcap">この設定で全部変わります</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="benchmark">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">ベンチマーク</p><h2>URL を貼るだけ。真似るのは動画ではなく、パターン。</h2><p class="lede" style="font-size:17px">YouTube や TikTok の動画をアプリ内のブラウザで開くと、再生している間に、字幕の出し方、効果音の入れどころ、話し声に対する BGM の音量、カットの間隔を測り、使えるテンプレートにします。動画はダウンロードせず、残すのは数値だけです。</p></div>
+      <div class="card reveal">
+        <p class="bench-url">youtube.com/watch?v=…</p>
+        <dl class="bench"><div><dt>字幕</dt><dd>下から 22% · 1行 14 文字 · 単語ハイライト · 黄色で強調</dd></div><div><dt>カット</dt><dd>平均 2.4 秒 · 1分に 14 回のジャンプカット · ズーム ×1.12</dd></div><div><dt>BGM</dt><dd>Lo-fi · 88 BPM · 声より −21 dB · ダッキングあり</dd></div><div><dt>効果音</dt><dd>1分に 9 回 · 強調で「ポン」· 章の切り替えで「シュッ」</dd></div><div><dt>声</dt><dd>1分 380 文字 · −15 LUFS</dd></div></dl>
+        <p class="bench-apply"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>talk-tiktok に取り込む</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="libraries">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">ライブラリ</p><h2>定番のオープンなツールを、必要なときにダウンロード。</h2><p>Solocut 本体は小さく保ちます。FFmpeg や whisper.cpp などは初めて使うときに取得し、バージョンを固定してハッシュ値で検証。特別な利用条件があるツールは、入れる前に同意を確認します。</p></div>
+      <div class="libs reveal"><div class="lib"><b>FFmpeg</b><span>カット・合成・字幕・音量</span></div><div class="lib"><b>whisper.cpp</b><span>端末内の文字起こし</span></div><div class="lib"><b>Remotion</b><span>React のモーショングラフィックス</span><br><em>利用条件あり</em></div><div class="lib"><b>HyperFrames</b><span>HTML のモーショングラフィックス</span></div><div class="lib"><b>Revideo</b><span>TypeScript のモーショングラフィックス</span></div><div class="lib"><b>MediaPipe</b><span>顔検出・リフレーム・モザイク</span></div><div class="lib"><b>PySceneDetect</b><span>シーン検出</span></div><div class="lib"><b>OpenTimelineIO</b><span>Premiere / Resolve / FCP へ</span></div></div>
+    </div>
+  </section>
+
+  <section class="section" id="why">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">Solocut の特長</p><h2>1人のために作りました。</h2></div>
+      <ul class="feat-grid reveal" style="margin-bottom:14px">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><h3>画像生成でサムネイル</h3><p>フレームを選んで、Codex や Gemini のサブスク、OpenAI や Google の API キーでサムネイルを生成。日本語のタイトルは崩れないよう確実に組みます。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>効果音・BGM が最初からそろう</h3><p>自由に使える効果音と BGM の初期ライブラリを初回起動時にダウンロード。クレジット表記も自動で作ります。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-json"/></svg><h3>設定はすべて JSON</h3><p>設定は公開スキーマ付きの JSON ファイル。手で編集しても、エージェントに「変えて」と頼んでもOK。</p></li>
+      </ul>
+      <ul class="feat-grid reveal">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-gift"/></svg><h3>無料・オープンソース</h3><p>MIT ライセンス。アカウント登録、透かし、サブスクリプションはありません。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><h3>初期設定でプライベート</h3><p>チェックにクラウドのモデルを選ばない限り、動画と音声は端末から出ません。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg><h3>macOS・Windows・Linux</h3><p>3つのOSで同じアプリ、同じ結果。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-film"/></svg><h3>YouTube・TikTok にそのまま</h3><p>YouTube、TikTok、Shorts、Reels 向けの書き出し設定。セーフエリア、音量、メタデータまで。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-text"/></svg><h3>日本語の字幕に強い</h3><p>BudouX による自然な改行、単語ハイライト、強調、用語の誤変換の修正。</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg><h3>見たままが仕上がる</h3><p>プレビューと本番の書き出しは、同じエンジンで作ります。</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="faq">
+    <div class="wrap">
+      <div class="section-head"><h2>よくある質問</h2></div>
+      <div class="faq">
+        <details><summary>本当に無料ですか？</summary><p>はい。Solocut は MIT ライセンスです。編集の頭脳には、すでにお持ちのエージェントのサブスクリプション（Claude Code、Codex など）を使い、判定モデルはローカルでも動かせます。</p></details>
+        <details><summary>今すぐ使えますか？</summary><p>まだです。Solocut は公開の場で設計・開発を進めています。最初のリリースは GitHub のリポジトリを Watch してお待ちください。</p></details>
+        <details><summary>編集の知識は必要ですか？</summary><p>いりません。撮って話すだけで、テンプレートとエージェントが編集します。あなたは結果を見て直してほしいところを伝えます。</p></details>
+        <details><summary>Remotion は必須ですか？</summary><p>いいえ。書き出しエンジンは FFmpeg です。Remotion はモーショングラフィックス用の追加オプションで、インストール前に利用条件を表示します。代わりに HyperFrames や Revideo も使えます。</p></details>
+        <details><summary>どのプラットフォーム向けに書き出せますか？</summary><p>YouTube（16:9、最大 4K）、TikTok・YouTube Shorts・Instagram Reels（9:16）。字幕、チャプター、メタデータも出力します。</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <h2>1人で撮って、毎日出す。</h2>
+      <p>Solocut は開発中です。GitHub で進み具合を追いかけてください。</p>
+      <div class="hero-actions">
+        <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>GitHub で最新情報を受け取る</a>
+        <a class="btn btn-lg btn-ghost" href="/ja/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>ダウンロード</a>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <a class="brand" href="/ja"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
+    <span>© 2026 JapanMarketing-Dev</span>
+    <nav aria-label="Footer">
+      <a href="/ja/download">ダウンロード</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer">設計書</a>
+      <a href="/ja/privacy">プライバシー</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT ライセンス</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

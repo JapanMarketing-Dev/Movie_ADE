@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solocut — Shoot alone. Your agent edits by template.</title>
+  <meta name="description" content="Solocut is a free, open-source video-editing ADE for YouTube and TikTok. Record screen and camera at once, let Claude Code or Codex edit by your template in the terminal, and check every frame with a decision model.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07070a">
+  <link rel="canonical" href="https://solocut.app/">
+  <link rel="alternate" hreflang="en" href="https://solocut.app/">
+  <link rel="alternate" hreflang="ja" href="https://solocut.app/ja">
+  <link rel="alternate" hreflang="x-default" href="https://solocut.app/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Solocut">
+  <meta property="og:title" content="Solocut — Shoot alone. Your agent edits by template.">
+  <meta property="og:description" content="Solocut is a free, open-source video-editing ADE for YouTube and TikTok. Record screen and camera at once, let Claude Code or Codex edit by your template in the terminal, and check every frame with a decision model.">
+  <meta property="og:url" content="https://solocut.app/">
+  <meta property="og:image" content="https://solocut.app/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://solocut.app/assets/og.png">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/js/app.js"></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut is a free, open-source video-editing ADE for YouTube and TikTok. Record screen and camera at once, let Claude Code or Codex edit by your template in the terminal, and check every frame with a decision model."}</script>
+</head>
+<body data-page="home" data-lang="en">
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-github" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5z"/><path d="M4 21a2 2 0 0 1 2-2h13v2H6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h14l-4-4M20 16H6l4 4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="5" rx="1"/><path d="M5 13v8h14v-8M12 8v13M12 8S10.5 3 8 3.8C5.7 4.6 7.5 8 12 8zM12 8s1.5-5 4-4.2C18.3 4.6 16.5 8 12 8z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.1-8 9-4.6-.9-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 6V4h16v2M12 4v16M9 20h6"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+  <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+  <symbol id="i-json" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+</svg>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#how">How it works</a>
+      <a href="#templates">Templates</a>
+      <a href="#checks">Frame checks</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="header-actions">
+      <a class="lang-switch" href="/ja" hreflang="ja" lang="ja">日本語</a>
+      <a class="btn btn-sm btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg><span class="btn-label-hide">GitHub</span></a>
+      <a class="btn btn-sm btn-primary" href="/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span class="btn-label-hide">Download</span></a>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="dot"></span>Video-editing ADE · Free &amp; open source · In development</p>
+        <h1>Shoot alone.<br>Your agent <em>edits by template.</em></h1>
+        <p class="lede">Made for tech tutorials and talking-head videos. Solocut records your screen, camera and mic at once, then Claude Code, Codex or any terminal agent cuts, captions and lays out the video by your template. A decision model checks every cut frame by frame, and you give feedback by talking over the preview.</p>
+        <div class="hero-actions">
+          <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>Get notified on GitHub</a>
+          <a class="btn btn-lg btn-ghost" href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>Read the design</a>
+        </div>
+        <p class="hero-meta">macOS · Windows · Linux · MIT license · YouTube / TikTok / Shorts / Reels</p>
+      </div>
+      <div class="mock reveal" aria-hidden="true">
+  <div class="mock-bar"><i></i><i></i><i></i><span>solocut — tiktok-talk</span></div>
+  <div class="mock-body">
+    <div class="mock-preview">
+      <div class="phone">
+        <svg class="person" viewBox="0 0 120 150"><circle cx="60" cy="52" r="30" fill="#5d6687"/><path d="M8 150c4-38 26-58 52-58s48 20 52 58z" fill="#454d6b"/></svg>
+        <div class="safe"></div>
+        <div class="mosaic"></div><span class="tag">auto mosaic · email</span>
+        <div class="cap" data-cap><span>This</span> <span>one</span> <span>setting</span> <span>changes</span> <span>everything</span></div>
+      </div>
+    </div>
+    <div class="mock-tl">
+      <div class="tl-head"><span>timeline.json</span><span>1080×1920 · 30fps</span></div>
+      <div class="tl-row"><span>screen</span><div class="tl-track"><i class="seg" style="left:2%;width:26%"></i><i class="seg cut" data-cut style="left:28%;width:6%"></i><i class="seg" style="left:35%;width:30%"></i><i class="seg cut" data-cut style="left:66%;width:5%"></i><i class="seg" style="left:72%;width:26%"></i><div class="playhead"></div></div></div>
+      <div class="tl-row"><span>camera</span><div class="tl-track"><i class="seg cam" style="left:2%;width:26%"></i><i class="seg cut" data-cut style="left:28%;width:6%"></i><i class="seg cam" style="left:35%;width:30%"></i><i class="seg cut" data-cut style="left:66%;width:5%"></i><i class="seg cam" style="left:72%;width:26%"></i></div></div>
+      <div class="tl-row"><span>captions</span><div class="tl-track"><i class="seg cap" style="left:4%;width:10%"></i><i class="seg cap" style="left:16%;width:10%"></i><i class="seg cap" style="left:37%;width:12%"></i><i class="seg cap" style="left:51%;width:12%"></i><i class="seg cap" style="left:74%;width:11%"></i><i class="seg cap" style="left:87%;width:9%"></i></div></div>
+      <div class="tl-row"><span>mic</span><div class="tl-track"><div class="wave"></div></div></div>
+      <div class="checks"><div class="chk" data-s="0.94"><span class="fn">00:12:04</span></div><div class="chk" data-s="0.91"><span class="fn">00:18:22</span></div><div class="chk warn" data-s="0.62"><span class="fn">00:41:07</span></div><div class="chk" data-s="0.97"><span class="fn">00:52:15</span></div></div>
+    </div>
+    <div class="mock-term">
+      <div class="term-tabs"><span class="on">claude</span><span>codex</span><span>gemini</span></div>
+      <div class="term-lines" data-term><div class="t-p">$ solocut next --json</div><div class="t-d">→ step rough-cut: 23 cut candidates</div><div>$ solocut propose cuts</div><div class="t-ok">✓ 19 decided by the decision model</div><div class="t-w">? 4 sent to you for review (0.42–0.61)</div><div>$ solocut captions build &amp;&amp; solocut render --preview</div><div>$ solocut check</div><div class="t-ok">✓ 312 frames · cut boundaries · safe area · PII</div><div class="t-w">! 00:00:41:07 caption overlaps face (0.62)</div><div>$ solocut edit move-caption c52 --y 1420</div><div class="t-ok">✓ all checks passed</div></div>
+    </div>
+  </div>
+</div>
+    </div>
+  </section>
+
+  <section class="works" aria-label="Works with">
+    <div class="wrap works-row"><strong>Works with</strong><span>Claude Code</span><span>Codex</span><span>Gemini CLI</span><span>OpenCode</span><span>Cursor</span><span>GitHub Copilot</span><span>Your own CLI</span></div>
+  </section>
+
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">How it works</p><h2>From one take to a finished video, without a timeline.</h2><p>Every step is a command your agent runs. The template decides the order, and <code>solocut next</code> always tells the agent what to do now.</p></div>
+      <ol class="flow reveal">
+        <li><h3>Pick a template</h3><p>TikTok talk, YouTube tutorial, Shorts from a long video… Format, layout, cut policy and caption style are set.</p></li>
+        <li><h3>Record</h3><p>Screen, camera and mic at once, each on its own track. Add footage from another camera later.</p></li>
+        <li><h3>Ask your agent</h3><p>“Edit this.” Claude Code or Codex follows the template: sync, transcribe, rough cut, captions, layout.</p></li>
+        <li><h3>Decision model decides</h3><p>Cut or keep, which retake, where captions break. Only uncertain items come to you.</p></li>
+        <li><h3>Check every frame</h3><p>Cut boundaries, black frames, caption safe areas, faces, personal info on screen, mosaic tracking.</p></li>
+        <li><h3>Talk over the preview</h3><p>Circle what bothers you and say it. It reaches your agent as timecoded instructions. Then export.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section" id="record">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">Record</p><h2>Screen and camera at once. Another camera, synced later.</h2><p class="lede" style="font-size:17px">Each source is saved on its own track, so the template can switch between picture-in-picture, split screen, camera only or screen only at any point.</p><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Screen, cameras, mics and system audio recorded together on one clock</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Import footage from a mirrorless camera or iPhone; it syncs to the frame by audio, with drift correction for long takes</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Teleprompter, countdown, and hotkeys to mark “bad take” or “important” while you talk</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Crash-safe: files are written every second</span></li></ul></div>
+      <div class="card reveal"><div class="tracks"><div class="trk"><span>screen</span><div class="bar"><i style="left:4%;width:92%;background:#3b4a8a"></i></div></div><div class="trk"><span>camera</span><div class="bar"><i style="left:4%;width:92%;background:#2f6e5a"></i></div></div><div class="trk"><span>camera B</span><div class="bar"><i style="left:22%;width:70%;background:#5a3f7d"></i></div></div><div class="trk"><span>mic</span><div class="bar"><div class="wavebar"></div></div></div></div><p class="sync-note">✓ camera B synced · offset −128 frames · confidence 0.97</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="templates">
+    <div class="wrap split rev">
+      <div class="reveal"><p class="kicker">Templates</p><h2>Decide once how your videos are made.</h2><p class="lede" style="font-size:17px">A template fixes the look, the editing rules written as prompts, and the pipeline. Any agent follows the same steps and the same quality bar, because Solocut generates the agent’s instructions from it.</p><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Built-in: tech tutorial, tech short, talk for YouTube, talk for TikTok, Shorts from a long video</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Tech templates zoom to where you click, show the keys you press and highlight the cursor</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Shooting with several cameras? Write how to switch angles in plain words; your agent follows the prompt</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span><code>solocut next</code> enforces the steps and their pass conditions</span></li></ul></div>
+      <div class="card reveal"><pre class="code"><span class="c"># templates/tiktok-talk/template.yaml</span>
+<span class="k">id</span>: tiktok-talk
+<span class="k">canvas</span>: { width: 1080, height: 1920, fps: 30 }
+<span class="k">layouts</span>: [camera-full, screen-top-camera-bottom]
+<span class="k">cut</span>:
+  <span class="k">silence</span>: { minMs: 300, padMs: 80 }
+  <span class="k">fillers</span>: [<span class="s">um, uh, like</span>]
+  <span class="k">retakes</span>: keep-last
+<span class="k">captions</span>: { style: tiktok-bold, highlight: word, safeArea: tiktok }
+<span class="k">audio</span>: { loudness: -14, truePeak: -1 }
+<span class="k">checks</span>: [cut-boundaries, caption-safe-area, pii-on-screen]
+<span class="k">pipeline</span>:
+  [ingest, sync, transcribe, rough-cut, captions,
+   layout, preview, check, review, final]</pre></div>
+    </div>
+  </section>
+
+  <section class="section" id="terminal">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">Terminal</p><h2>Your agent, your subscription, your terminal.</h2><p>Solocut runs agent CLIs in real terminals inside the app. Switch between them in tabs; the project state lives in files, so any agent can pick up where another stopped.</p></div>
+      <ul class="feat-grid reveal">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-terminal"/></svg><h3>Any CLI agent</h3><p>Claude Code, Codex, Gemini CLI, OpenCode, Cursor, GitHub Copilot, or your own command.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-swap"/></svg><h3>Switch and hand off</h3><p>Hit a usage limit? The next agent opens with the handoff note and continues.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><h3>Always up to date</h3><p>Solocut updates itself, signed, from Cloudflare. It also tells you when your agent CLIs have a new version.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg><h3>Headless CLI</h3><p><code>solocut</code> works without the app, too: in your own terminal or in CI.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-undo"/></svg><h3>Every edit is undoable</h3><p>Edits are operations in a log. See who changed what and why, and roll back.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><h3>Originals stay untouched</h3><p>Recorded footage is read-only. Everything else can be rebuilt.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="checks">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">Decision model</p><h2>A final check on every frame that matters.</h2><p>Machine checks run first (black frames, freezes, loudness, specs). Then a decision model looks at the frames around every cut, every caption change and every mosaic, and answers typed questions with a probability. Confident answers are applied; uncertain ones come to you.</p></div>
+      <div class="frames reveal"><div class="frame ok"><div class="img"></div><div class="meta"><b>cut 00:12:04</b>eyes open · pass 0.94</div></div><div class="frame ok"><div class="img"></div><div class="meta"><b>caption c18</b>in safe area</div></div><div class="frame ask"><div class="img"></div><div class="meta"><b>cut 00:41:07</b>mid-word? 0.58 → you</div></div><div class="frame ng"><div class="img"></div><div class="meta"><b>frame 01:02:11</b>email visible → mosaic</div></div></div>
+      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Runs locally with Ollama, or with your own API key (TypeSafe, OpenAI, Anthropic, Gemini, Workers AI)</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Spending limits per project and per day, with a log of every call</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Only frames and transcript text are sent, and only after you agree</span></li></ul></div>
+    </div>
+  </section>
+
+  <section class="section" id="mosaic">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">Mosaic</p><h2>Personal info, hidden and tracked.</h2><p class="lede" style="font-size:17px">Emails, notifications, API keys, phone numbers, bystanders’ faces and license plates are detected and tracked, then pixelated, blurred or filled. Masks follow the source, so they stay in place when you change the layout or reframe to 9:16.</p></div>
+      <div class="card reveal"><pre class="code"><span class="c">// timeline.json</span>
+<span class="k">"masks"</span>: [{
+  <span class="k">"kind"</span>: <span class="s">"pixelate"</span>,
+  <span class="k">"reason"</span>: <span class="s">"pii:email"</span>,
+  <span class="k">"source"</span>: <span class="s">"t1.screen"</span>,
+  <span class="k">"track"</span>: [
+    { <span class="k">"frame"</span>: 120, <span class="k">"box"</span>: [412, 88, 260, 28] },
+    { <span class="k">"frame"</span>: 180, <span class="k">"box"</span>: [412, 40, 260, 28] }
+  ],
+  <span class="k">"confidence"</span>: 0.93
+}]</pre></div>
+    </div>
+  </section>
+
+  <section class="section" id="feedback">
+    <div class="wrap split rev">
+      <div class="reveal"><p class="kicker">Feedback by video</p><h2>Don’t type the fix. Point at it.</h2><p class="lede" style="font-size:17px">Play the preview, talk, pause and circle. Solocut transcribes on your machine and turns each remark into a timecode, a frame with your pen, your words and the exact caption or clip you meant. One click sends it to your agent.</p></div>
+      <div class="fb reveal" aria-hidden="true">
+        <span class="bubble"><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg>“This caption covers my face. Move it down.”</span>
+        <span class="tc">00:00:41:07</span>
+        <svg class="pen" viewBox="0 0 400 250" preserveAspectRatio="none"><path d="M120 196c-30-14-22-40 30-46 70-8 150-6 168 14 14 18-30 34-110 36-50 2-90-2-110-10"/></svg>
+        <span class="fbcap">This setting changes everything</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="benchmark">
+    <div class="wrap split">
+      <div class="reveal"><p class="kicker">Benchmark</p><h2>Paste a URL. Borrow the pattern, not the video.</h2><p class="lede" style="font-size:17px">Open any YouTube or TikTok video in the built-in browser. While it plays, Solocut measures how captions appear, where sound effects land, how loud the music sits under the voice and how fast the cuts come, then turns it into a template you can use. Nothing is downloaded; only numbers are kept.</p></div>
+      <div class="card reveal">
+        <p class="bench-url">youtube.com/watch?v=…</p>
+        <dl class="bench"><div><dt>Captions</dt><dd>bottom 22% · 14 chars · word highlight · yellow emphasis</dd></div><div><dt>Cuts</dt><dd>2.4 s average · 14 jump cuts/min · punch-in ×1.12</dd></div><div><dt>Music</dt><dd>lo-fi · 88 BPM · −21 dB under voice · ducking</dd></div><div><dt>Sound effects</dt><dd>9/min · pop on emphasis · whoosh on new section</dd></div><div><dt>Voice</dt><dd>380 chars/min · −15 LUFS</dd></div></dl>
+        <p class="bench-apply"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Apply to talk-tiktok</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="libraries">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">Libraries on demand</p><h2>The best open tools, downloaded when you need them.</h2><p>Solocut stays small. FFmpeg, whisper.cpp and the rest are fetched on first use, pinned to a version and verified by hash. Tools with special license terms ask for your consent first.</p></div>
+      <div class="libs reveal"><div class="lib"><b>FFmpeg</b><span>cut, compose, captions, loudness</span></div><div class="lib"><b>whisper.cpp</b><span>on-device transcription</span></div><div class="lib"><b>Remotion</b><span>React motion graphics</span><br><em>license terms apply</em></div><div class="lib"><b>HyperFrames</b><span>HTML motion graphics</span></div><div class="lib"><b>Revideo</b><span>TypeScript motion graphics</span></div><div class="lib"><b>MediaPipe</b><span>faces, reframing, mosaic</span></div><div class="lib"><b>PySceneDetect</b><span>scene detection</span></div><div class="lib"><b>OpenTimelineIO</b><span>to Premiere / Resolve / FCP</span></div></div>
+    </div>
+  </section>
+
+  <section class="section" id="why">
+    <div class="wrap">
+      <div class="section-head reveal"><p class="kicker">Why Solocut</p><h2>Built for one person.</h2></div>
+      <ul class="feat-grid reveal" style="margin-bottom:14px">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><h3>Thumbnails with image generation</h3><p>Pick a frame and generate thumbnails with your Codex or Gemini subscription, or an OpenAI or Google API key. Titles are typeset so Japanese text never breaks.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-music"/></svg><h3>Sound effects and music, ready</h3><p>A starter library of sound effects and BGM you are free to use, downloaded on first launch, with credits written for you.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-json"/></svg><h3>Every setting is JSON</h3><p>Settings live in a JSON file with a public schema. Edit it by hand or just ask your agent to change it.</p></li>
+      </ul>
+      <ul class="feat-grid reveal">
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-gift"/></svg><h3>Free and open source</h3><p>MIT license. No account, no watermark, no subscription.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><h3>Private by default</h3><p>Video and audio never leave your machine unless you choose a cloud model for checks.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg><h3>macOS, Windows, Linux</h3><p>The same app and the same results on all three.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-film"/></svg><h3>YouTube and TikTok ready</h3><p>Export presets for YouTube, TikTok, Shorts and Reels with safe areas, loudness and metadata.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-text"/></svg><h3>Japanese-grade captions</h3><p>Natural line breaks with BudouX, word highlight, emphasis and term correction.</p></li>
+        <li class="feat"><svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg><h3>What you see is what you get</h3><p>Preview and final export come from the same render engine.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" id="faq">
+    <div class="wrap">
+      <div class="section-head"><h2>FAQ</h2></div>
+      <div class="faq">
+        <details><summary>Is it really free?</summary><p>Yes. Solocut is MIT-licensed. The editing intelligence comes from the agent subscription you already have (Claude Code, Codex…), and the decision model can run locally.</p></details>
+        <details><summary>Can I use it today?</summary><p>Not yet. Solocut is being designed and built in the open. Watch the GitHub repository to get the first release.</p></details>
+        <details><summary>Do I need to know how to edit?</summary><p>No. You record and talk. The template and your agent do the editing; you review the result.</p></details>
+        <details><summary>Is Remotion required?</summary><p>No. The render engine is FFmpeg. Remotion is an optional add-on for motion graphics, and Solocut shows its license terms before installing it. HyperFrames and Revideo are alternatives.</p></details>
+        <details><summary>Which platforms can I export for?</summary><p>YouTube (16:9, up to 4K), TikTok, YouTube Shorts and Instagram Reels (9:16), with captions, chapters and metadata.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <h2>Shoot alone. Ship every day.</h2>
+      <p>Solocut is in development. Follow along on GitHub.</p>
+      <div class="hero-actions">
+        <a class="btn btn-lg btn-primary" href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer"><svg class="icon icon-fill" aria-hidden="true"><use href="#i-github"/></svg>Get notified on GitHub</a>
+        <a class="btn btn-lg btn-ghost" href="/download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="9" fill="#ff4a3d"/><path d="M11 9.5l12 6.5-12 6.5z" fill="#fff"/><path d="M6 23.5L26 8.5" stroke="#07070a" stroke-width="2.6" stroke-linecap="round"/></svg><span>Solocut</span></a>
+    <span>© 2026 JapanMarketing-Dev</span>
+    <nav aria-label="Footer">
+      <a href="/download">Download</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/tree/main/docs" target="_blank" rel="noopener noreferrer">Design docs</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+      <a href="https://github.com/JapanMarketing-Dev/Movie_ADE" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

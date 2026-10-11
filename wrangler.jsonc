@@ -1,0 +1,15 @@
+{
+  // solocut.app: static site served by Cloudflare Workers static assets (no Worker script, no build step).
+  // Regenerate the HTML with `node tools/site/build.mjs`, then `npx wrangler@4.149.0 deploy`.
+  "name": "solocut-site",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./site",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "solocut.app", "custom_domain": true }
+  ]
+}
