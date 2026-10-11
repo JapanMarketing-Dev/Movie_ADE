@@ -1,0 +1,30 @@
+{
+  "name": "solocut",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "The ADE for video editing. Shoot alone; your terminal agent edits by template.",
+  "repository": "github:JapanMarketing-Dev/solocut",
+  "author": "JapanMarketing-Dev",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@10.31.0",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:cli": "node scripts/build-cli.mjs",
+    "dev": "pnpm --filter @solocut/desktop dev",
+    "build": "pnpm build:cli && pnpm --filter @solocut/desktop build",
+    "site:build": "node tools/site/build.mjs",
+    "site:deploy": "node tools/site/build.mjs && npx -y wrangler@4.149.0 deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild", "node-pty"]
+  }
+}

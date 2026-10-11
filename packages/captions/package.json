@@ -1,0 +1,12 @@
+{
+  "name": "@solocut/captions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "budoux": "^0.7.0",
+    "@solocut/core": "workspace:*"
+  }
+}

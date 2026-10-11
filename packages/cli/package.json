@@ -1,0 +1,19 @@
+{
+  "name": "@solocut/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@solocut/core": "workspace:*",
+    "@solocut/media": "workspace:*",
+    "@solocut/captions": "workspace:*",
+    "@solocut/toolchain": "workspace:*",
+    "@solocut/templates": "workspace:*",
+    "@solocut/settings": "workspace:*",
+    "@solocut/archive": "workspace:*",
+    "@solocut/agents": "workspace:*",
+    "@solocut/decide": "workspace:*"
+  }
+}
