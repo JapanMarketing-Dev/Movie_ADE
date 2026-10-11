@@ -109,6 +109,8 @@ async function sfxLibrary(p: Project, tl: Timeline, warnings: string[]): Promise
   return { items, copies };
 }
 
+const sfx0 = (ops: Op[]) => ops.some((o) => o.op === 'addSfx');
+
 async function cmdSfxApply(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { seed: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
@@ -145,6 +147,7 @@ async function cmdSfxApply(ctx: Ctx, args: string[]): Promise<void> {
     }
   }
   const r = await apply(ctx, p, ops, 'sfx apply', dryRun);
+  if (!dryRun && !p.variant) setStep(p, 'sfx', 'done', sfx0(added) ? undefined : t(ctx, 'ライブラリに合う効果音がなかった', 'no matching sound in the library'));
   const fps = tl.canvas.fps;
   const sfx = added.flatMap((o) => (o.op === 'addSfx' ? [{ id: o.sfx.id, at: o.sfx.at, timecode: frameToTimecode(o.sfx.at, fps), trigger: o.sfx.trigger ?? null, asset: o.sfx.asset, gainDb: o.sfx.gainDb }] : []));
   emit(ctx, { variant: p.variant ?? 'main', added: sfx.length, removed: old.length, sfx, library: items.length, dryRun, changed: r.changed, warnings: [...warnings, ...r.warnings] }, () => [

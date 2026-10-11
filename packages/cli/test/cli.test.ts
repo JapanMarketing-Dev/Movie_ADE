@@ -53,7 +53,7 @@ describe('basics', () => {
     expect(u.json).toMatchObject({ ok: false, error: { code: 'usage' } });
     const bad = await sb.run(['version', '--nope']);
     expect(bad.code).toBe(2);
-    expect(bad.stderr).toMatch(/Unknown option/);
+    expect(bad.stderr).toMatch(/Unknown option|不明なオプション/);
   });
 
   it('commands outside a project explain how to start', async () => {

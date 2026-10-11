@@ -25,7 +25,9 @@ const hiraToKata = (s: string) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromChar
 /** Sound key: NFKC, hiragana → katakana, Latin words → their katakana reading, no spaces or punctuation. */
 export function soundKey(s: string): string {
   return hiraToKata(s.normalize('NFKC'))
-    .replace(/[A-Za-z]+/g, (w) => WORDS[w.toLowerCase()] ?? [...w.toLowerCase()].map((c) => LETTERS[c] ?? '').join(''))
+    // camel-case runs are separate words: "CLAUDECode" → CLAUDE + Code, "GitHub" → Git + Hub (unless known whole)
+    .replace(/[A-Za-z]+/g, (run) => (WORDS[run.toLowerCase()] ? [run] : run.split(/(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/))
+      .map((w) => WORDS[w.toLowerCase()] ?? [...w.toLowerCase()].map((c) => LETTERS[c] ?? '').join('')).join(''))
     .replace(/[0-9]/g, (d) => ['ゼロ', 'イチ', 'ニ', 'サン', 'ヨン', 'ゴ', 'ロク', 'ナナ', 'ハチ', 'キュウ'][Number(d)]!)
     .replace(/[\s\p{P}\p{S}]/gu, '');
 }
@@ -59,20 +61,24 @@ export function similarity(a: string, b: string): number {
 export interface Correction { from: string; to: string; score: number }
 
 /**
- * Replace near-matches of glossary terms in `text` (reading similarity ≥ `min`, default 0.75). Exact spellings are
- * left alone; matches do not overlap (best first).
+ * Replace near-matches of glossary terms in `text` (reading similarity ≥ `min`, default 0.75). A spelling that only
+ * differs in case ("CLAUDE Code") is respelled; exact spellings are left alone; matches do not overlap (best first).
  */
 export function correctText(text: string, terms: Term[], min = 0.75): { text: string; corrections: Correction[] } {
   const chars = [...text];
-  // exact spellings already in the text are protected (no window may overlap them)
+  type Hit = { i: number; j: number; term: string; score: number };
+  const hits: Hit[] = [];
+  // the term spelled with other letter case is fixed outright; any spelling of it is protected from the fuzzy pass
   const lower = chars.map((c) => c.toLowerCase());
   const exact: [number, number][] = [];
   for (const t of terms) {
     const tc = [...t.term.toLowerCase()];
-    for (let i = 0; i + tc.length <= lower.length; i++) if (tc.every((c, k) => lower[i + k] === c)) exact.push([i, i + tc.length]);
+    for (let i = 0; i + tc.length <= lower.length; i++) {
+      if (!tc.every((c, k) => lower[i + k] === c)) continue;
+      exact.push([i, i + tc.length]);
+      if (chars.slice(i, i + tc.length).join('') !== t.term) hits.push({ i, j: i + tc.length, term: t.term, score: 1 });
+    }
   }
-  type Hit = { i: number; j: number; term: string; score: number };
-  const hits: Hit[] = [];
   for (const t of terms) {
     const reads = readingsOf(t);
     if (!reads.length) continue;

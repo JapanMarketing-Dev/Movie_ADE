@@ -298,7 +298,7 @@ export async function applyEdit(
     try {
       r = applyOps(before, ops);
     } catch (e) {
-      throw new CliError('op-failed', (e as Error).message);
+      throw new CliError('op-failed', `${(e as Error).message} (check the current ids with solocut tl summary or solocut tl query "<kind>")`);
     }
     const v = validateTimeline(r.timeline);
     if (!v.ok) throw new CliError('invalid-result', `the edit would make timeline.json invalid: ${v.issues.filter((i) => i.level === 'error').map((i) => `${i.path}: ${i.message}`).slice(0, 5).join('; ')}`, v.issues);

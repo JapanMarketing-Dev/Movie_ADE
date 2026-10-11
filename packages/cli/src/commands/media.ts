@@ -92,7 +92,7 @@ async function sourceFor(p: Project, m: Media, file: string, o: { kind?: 'camera
   const v = pr.streams.find((s) => s.type === 'video');
   const a = pr.streams.find((s) => s.type === 'audio');
   const kind = o.kind ?? (v ? 'camera' : 'mic');
-  if ((kind === 'camera' || kind === 'screen') && !v) throw new CliError('no-video', `${file} has no video stream`);
+  if ((kind === 'camera' || kind === 'screen') && !v) throw new CliError('no-video', `${basename(file)} has no video stream; import audio-only files with --kind mic`);
   if (kind === 'mic' && !a) throw new CliError('no-audio', `${file} has no audio stream`);
   const offsetSec = o.offsetSec ?? 0;
   if (kind === 'mic') {
@@ -225,6 +225,12 @@ export async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
 
 // ---------- sync ----------
 
+/** --take must name a take of the timeline. */
+export function checkTake(ctx: Ctx, tl: Timeline, take: string | undefined): void {
+  if (take === undefined || takesOf(tl).includes(take)) return;
+  throw new CliError('not-found', t(ctx, `テイクがありません: ${take}（あるもの: ${takesOf(tl).join(', ') || 'なし'}。solocut takes で確認）`, `no such take: ${take} (have: ${takesOf(tl).join(', ') || 'none'}; see solocut takes)`));
+}
+
 export function takesOf(tl: Timeline): string[] {
   return [...new Set(Object.values(tl.sources).map((s) => ('take' in s ? s.take : undefined)).filter((x): x is string => !!x))].sort();
 }
@@ -241,6 +247,7 @@ export async function cmdSync(ctx: Ctx, args: string[]): Promise<void> {
   const tl = readTimeline(p);
   const minConf = values['min-confidence'] ? Number(values['min-confidence']) : 0.5;
   const takes = values.take ? [values.take] : takesOf(tl);
+  checkTake(ctx, tl, values.take);
   if (!takes.length) throw new CliError('no-takes', t(ctx, '同期する素材がありません。先に solocut ingest / import', 'nothing to sync; run solocut ingest / import first'));
   const m = await media();
   const ops: Op[] = [];
@@ -387,6 +394,8 @@ export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
   const p = openProject(ctx);
   const tl = readTimeline(p);
   const settings = loadSettings();
+  checkTake(ctx, tl, values.take);
+  if (values.model !== undefined && values.model !== 'small' && values.model !== 'large-v3-turbo-q5') throw new CliError('usage', t(ctx, `--model は small か large-v3-turbo-q5 です（${values.model} は使えません）`, `--model is small or large-v3-turbo-q5 (not ${values.model})`));
   const take = values.take ?? takesOf(tl)[0];
   if (!take) throw new CliError('no-takes', t(ctx, '文字起こしする素材がありません。先に solocut ingest / import', 'nothing to transcribe; run solocut ingest / import first'));
   const voice = values.source ? ([values.source, tl.sources[values.source]] as const) : voiceOf(tl, take);
@@ -433,6 +442,7 @@ export async function cmdAnalyze(ctx: Ctx, args: string[]): Promise<void> {
   const tpl = projectTemplate(p);
   const m = await media();
   const out: Record<string, unknown> = {};
+  checkTake(ctx, tl, values.take);
   for (const take of values.take ? [values.take] : takesOf(tl)) {
     const voice = voiceOf(tl, take);
     const entry: Record<string, unknown> = {};
@@ -451,6 +461,7 @@ export async function cmdAnalyze(ctx: Ctx, args: string[]): Promise<void> {
     out[take] = entry;
     writeAtomic(join(paths(p.dir).analysis, `${take}.json`), JSON.stringify({ at: new Date().toISOString(), ...entry }, null, 2));
   }
+  if (!p.variant && !values.take) setStep(p, 'analyze', 'done');
   emit(ctx, { analysis: out }, () => Object.entries(out).map(([take, e]) => {
     const x = e as { silence?: unknown[]; loudness?: { integrated: number } };
     return `${take}: ${t(ctx, '無音', 'silences')} ${x.silence?.length ?? 0}, ${x.loudness ? `${x.loudness.integrated.toFixed(1)} LUFS` : ''}`;
@@ -671,6 +682,7 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
   // variants use the vertical style of the template's outputs map (docs/18), sized by the style itself
   const variantCfg = p.variant ? tpl.outputs?.[p.variant] : undefined;
   const style = o.style ?? (p.variant ? variantCfg?.captions ?? 'tiktok-bold' : tpl.captions.style);
+  if (o.style && !cap.CAPTION_STYLES[o.style]) throw new CliError('usage', t(ctx, `字幕のスタイルがありません: ${o.style}（${Object.keys(cap.CAPTION_STYLES).join(', ')}）`, `unknown caption style: ${o.style} (${Object.keys(cap.CAPTION_STYLES).join(', ')})`));
   const styleDef = cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!;
   const maxCharsPerLine = p.variant ? styleDef.maxCharsPerLine[p.file.language] : tpl.captions.maxCharsPerLine;
   const maxLines = p.variant ? styleDef.maxLines : tpl.captions.maxLines;

@@ -114,10 +114,26 @@ const Autopilot = z.object({
   budget: z.object({ decisionUsd: z.number().min(0).default(2) }).prefault({}),
 });
 
+/** Workspace panes the user toggled / resized (desktop). Widths in px. */
+const Ui = z.object({
+  layout: z.object({
+    sidebar: z.boolean().default(true),
+    center: z.boolean().default(true),
+    terminal: z.boolean().default(true),
+    sidebarWidth: z.number().int().min(120).max(1200).optional(),
+    terminalWidth: z.number().int().min(200).max(2400).optional(),
+  }).prefault({}),
+});
+
+/** First-run onboarding: when it was finished (null = not yet). */
+const Onboarding = z.object({ completedAt: z.iso.datetime({ offset: true }).nullable().default(null) });
+
 export const SettingsSchema = z.object({
   $schema: z.string().optional(),
   language: Lang.default('ja'),
   appearance: Appearance.prefault({}),
+  ui: Ui.prefault({}),
+  onboarding: Onboarding.prefault({}),
   agents: Agents.prefault({}),
   recording: Recording.prefault({}),
   transcription: Transcription.prefault({}),

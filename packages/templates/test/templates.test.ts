@@ -482,3 +482,31 @@ describe('nextStep', () => {
     });
   });
 });
+
+describe('nextStep never dead-ends', () => {
+  const STATES: StepState['state'][] = ['todo', 'running', 'done', 'needs-human', 'skipped'];
+  // a small deterministic PRNG so failures reproduce
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const pick = <T,>(a: readonly T[]): T => a[Math.floor(rnd() * a.length)]!;
+
+  it.each(['tech', 'talk', 'tech-tutorial', 'talk-tiktok', 'shorts-from-long'])('%s: every state gives a command or a human action', (id) => {
+    const t = loadTemplate(id);
+    const pipeline = expandPipeline(t);
+    for (let k = 0; k < 400; k++) {
+      const status = pipeline.map((step) => ({ step, state: pick(STATES), ...(rnd() < 0.2 ? { note: 'n' } : {}) }));
+      const vs = Object.fromEntries(derivedTargets(t).map((v) => [v, { exists: rnd() < 0.6, stale: rnd() < 0.3, lastCheckFailed: rnd() < 0.3 ? 2 : 0 }]));
+      const n = nextStep(t, status, {
+        hasTakes: rnd() < 0.8, hasTranscript: rnd() < 0.7, openItems: rnd() < 0.3 ? 2 : 0, lastCheckFailed: rnd() < 0.3 ? 1 : 0,
+        autopilot: rnd() < 0.5, stopBefore: rnd() < 0.5 ? ['publish'] : [], lang: pick(['ja', 'en'] as const), variants: vs,
+        ...(rnd() < 0.5 ? { cameras: Math.floor(rnd() * 3) } : {}),
+      });
+      const where = `${id} #${k}: ${JSON.stringify(n)}`;
+      expect(n.do.trim(), where).not.toBe('');
+      expect(n.why.trim(), where).not.toBe('');
+      if (n.state === 'ready') expect(n.commands.length, where).toBeGreaterThan(0);
+      if (n.state === 'done') expect(n.step, where).toBe('done');
+      for (const c of n.commands) expect(c, where).toMatch(/^solocut /);
+    }
+  });
+});

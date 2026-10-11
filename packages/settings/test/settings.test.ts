@@ -146,6 +146,21 @@ describe('get/set by dot path', () => {
     expect(loadSettings().imageGen.providers.mine).toEqual({ via: 'api', apiKeyRef: 'mine' });
   });
 
+  it('ui.layout and onboarding.completedAt (desktop)', () => {
+    const d = defaultSettings();
+    expect(d.ui.layout).toEqual({ sidebar: true, center: true, terminal: true });
+    expect(d.onboarding.completedAt).toBeNull();
+    expect(d.appearance.uiScale).toBe(1);
+    expect(setSetting('ui.layout', { sidebar: false, center: true, terminal: true, sidebarWidth: 280, terminalWidth: 640 }).ui.layout.sidebarWidth).toBe(280);
+    expect(setSetting('ui.layout.terminal', false).ui.layout).toMatchObject({ terminal: false, sidebarWidth: 280 });
+    expect(setSetting('onboarding.completedAt', '2026-10-11T12:00:00+09:00').onboarding.completedAt).toBe('2026-10-11T12:00:00+09:00');
+    expect(setSetting('onboarding.completedAt', null).onboarding.completedAt).toBeNull();
+    expect(() => setSetting('onboarding.completedAt', 'yesterday')).toThrow(SettingsError);
+    expect(() => setSetting('ui.layout.sidebarWidth', 10)).toThrow(SettingsError);
+    expect(() => setSetting('ui.layout.sidebar', 'yes')).toThrow(SettingsError);
+    expect(() => setSetting('appearance.uiScale', 3)).toThrow(SettingsError);
+  });
+
   it('agents.order accepts any catalog agent id and custom ones', () => {
     expect(setSetting('agents.order', ['aider', 'claude', 'custom:mine']).agents.order).toEqual(['aider', 'claude', 'custom:mine']);
   });

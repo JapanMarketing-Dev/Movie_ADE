@@ -32,6 +32,8 @@ describe('glossary: correctText', () => {
     expect(correctText('クロードコードで書きます', terms).text).toBe('Claude Codeで書きます');
     expect(correctText('そろかっとを使う', terms).text).toBe('Solocutを使う');
     expect(correctText('Claude CodeとCLAUDE.md', terms)).toEqual({ text: 'Claude CodeとCLAUDE.md', corrections: [] });   // exact spellings stay
+    expect(correctText('CLAUDE Codeの設定', terms)).toEqual({ text: 'Claude Codeの設定', corrections: [{ from: 'CLAUDE Code', to: 'Claude Code', score: 1 }] });
+    expect(correctText('CLAUDECodeで', terms).text).toBe('Claude Codeで');
   });
 
   it('leaves unrelated text alone and handles several matches without overlap', () => {

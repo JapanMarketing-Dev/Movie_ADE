@@ -16,6 +16,7 @@ import { cmdThumb } from './commands/thumb.js';
 import { cmdFeedback } from './commands/feedback.js';
 import { cmdDerive } from './commands/derive.js';
 import { cmdPublish } from './commands/publish.js';
+import { explainError, localize } from './errors.js';
 import { cmdBench, cmdMasks, cmdMulticam, cmdSfx, cmdTracks } from './commands/assist.js';
 
 export { CliError, CLI_VERSION } from './ctx.js';
@@ -246,7 +247,8 @@ export async function main(argv: string[], io: IO = defaultIO()): Promise<number
     await handler(ctx, args);
     return 0;
   } catch (e) {
-    const err = e instanceof CliError ? e : new CliError('error', (e as Error)?.message ?? String(e));
+    const raw = explainError(e, lang);
+    const err = new CliError(raw.code, localize(raw.message, lang), raw.details);
     if (json) {
       io.stdout(JSON.stringify({ ok: false, error: { code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) } }, null, 2) + '\n');
     } else {
