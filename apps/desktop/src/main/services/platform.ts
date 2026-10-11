@@ -30,6 +30,8 @@ import type {
 import { timelineOverview } from '../../shared/project';
 import { mediaUrl } from '../../shared/ipc';
 import { existsSync } from 'node:fs';
+import { delimiter } from 'node:path';
+import { searchDirs, shellPathIsProvisional } from '../shellPath';
 import { join } from 'node:path';
 
 type Dict = Record<string, unknown>;
@@ -201,7 +203,12 @@ export function templates(): TemplateInfo[] {
 
 export async function agents(): Promise<AgentStatus[]> {
   const os = osName();
-  const detected = await detectAgents();
+  // search the login shell's PATH + common install dirs (Finder-launched apps get a short PATH)
+  let detected = await detectAgents({ path: (await searchDirs()).join(delimiter) });
+  if (shellPathIsProvisional() && detected.some((d) => !d.installed)) {
+    // last launch's PATH may be stale: retry once with a fresh login shell PATH
+    detected = await detectAgents({ path: (await searchDirs({ fresh: true })).join(delimiter) });
+  }
   return AGENTS.map((def) => {
     const d = detected.find((x) => x.id === def.id);
     const s: AgentStatus = {

@@ -254,10 +254,11 @@ export function spawnSpec(file: string, args: string[], platform: string = proce
   return { command: file, args };
 }
 
-function runVersion(path: string, args: string[]): Promise<string | undefined> {
-  const sp = spawnSpec(path, args);
+function runVersion(path: string, args: string[], env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  const sp = spawnSpec(path, args, process.platform, env);
   return new Promise((res) => {
-    execFile(sp.command, sp.args, { timeout: 8000, windowsHide: true, ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
+    // env carries the full PATH: npm-installed agents are `#!/usr/bin/env node` scripts that need node on PATH
+    execFile(sp.command, sp.args, { timeout: 8000, windowsHide: true, env, ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) }, (err, stdout, stderr) => {
       if (err) return res(undefined);
       res(parseVersion(`${stdout}\n${stderr}`));
     });
@@ -269,13 +270,23 @@ export function parseVersion(s: string): string | undefined {
   return /(?<![\d.])(\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.]*[0-9A-Za-z])?)/.exec(s)?.[1];
 }
 
-export async function detectAgents(o: { defs?: AgentDef[]; versions?: boolean } = {}): Promise<{ id: string; installed: boolean; version?: string; path?: string }[]> {
+/**
+ * Detects installed agents. `path` overrides the PATH searched (and given to `--version` probes): GUI apps launched
+ * from Finder / Dock do not inherit the login shell's PATH, so the desktop app passes its resolved PATH here.
+ * `dirs` adds directories searched after `path`.
+ */
+export async function detectAgents(o: { defs?: AgentDef[]; versions?: boolean; path?: string; dirs?: string[] } = {}): Promise<{ id: string; installed: boolean; version?: string; path?: string }[]> {
   const defs = o.defs ?? AGENTS;
+  const win = process.platform === 'win32';
+  const basePath = o.path ?? envValue(process.env, 'PATH') ?? '';
+  const fullPath = [basePath, ...(o.dirs ?? [])].filter(Boolean).join(win ? ';' : delimiter);
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: fullPath };
+  if (win) delete env.Path;
   return Promise.all(
     defs.map(async (d) => {
-      const path = d.detect.map((c) => which(c)).find((p): p is string => !!p);
+      const path = d.detect.map((c) => which(c, env)).find((p): p is string => !!p);
       if (!path) return { id: d.id, installed: false };
-      const version = o.versions === false ? undefined : await runVersion(path, d.versionArgs);
+      const version = o.versions === false ? undefined : await runVersion(path, d.versionArgs, env);
       return { id: d.id, installed: true, path, ...(version ? { version } : {}) };
     }),
   );

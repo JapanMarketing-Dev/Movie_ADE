@@ -8,6 +8,7 @@ import { cliBinDir, cliScript, templatesDir } from '../paths';
 import { prependPath } from '../../shared/terminal';
 import { delimiter } from 'node:path';
 import { secretEnv } from './secrets';
+import { appPath } from '../shellPath';
 
 export function cliAvailable(): boolean {
   return existsSync(cliScript());
@@ -15,9 +16,12 @@ export function cliAvailable(): boolean {
 
 /** Environment shared by CLI child processes and agent terminals. */
 export function solocutEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+  if (process.platform === 'win32') delete env.Path; // one PATH key only
   return {
-    ...base,
-    PATH: prependPath(cliBinDir(), base.PATH ?? base.Path, delimiter),
+    ...env,
+    // the login shell's PATH (Finder-launched apps get a short one) so the CLI finds claude / codex / ffmpeg
+    PATH: prependPath(cliBinDir(), appPath(), delimiter),
     SOLOCUT_ELECTRON: process.execPath,
     SOLOCUT_TEMPLATES_DIR: base.SOLOCUT_TEMPLATES_DIR ?? templatesDir(),
     SOLOCUT_APP: '1',

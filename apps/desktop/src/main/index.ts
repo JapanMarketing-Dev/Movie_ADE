@@ -20,6 +20,7 @@ import * as secrets from './services/secrets';
 import * as publish from './publish/publish';
 import * as youtube from './publish/youtube';
 import { AnalysisRunner } from './services/analysis';
+import { warmLoginShellPath } from './shellPath';
 import { startCursorLog, stopAllCursorLogs, stopCursorLog } from './services/cursor';
 import { intentUrl, libNameFor, parseProgress, UPLOAD_PAGES } from '../shared/publish';
 
@@ -35,6 +36,10 @@ try {
 initSentry(crashReports);
 registerMediaScheme();
 app.setName('Solocut');
+// test aid: a separate profile (and single-instance lock) so a running Solocut is not disturbed
+if (process.env.SOLOCUT_USER_DATA) app.setPath('userData', process.env.SOLOCUT_USER_DATA);
+// login shell PATH (remembered from the last launch, refreshed in the background) for agents and CLI children
+void warmLoginShellPath(join(app.getPath('userData'), 'shell-path.json'));
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
