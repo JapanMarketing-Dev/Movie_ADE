@@ -9,15 +9,15 @@ import {
   settingsJsonSchema, settingsPath, SettingsError,
 } from '@solocut/settings';
 import {
-  CLAUDE_MD, STEP_IDS, builtinTemplatesDir, expandPipeline, generateAgentsMd, initialStatus, listTemplatesWithErrors, loadTemplate, nextStep, splitStep,
+  CLAUDE_MD, STEP_IDS, builtinTemplatesDir, generateAgentsMd, initialStatus, listTemplatesWithErrors, loadTemplate, nextStep,
   type PipelineStep,
   type NextContext, type StepId, type StepState,
 } from '@solocut/templates';
 import { DEFAULT_MANIFEST, ensureTool, resolveToolSync, solocutHome, toolStatus, whichSync, type ToolName } from '@solocut/toolchain';
-import { variantInfo } from './derive.js';
 import { CLI_VERSION, CliError, emit, info, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { cameraCount } from '../analysis.js';
 import { termsFromTitle } from '../glossary.js';
+import { publishStatus } from '../publishJson.js';
 import {
   listDirs, openProject, paths, projectTemplate, readStatus, readTimeline, readTimelineRaw, setStep, writeAtomic, writeStatus,
   writeTimeline, type Project, type ProjectFile,
@@ -36,6 +36,9 @@ renders/
 .DS_Store
 `;
 
+/** The one template new projects use (apps/desktop DEFAULT_TEMPLATE_ID). */
+export const DEFAULT_TEMPLATE = 'tech';
+
 function newProjectId(now = new Date()): string {
   return `prj_${now.toISOString().slice(0, 10).replace(/-/g, '')}_${randomBytes(4).toString('hex')}`;
 }
@@ -44,7 +47,7 @@ export async function cmdInit(ctx: Ctx, args: string[]): Promise<void> {
   const { values, positionals } = opts(args, {
     template: { type: 'string', short: 't' }, title: { type: 'string' }, lang: { type: 'string' }, 'no-git': { type: 'boolean' },
     force: { type: 'boolean' }, dir: { type: 'string' },
-  }, { max: 1, usage: 'solocut init [dir | --dir <dir>] --template <id> [--title <title>] [--lang ja|en] [--no-git]' });
+  }, { max: 1, usage: 'solocut init [dir | --dir <dir>] [--template tech] [--title <title>] [--lang ja|en] [--no-git]' });
   if (values.dir && positionals[0] && resolve(ctx.io.cwd, values.dir) !== resolve(ctx.io.cwd, positionals[0])) throw new CliError('usage', 'give the folder either as an argument or with --dir');
   const dir = resolve(ctx.io.cwd, values.dir ?? positionals[0] ?? '.');
   const settings = loadSettings();
@@ -54,7 +57,8 @@ export async function cmdInit(ctx: Ctx, args: string[]): Promise<void> {
   if (existsSync(join(dir, 'solocut.json')) && !values.force) {
     throw new CliError('exists', t(ctx, `すでにプロジェクトがあります: ${dir}`, `a project already exists in ${dir}`));
   }
-  const tpl = loadTemplate(values.template ?? 'talk');
+  // one template: the app always uses tech (older ids stay loadable for existing projects)
+  const tpl = loadTemplate(values.template ?? DEFAULT_TEMPLATE);
   const title = (values.title ?? basename(dir)).trim() || 'untitled';
   for (const d of PROJECT_DIRS) mkdirSync(join(dir, d), { recursive: true });
   const ff = resolveToolSync('ffmpeg');
@@ -85,7 +89,7 @@ export async function cmdInit(ctx: Ctx, args: string[]): Promise<void> {
 }
 
 /** Inputs of nextStep from the project files. */
-export function nextContext(p: Project, tl: Timeline | null, o: { autopilot?: boolean; lang: 'ja' | 'en'; variants?: NextContext['variants'] }): NextContext {
+export function nextContext(p: Project, tl: Timeline | null, o: { autopilot?: boolean; lang: 'ja' | 'en' }): NextContext {
   const takesDir = join(p.dir, 'media', 'takes');
   const importsDir = join(p.dir, 'media', 'imports');
   const hasSources = tl ? Object.values(tl.sources).some((s) => s.kind !== 'asset') : false;
@@ -101,7 +105,8 @@ export function nextContext(p: Project, tl: Timeline | null, o: { autopilot?: bo
     autopilot: !!o.autopilot,
     stopBefore: settings.autopilot.stopBefore,
     lang: o.lang,
-    ...(o.variants ? { variants: o.variants } : {}),
+    // metadata / thumbnail pass by publish.json (the post the human approves in the app)
+    publish: publishStatus(p.dir, o.lang),
     // known once media is registered: one camera (or none) → nothing to switch, multicam passes
     ...(tl && hasSources ? { cameras: cameraCount(tl) } : {}),
   };
@@ -115,7 +120,7 @@ function tryTimeline(p: Project): { tl: Timeline | null; error?: string } {
   }
 }
 
-/** Progress is project-wide: it follows the main timeline plus the state of each derived variant (docs/18). */
+/** Progress of the project's one video (older projects may have variant folders; they are not followed). */
 function progressOf(ctx: Ctx, p: Project, autopilot: boolean) {
   const main: Project = { ...p, variant: null };
   const tpl = projectTemplate(main);
@@ -123,23 +128,21 @@ function progressOf(ctx: Ctx, p: Project, autopilot: boolean) {
   // the desktop app adds PII masks itself after OCR: then the masks step has nothing left to run
   const steps = readStatus(main, tpl).map((s) => (s.step === 'masks' && s.state === 'todo' && tl?.masks.some((m) => m.id.startsWith('mask_pii_'))
     ? { ...s, state: 'done' as const, note: t(ctx, 'アプリがモザイクを入れ済み（要確認）', 'masks added by the app (review them)') } : s));
-  const variants = variantInfo(main, tpl, tl);
-  const next = nextStep(tpl, steps, nextContext(main, tl, { autopilot, lang: ctx.lang, variants }));
-  return { tpl, steps, tl, error, variants, next };
+  const next = nextStep(tpl, steps, nextContext(main, tl, { autopilot, lang: ctx.lang }));
+  return { tpl, steps, tl, error, next };
 }
 
 export async function cmdStatus(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { autopilot: { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
-  const { tpl, steps, tl: mainTl, error, variants, next } = progressOf(ctx, p, !!values.autopilot || ctx.io.env.SOLOCUT_AUTOPILOT === '1');
+  const { tpl, steps, tl: mainTl, error, next } = progressOf(ctx, p, !!values.autopilot || ctx.io.env.SOLOCUT_AUTOPILOT === '1');
   const tl = p.variant ? tryTimeline(p).tl : mainTl;
   const summary = tl ? summarize(tl) : null;
-  emit(ctx, { project: { dir: p.dir, ...p.file }, variant: p.variant ?? 'main', steps, next, summary, variants, ...(error ? { timelineError: error } : {}) }, () => {
+  emit(ctx, { project: { dir: p.dir, ...p.file }, steps, next, summary, ...(error ? { timelineError: error } : {}) }, () => {
     const mark = (s: StepState) => ({ done: '✓', skipped: '–', running: '●', 'needs-human': '!', todo: '·' })[s.state];
     const lines = [`${p.file.title}  [${tpl.id}]  ${p.dir}`, steps.map((s) => `${mark(s)} ${s.step}`).join('  ')];
     if (summary) lines.push(t(ctx, `長さ ${summary.duration}・区間 ${summary.counts.segments}・字幕 ${summary.counts.captions}・要確認 ${summary.needsReview.length + summary.openItems.length}`, `length ${summary.duration} · ${summary.counts.segments} segments · ${summary.counts.captions} captions · ${summary.needsReview.length + summary.openItems.length} to review`));
     if (error) lines.push(`! ${error}`);
-    for (const [v, i] of Object.entries(variants)) lines.push(`  ${v}: ${i.exists ? (i.stale ? t(ctx, '本編が変わったので作り直しが必要', 'stale (main changed)') : t(ctx, 'あり', 'ready')) : t(ctx, 'まだ', 'not yet')}`);
     lines.push(t(ctx, `次: ${next.step} — ${next.why}`, `Next: ${next.step} — ${next.why}`));
     return lines;
   });
@@ -149,8 +152,7 @@ export async function cmdNext(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { autopilot: { type: 'boolean' }, 'with-prompt': { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
   const { tpl, next } = progressOf(ctx, p, !!values.autopilot || ctx.io.env.SOLOCUT_AUTOPILOT === '1');
-  const base = splitStep(next.step).base;
-  const promptText = values['with-prompt'] && next.step !== 'done' ? tpl.prompts[base === 'derive' ? 'vertical' : next.step] : undefined;
+  const promptText = values['with-prompt'] && next.step !== 'done' ? tpl.prompts[next.step] : undefined;
   emit(ctx, { ...next, ...(promptText ? { promptText } : {}) }, () => {
     const lines = [`${next.step} (${next.state})`, `${t(ctx, 'なぜ', 'why')}: ${next.why}`, `${t(ctx, 'やること', 'do')}: ${next.do}`];
     if (next.commands.length) lines.push(...next.commands.map((c) => `  $ ${c}`));
@@ -168,7 +170,7 @@ export async function cmdStep(ctx: Ctx, args: string[]): Promise<void> {
   const [step, state] = positionals as [string, string];
   if (!(STATES as readonly string[]).includes(state)) throw new CliError('usage', `unknown state: ${state} (${STATES.join(', ')})`);
   const p = openProject(ctx);
-  const known = expandPipeline(projectTemplate(p));
+  const known = projectTemplate(p).pipeline;
   if (!(STEP_IDS as readonly string[]).includes(step) && !known.includes(step as PipelineStep)) throw new CliError('usage', `unknown step: ${step} (${known.join(', ')})`);
   const steps = setStep(p, step as PipelineStep, state as StepState['state'], values.note);
   emit(ctx, { steps }, () => t(ctx, `${step} を ${state} にしました`, `${step} → ${state}`));

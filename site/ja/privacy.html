@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>プライバシー — Solocut</title>
-  <meta name="description" content="Solocut はお使いのコンピューターの中で動きます。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。">
+  <meta name="description" content="Solocut はお使いのコンピューターの中で動くデスクトップアプリです。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。JapanMarketing合同会社（以下「当社」）は、あなたの動画を受け取るサーバーを運用していません。">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#07070a">
   <link rel="canonical" href="https://solocut.app/ja/privacy">
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Solocut">
   <meta property="og:title" content="プライバシー — Solocut">
-  <meta property="og:description" content="Solocut はお使いのコンピューターの中で動きます。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。">
+  <meta property="og:description" content="Solocut はお使いのコンピューターの中で動くデスクトップアプリです。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。JapanMarketing合同会社（以下「当社」）は、あなたの動画を受け取るサーバーを運用していません。">
   <meta property="og:url" content="https://solocut.app/ja/privacy">
   <meta property="og:image" content="https://solocut.app/assets/og.png">
   <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/js/app.js"></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut はお使いのコンピューターの中で動きます。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。"}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut はお使いのコンピューターの中で動くデスクトップアプリです。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。JapanMarketing合同会社（以下「当社」）は、あなたの動画を受け取るサーバーを運用していません。"}</script>
 </head>
 <body data-page="privacy" data-lang="ja">
 <svg class="sprite" aria-hidden="true">
@@ -62,7 +62,7 @@
     <nav class="site-nav" aria-label="Main">
       <a href="/ja#how">使い方</a>
       <a href="/ja#templates">テンプレート</a>
-      <a href="/ja#checks">フレームチェック</a>
+      <a href="/ja#checks">チェック</a>
       <a href="/ja#faq">よくある質問</a>
     </nav>
     <div class="header-actions">
@@ -76,10 +76,21 @@
 <main id="main">
   <section class="dl-hero"><div class="wrap" style="max-width:820px">
     <h1>プライバシー</h1>
-    <p class="lede" style="font-size:17px">Solocut はお使いのコンピューターの中で動きます。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。</p>
-    <p class="lede" style="font-size:17px">文字起こしは、初期設定では whisper.cpp で端末内で行います。クラウドの文字起こしや判定モデルを選んだ場合に限り、その処理に必要なデータ（文字起こしは音声、チェックはフレーム画像と文字起こし）を、あなたが選んだ事業者へ、あなたの API キーで、同意のうえで送ります。</p>
+    <p class="sums">最終更新日：2026年10月11日</p>
+    <p class="lede" style="font-size:17px">Solocut はお使いのコンピューターの中で動くデスクトップアプリです。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。JapanMarketing合同会社（以下「当社」）は、あなたの動画を受け取るサーバーを運用していません。</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">編集と文字起こし</h2>
+    <p class="lede" style="font-size:17px">文字起こしは whisper.cpp で端末内で行います。編集はあなたが選んだ AI エージェント（Claude Code、Codex、Gemini CLI など）が、あなたのサブスクリプションと各提供元の規約のもとで行います。Solocut が自らデータを AI サービスへ送ることはありません。判定モデルは任意で初期設定はオフです。クラウドの判定モデルを有効にした場合に限り、チェックに必要なフレーム画像と文字起こしを、同意のうえで、あなたが選んだ事業者へ送ります。</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">YouTube（YouTube API サービス）</h2>
+    <p class="lede" style="font-size:17px">Solocut は、あなたが Google アカウントを連携し「OK・投稿する」を押したときに、あなた自身の YouTube チャンネルへ動画をアップロードするために YouTube API サービスを利用します。連携することで <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube 利用規約</a> に同意したものとみなされます。Google によるデータの取り扱いは <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google プライバシー ポリシー</a> をご覧ください。</p>
+    <p class="lede" style="font-size:17px">このアクセスは、あなたが承認した動画・サムネイル・メタデータ（タイトル、説明、タグ、公開設定など）のアップロードと、アップロード状況の確認にだけ使います。Google アカウントのほかのデータを読み取る・集める・共有することはなく、当社に送られることもありません。</p>
+    <p class="lede" style="font-size:17px">OAuth のトークンは端末内にのみ、OS のキーチェーン（macOS のキーチェーン、Windows の DPAPI、Linux のシークレットサービス）で暗号化して保存します。Solocut の設定からいつでも連携を解除でき、解除するとトークンは削除されます。<a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">Google のセキュリティ設定</a> からアクセス権を取り消すこともできます。</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">TikTok</h2>
+    <p class="lede" style="font-size:17px">TikTok を連携した場合、Solocut は TikTok の Content Posting API を、あなたが承認した動画とキャプションをあなたのアカウントに投稿するためだけに使います。トークンは同じく端末内に保存し、連携の解除で削除できます。TikTok の利用は <a href="https://www.tiktok.com/legal/terms-of-service" target="_blank" rel="noopener noreferrer">TikTok 利用規約</a> に従います。</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">更新・クラッシュレポート・このサイト</h2>
     <p class="lede" style="font-size:17px">アプリは solocut.app で更新を確認します。クラッシュレポート（スタックトレースと環境の情報。映像・文字起こし・ファイルのパスは含みません）を Sentry に送ります。設定でオフにできます。</p>
     <p class="lede" style="font-size:17px">このサイトは Cookie を使わない Cloudflare Web Analytics を利用しています。</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">お問い合わせ</h2>
+    <p class="lede" style="font-size:17px">プライバシーに関するお問い合わせ：<a href="mailto:takumi.endoh@japan-marketing.co.jp">takumi.endoh@japan-marketing.co.jp</a></p>
   </div></section>
 </main>
 <footer class="site-footer">
@@ -90,6 +101,7 @@
       <a href="/ja/download">ダウンロード</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer">設計書</a>
       <a href="/ja/privacy">プライバシー</a>
+      <a href="/ja/terms">利用規約</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT ライセンス</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://x.com/ai_agent_dev" target="_blank" rel="noopener noreferrer">X</a>

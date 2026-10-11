@@ -4,7 +4,9 @@
 // and on stop.
 import type { TakeMarker, TakeMeta, TakeTrackMeta } from '@shared/types';
 import { pickVideoMime } from '@shared/pcm';
+import type { Region, StreamCrop } from '@shared/region';
 import { api } from './api';
+import { cropVideoTrack } from './crop';
 import { SAMPLE_RATE, ensureWorklet, startPcmCapture } from './pcm-capture';
 
 export interface CameraChoice {
@@ -13,12 +15,16 @@ export interface CameraChoice {
   width: number;
   height: number;
   fps: number;
+  /** 'main' = the camera that shows the person (recorded as camera-1) */
+  role?: 'main';
 }
 
 export interface Sources {
   screen: MediaStream | null;
   screenSourceId: string | null; // desktopCapturer id, for the cursor log's display
   screenFps: number;
+  /** Recording region (settings record.region) and the crop it means for this stream; null = whole display */
+  screenRegion?: { region: Region; crop: StreamCrop } | null;
   cameras: { choice: CameraChoice; stream: MediaStream }[];
   mic: { deviceId: string; label: string; stream: MediaStream } | null;
 }
@@ -52,6 +58,7 @@ class Recorder {
   private meta: TakeMeta | null = null;
   private audioCtx: AudioContext | null = null;
   private metaTimer: number | null = null;
+  private cleanups: (() => void)[] = [];
 
   constructor() {
     api.on('record:hotkey', (kind) => this.mark(kind));
@@ -92,12 +99,25 @@ class Recorder {
     try {
       if (src.screen) {
         // cursor.jsonl at 30 Hz on the take clock (epoch of timeOrigin + startedAtMs)
-        this.meta.cursor = await api.invoke('record:cursorStart', takeId, src.screenSourceId, performance.timeOrigin + now);
+        this.meta.cursor = await api.invoke('record:cursorStart', takeId, src.screenSourceId, performance.timeOrigin + now, src.screenRegion?.region ?? null);
       }
       const { mime, ext } = pickVideoMime((m) => MediaRecorder.isTypeSupported(m));
       if (src.screen) {
         const v = src.screen.getVideoTracks()[0];
-        if (v) await this.startVideo(takeId, `screen.${ext}`, 'screen', new MediaStream([v]), mime, { fps: src.screenFps });
+        if (v) {
+          const rc = src.screenRegion;
+          if (rc) {
+            // only the region is recorded; cursor.jsonl is normalized to the same rectangle (record:cursorStart)
+            const cropped = cropVideoTrack(v, rc.crop, src.screenFps);
+            this.cleanups.push(cropped.stop);
+            const s = v.getSettings();
+            await this.startVideo(takeId, `screen.${ext}`, 'screen', new MediaStream([cropped.track]), mime, {
+              fps: src.screenFps,
+              size: { width: rc.crop.width, height: rc.crop.height },
+              crop: { ...rc.region, sourceWidth: s.width, sourceHeight: s.height },
+            });
+          } else await this.startVideo(takeId, `screen.${ext}`, 'screen', new MediaStream([v]), mime, { fps: src.screenFps });
+        }
         const a = src.screen.getAudioTracks()[0];
         if (a && systemAudio) await this.startAudio(takeId, 'system.wav', 'system', new MediaStream([a]), 'system');
       }
@@ -109,6 +129,7 @@ class Recorder {
           device: cam.choice.deviceId,
           label: cam.choice.label,
           fps: cam.choice.fps,
+          ...(cam.choice.role ? { role: cam.choice.role } : {}),
         });
         i++;
       }
@@ -141,14 +162,25 @@ class Recorder {
     kind: 'screen' | 'camera',
     stream: MediaStream,
     mime: string,
-    extra: { device?: string; label?: string; fps?: number },
+    extra: { device?: string; label?: string; fps?: number; role?: 'main'; size?: { width: number; height: number }; crop?: TakeTrackMeta['crop'] },
   ): Promise<void> {
     await api.invoke('record:openTrack', { takeId, file, kind });
     const track = stream.getVideoTracks()[0]!;
     const s = track.getSettings();
-    const meta: TakeTrackMeta = { file, kind, mimeType: mime || undefined, width: s.width, height: s.height, fps: s.frameRate ?? extra.fps };
+    const meta: TakeTrackMeta = {
+      file,
+      kind,
+      mimeType: mime || undefined,
+      width: extra.size?.width ?? s.width,
+      height: extra.size?.height ?? s.height,
+      // screen capture only emits frames when something changes, so the file's average rate is meaningless: write
+      // the requested capture rate (ingest prefers it over the probed rate)
+      fps: kind === 'screen' || extra.size ? (extra.fps ?? s.frameRate) : (s.frameRate ?? extra.fps),
+    };
     if (extra.device) meta.device = extra.device;
     if (extra.label) meta.label = extra.label;
+    if (extra.role) meta.role = extra.role;
+    if (extra.crop) meta.crop = extra.crop;
     const rec = new MediaRecorder(stream, {
       ...(mime ? { mimeType: mime } : {}),
       videoBitsPerSecond: kind === 'screen' ? 12_000_000 : 10_000_000,
@@ -225,6 +257,7 @@ class Recorder {
     if (this.metaTimer !== null) window.clearInterval(this.metaTimer);
     this.metaTimer = null;
     await Promise.allSettled(this.writers.map((w) => w.stop()));
+    for (const c of this.cleanups.splice(0)) c();
     if (this.meta) {
       this.meta.stoppedAtMs = performance.now();
       this.meta.complete = true;

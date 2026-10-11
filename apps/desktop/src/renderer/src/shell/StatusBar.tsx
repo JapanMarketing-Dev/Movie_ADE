@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowRightLeft,
   AudioLines,
+  ChevronRight,
   ChevronUp,
   CircleAlert,
   CircleCheck,
@@ -17,9 +18,15 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { AgentStatus, AppInfo, ProjectSnapshot } from '@shared/types';
+import { ACCOUNT_AGENTS, isAccountAgent, type AccountAgent } from '@shared/accounts';
+import { LangContext } from '../i18n';
+import { AccountBreakdown } from '../components/AgentAccounts';
+import { UpdatePill } from '../components/UpdatePill';
+import { useAgentAccounts } from './agentAccounts';
+import { activeAccountName } from './accountsModel';
 import { api, errMsg } from '../lib/api';
 import { Button, IconButton, Popover, Progress, RecordDot, Spinner } from '../ui';
-import { invokeOptional, resetIn, tightestWindow, usageTone, useAgentUsage, type AgentUsage } from './agentUsage';
+import { invokeOptional, refreshUsage, resetIn, tightestWindow, usageTone, useAgentUsage, type AgentUsage } from './agentUsage';
 import { analysisProgress, formatElapsed, summarizePipeline, summarizeTools, updatePill } from './format';
 import { useST, type ST } from './i18n';
 import { analysisStore, agentsStore, settingsStore, toolsStore, updateStore, useStore } from './stores';
@@ -169,18 +176,7 @@ export function StatusBar({
 
       <MemoryItem t={t} />
 
-      {pill?.kind === 'ready' && (
-        <button type="button" className="statusbar__btn statusbar__update-ready" onClick={() => void api.invoke('update:restart')} title={t('status.update.restartTitle', { version: pill.version })}>
-          <RefreshCw size={12} strokeWidth={2} aria-hidden="true" />
-          <span>{t('status.update.restart')}</span>
-        </button>
-      )}
-      {pill?.kind === 'downloading' && (
-        <span className="statusbar__item" title={t('status.update.downloading', { version: pill.version, percent: String(pill.progress ?? 0) })}>
-          <Download size={12} strokeWidth={2} aria-hidden="true" />
-          <span className="statusbar__value">{pill.progress ?? 0}%</span>
-        </span>
-      )}
+      <UpdatePill />
       <button ref={ref('update')} type="button" className="statusbar__btn statusbar__version" aria-expanded={open === 'update'} onClick={() => toggle('update')} title={t('status.update.title')} data-testid="statusbar-version">
         {info ? `v${info.version}` : <Spinner size={10} />}
         {pill?.kind === 'available' && <span className="statusbar__dot" aria-hidden="true" />}
@@ -190,7 +186,7 @@ export function StatusBar({
       </button>
 
       {open === 'usage' && (
-        <Popover anchor={refs.current.usage ?? null} label={t('status.usage.title')} onClose={close} className="sb-pop--wide">
+        <Popover anchor={refs.current.usage ?? null} label={t('status.usage.title')} onClose={close} className="usage-panel">
           <UsagePopover usage={usage.usage} available={usage.available} agents={agents} failover={usage.failover} t={t} onManage={() => (close(), onOpenSettings('accounts'))} onAgents={() => (close(), onOpenSettings('agents'))} />
         </Popover>
       )}
@@ -325,61 +321,90 @@ function UsagePopover({
   onManage: () => void;
   onAgents: () => void;
 }) {
+  // roster of agents → 「>」 → accounts of one agent (Ferret UsageMeter: switching happens in the breakdown)
+  const [view, setView] = useState<'roster' | AccountAgent>('roster');
+  const [refreshing, setRefreshing] = useState(false);
+  const accounts = useAgentAccounts();
+  const lang = useContext(LangContext);
+  if (view !== 'roster') return <AccountBreakdown agent={view} onBack={() => setView('roster')} onManage={onManage} />;
+  const refresh = () => {
+    setRefreshing(true);
+    void refreshUsage(true).finally(() => setRefreshing(false));
+  };
+  // Claude Code / Codex always have a row (accounts can be added even before usage is known)
+  const rows: AgentUsage[] = [...usage];
+  for (const agent of ACCOUNT_AGENTS) if (!rows.some((u) => u.agent === agent)) rows.push({ agent, status: 'idle', windows: [] });
   return (
-    <div className="sb-pop__body" data-testid="statusbar-usage">
-      <h3 className="sb-pop__title">{t('status.usage.title')}</h3>
-      {available ? (
-        usage.map((u) => (
-          <div key={u.agent} className="usage-card">
-            <div className="usage-card__head">
+    <div data-testid="statusbar-usage">
+      <div className="usage-panel__head">
+        <span className="usage-panel__title">{t('acct.usageTitle')}</span>
+        <span className="usage-panel__sub">{t('acct.usageSub')}</span>
+        <button type="button" className="usage-panel__icon" onClick={refresh} aria-label={t('acct.reload')} title={t('acct.reload')}>
+          <RefreshCw size={12} className={refreshing ? 'is-spinning' : ''} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="usage-panel__rule" />
+      {rows.map((u) => {
+        const switchable = isAccountAgent(u.agent) ? u.agent : null;
+        const accountName = switchable ? activeAccountName(accounts.state?.[switchable], lang) : u.account;
+        const body = (
+          <span className="usage-row__body">
+            <span className="usage-row__head">
               <AgentGlyph id={u.agent} />
-              <span className="usage-card__name">{agentName(u.agent, agents)}</span>
-              {u.plan && <span className="usage-card__plan">{u.plan}</span>}
-              {u.account && <span className="usage-card__account">{u.account}</span>}
-            </div>
-            {u.windows.length === 0 && <p className="st-note">{u.error ?? t('status.usage.unavailable')}</p>}
-            {u.windows.map((w) => (
-              <div key={w.label} className="usage-card__row">
-                <span className="usage-card__label">{w.label}</span>
-                <span className="usage-bar usage-bar--wide" data-tone={usageTone(w.usedPercent)} aria-hidden="true">
-                  <span className="usage-bar__fill" style={{ width: `${w.usedPercent}%` }} />
-                </span>
-                <span className="usage-card__pct">{Math.round(w.usedPercent)}%</span>
-                <span className="usage-card__reset">{resetIn(w.resetsAt) && t('status.usage.resetsIn', { time: resetIn(w.resetsAt) })}</span>
-              </div>
-            ))}
-          </div>
-        ))
-      ) : (
-        <>
-          <p className="st-note">{t('status.usage.pending')}</p>
-          {(agents ?? []).map((a) => (
-            <div key={a.id} className="st-row">
-              <span className="st-row__label">
-                <AgentGlyph id={a.id} />
-                {a.label}
+              <span className="usage-row__name">
+                {agentName(u.agent, agents)}
+                {u.plan && <span className="usage-row__plan"> · {u.plan}</span>}
               </span>
-              <span className={`sb-pop__mono${a.installed ? '' : ' is-warn'}`}>{a.installed ? (a.version ?? t('status.usage.installed')) : t('status.usage.notInstalled')}</span>
-            </div>
-          ))}
-        </>
-      )}
+              {accountName && <span className="usage-row__reset" title={accountName}>{accountName}</span>}
+            </span>
+            {u.windows.length > 0 ? (
+              <span className="usage-row__metrics">
+                {u.windows.map((w) => (
+                  <span key={w.label} className="usage-metric">
+                    <span className="usage-metric__label">{w.label}</span>
+                    <MiniBar percent={w.usedPercent} />
+                    <span className="usage-metric__value usage-seg__value" data-tone={usageTone(w.usedPercent)}>
+                      {Math.round(w.usedPercent)}%
+                    </span>
+                    {resetIn(w.resetsAt) && <span className="usage-metric__label">{t('status.usage.resetsIn', { time: resetIn(w.resetsAt) })}</span>}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="usage-row__status usage-row__metrics">{u.error ?? (available ? t('status.usage.unavailable') : t('acct.loading'))}</span>
+            )}
+          </span>
+        );
+        return switchable ? (
+          <button key={u.agent} type="button" className="usage-row" onClick={() => setView(switchable)} data-testid={`usage-row-${u.agent}`} title={t('acct.accountsOf', { agent: agentName(u.agent, agents) })}>
+            {body}
+            <ChevronRight size={14} className="usage-row__chevron" aria-hidden="true" />
+          </button>
+        ) : (
+          <div key={u.agent} className="usage-row">
+            {body}
+          </div>
+        );
+      })}
       {failover && (
-        <p className="st-note">
+        <p className="account-switcher__note">
           <ArrowRightLeft size={12} aria-hidden="true" />
-          {failover.enabled
-            ? t('status.failover.detail', { current: agentName(failover.current ?? '—', agents), next: agentName(failover.next ?? '—', agents) })
-            : t('status.failover.off')}
+          <span>
+            {failover.enabled
+              ? t('status.failover.detail', { current: agentName(failover.current ?? '—', agents), next: agentName(failover.next ?? '—', agents) })
+              : t('status.failover.off')}
+          </span>
         </p>
       )}
-      <div className="sb-pop__foot">
-        <Button variant="ghost" onClick={onAgents}>
-          {t('status.usage.agents')}
-        </Button>
-        <Button variant="ghost" onClick={onManage}>
-          {t('status.usage.manage')}
-        </Button>
-      </div>
+      <div className="usage-panel__rule" />
+      <button type="button" className="usage-panel__link" onClick={onManage}>
+        <span>{t('acct.manage')}</span>
+        <ChevronRight size={14} aria-hidden="true" />
+      </button>
+      <button type="button" className="usage-panel__link" onClick={onAgents}>
+        <span>{t('status.usage.agents')}</span>
+        <ChevronRight size={14} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -597,7 +622,10 @@ function UpdatePopover({ info, t }: { info: AppInfo | null; t: ST }) {
         <span className="sb-pop__mono">v{info?.version ?? '—'}</span>
       </div>
       {note}
-      {info && !info.packaged && <p className="st-note">{t('status.update.dev')}</p>}
+      {s?.status === 'ready' && s.blockedBy && (
+        <p className="st-note">{t(s.blockedBy === 'recording' ? 'upd.pill.waitRecordingTitle' : 'upd.pill.waitAgentTitle', { version: s.latest ?? '' })}</p>
+      )}
+      {info && !info.packaged ? <p className="st-note">{t('status.update.dev')}</p> : <p className="st-note">{t('upd.auto')}</p>}
       <div className="sb-pop__foot">
         {s?.status === 'ready' && (
           <Button variant="primary" onClick={() => void api.invoke('update:restart')}>

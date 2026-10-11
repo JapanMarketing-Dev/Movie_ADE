@@ -156,7 +156,7 @@ const JA: [RegExp, (m: RegExpExecArray) => string][] = [
   [/^timeline\.json is invalid \((\d+) issue\(s\)\); run `solocut validate`$/, (m) => `timeline.json に問題が ${m[1]} 件あります。\`solocut validate\` で確認して直してください`],
   [/^the edit would make timeline\.json invalid: ([\s\S]+)$/, (m) => `この編集を適用すると timeline.json が不正になります（何も変えていません）: ${m[1]}`],
   [/^([\w]+): (\w+) not found: (\S+) \(check the current ids with [^)]+\)$/, (m) => `${m[1]}: 見つかりません: ${m[3]}（solocut tl summary / solocut tl query で今の id を確認してください）`],
-  [/^variant (\S+) does not exist yet; create it with `([^`]+)`$/, (m) => `${m[1]} の版はまだありません。\`${m[2]}\` で作ってください`],
+  [/^variant (\S+) does not exist \(projects make one 16:9 video; drop --variant\)$/, (m) => `${m[1]} の版はありません（動画は 16:9 の1本だけです。--variant を外してください）`],
   [/^variant (\S+) only has the \S+ output$/, (m) => `版 ${m[1]} の出力先は ${m[1]} だけです`],
   [/^no operations given$/, () => '操作が指定されていません'],
   [/^operation #(\d+) has no "op"$/, (m) => `${m[1]} 番目の操作に "op" がありません`],

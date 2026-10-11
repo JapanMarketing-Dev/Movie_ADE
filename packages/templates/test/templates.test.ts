@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  CLAUDE_MD, STEP_DEPS, STEP_IDS, TemplateError, TemplateFileSchema, builtinTemplatesDir, deepMerge, derivedTargets, expandPipeline, generateAgentsMd, initialStatus, listTemplates,
+  CLAUDE_MD, STEP_DEPS, STEP_IDS, TemplateError, TemplateFileSchema, builtinTemplatesDir, deepMerge, generateAgentsMd, initialStatus, listTemplates,
   listTemplatesWithErrors, loadTemplate, nextStep, stepText, toRational, type NextContext, type PipelineStep, type StepId, type StepState, type Template,
 } from '../src/index.js';
 
@@ -31,43 +31,64 @@ function writeTemplate(root: string, id: string, yaml: string, files: Record<str
 }
 
 describe('built-in templates', () => {
-  const FAMILIES = ['talk', 'tech'];
-  const ALIASES = { 'tech-tutorial': 'tech', 'tech-short': 'tech', 'talk-youtube': 'talk', 'talk-tiktok': 'talk', 'shorts-from-long': 'talk' };
+  const ALIASES = { talk: 'base-horizontal', 'tech-tutorial': 'tech', 'tech-short': 'tech', 'talk-youtube': 'talk', 'talk-tiktok': 'talk', 'shorts-from-long': 'talk' };
 
   it('resolves the repo templates dir', () => {
     expect(basename(builtinTemplatesDir())).toBe('templates');
     expect(existsSync(join(builtinTemplatesDir(), 'tech', 'template.yaml'))).toBe(true);
   });
 
-  it('lists the two families without errors; hides bases and aliases', () => {
+  it('lists exactly one template (tech) without errors; hides bases and aliases', () => {
     const r = listTemplatesWithErrors();
     expect(r.errors.map((e) => e.message)).toEqual([]);
-    expect(r.templates.map((t) => t.id).sort()).toEqual(FAMILIES);
+    expect(r.templates.map((t) => t.id)).toEqual(['tech']);
     const all = listTemplatesWithErrors({ includeAbstract: true }).templates.map((t) => t.id);
-    for (const id of ['base-horizontal', 'base-vertical', ...Object.keys(ALIASES)]) expect(all).toContain(id);
+    for (const id of ['base-horizontal', ...Object.keys(ALIASES)]) expect(all).toContain(id);
+    expect(all).not.toContain('base-vertical');
   });
 
-  it.each(FAMILIES)('%s is complete and makes three videos', (id) => {
+  it.each(['tech', 'talk'])('%s is complete and makes one 16:9 video', (id) => {
     const t = loadTemplate(id);
     expect(t.abstract).toBe(false);
-    for (const p of ['rough-cut', 'multicam', 'captions', 'sfx', 'thumbnail', 'vertical']) {
+    for (const p of ['rough-cut', 'multicam', 'captions', 'sfx', 'thumbnail', 'metadata']) {
       expect(t.prompts[p], `${id} prompts/${p}.md`).toBeTruthy();
       expect(t.prompts[p]!.length).toBeGreaterThan(200);
     }
-    expect(t.rules).toContain('1回の撮影から3本');
+    expect(t.prompts.vertical).toBeUndefined();
     expect([t.canvas.width, t.canvas.height]).toEqual([1920, 1080]);
-    expect(Object.keys(t.outputs ?? {}).sort()).toEqual(['tiktok', 'youtube', 'youtube-shorts']);
-    expect(derivedTargets(t)).toEqual(['tiktok', 'youtube-shorts']);
-    expect(t.outputs!['youtube-shorts']).toMatchObject({ derive: 'vertical', sameAs: 'tiktok', maxSec: 60 });
+    expect(t.targets).toEqual(['youtube']);
+    expect(t.outputs).toEqual({ youtube: { enabled: true } });
+    expect(t.features.faceReframe).toBe(true);
+    expect(t.pipeline).not.toContain('review');
+    expect(t.pipeline.at(-3)).toBe('final');
     expect(t.canvas.fps).toEqual({ num: 30, den: 1 });
   });
 
-  it.each(Object.entries(ALIASES))('old id %s is an alias of %s', (id, fam) => {
+  it.each(['tech', 'talk'])('%s rules and prompts: no vertical/3-video/announce wording; person centred; free illustration libraries', (id) => {
+    const t = loadTemplate(id);
+    const all = [t.rules, ...Object.values(t.prompts)].join('\n');
+    for (const bad of ['3本', 'solocut derive', '--variant', 'vertical.md', 'Shorts', '告知', 'Instagram', '判定モデルの確信度']) expect(all, bad).not.toContain(bad);
+    expect(t.rules).toContain('顔がカメラの枠');
+    expect(t.prompts.multicam).toContain('main');
+    expect(all).toContain('いらすとや');
+    expect(all).toContain('クレジット');
+    expect(t.prompts.thumbnail).toContain('API キー');
+    expect(t.prompts.metadata).toContain('publish.json');
+  });
+
+  it.each(Object.entries(ALIASES))('old id %s is a hidden alias (chain %s)', (id, parent) => {
     const t = loadTemplate(id);
     expect(t.alias).toBe(true);
-    expect(t.chain.slice(0, 2)).toEqual([id, fam]);
-    expect(t.prompts.vertical).toBe(loadTemplate(fam).prompts.vertical);
-    expect(t.outputs).toEqual(loadTemplate(fam).outputs);
+    expect(t.chain.slice(0, 2)).toEqual([id, parent]);
+    expect(t.outputs).toEqual({ youtube: { enabled: true } });
+  });
+
+  it('older templates with vertical outputs still load (extra keys ignored)', () => {
+    const root = join(home, 'templates');
+    writeTemplate(root, 'old', 'id: old\nversion: 1\nextends: tech\noutputs:\n  youtube: {}\n  tiktok: { derive: vertical, maxSec: 90, sameAs: youtube }\n');
+    const t = loadTemplate('old');
+    expect(t.outputs).toEqual({ youtube: { enabled: true }, tiktok: { enabled: true } });
+    expect(t.pipeline).toEqual(loadTemplate('tech').pipeline);
   });
 
   it('merges extends: child overrides keys, keeps the rest; arrays replace', () => {
@@ -78,13 +99,13 @@ describe('built-in templates', () => {
     expect(t.rules.indexOf('共通の方針')).toBeLessThan(t.rules.indexOf('語り動画（YouTube）の編集方針')); // base first
   });
 
-  it('tech enables the tech features; vertical layouts per family', () => {
+  it('tech enables the tech features', () => {
     const t = loadTemplate('tech');
     expect(t.kind).toBe('tech');
-    expect(t.features).toMatchObject({ autoZoom: true, keystrokes: true, cursorHighlight: true, piiMask: true });
+    expect(t.features).toMatchObject({ autoZoom: true, keystrokes: true, cursorHighlight: true, piiMask: true, faceReframe: true });
     expect(t.checks).toContain('pii-on-screen');
-    expect(t.outputs!.tiktok!.layout).toBe('split-v');
-    expect(loadTemplate('talk').outputs!.tiktok!.layout).toBe('camera-full');
+    expect(t.layouts.default).toBe('screen-with-wipe');
+    expect(t.layouts.allowed).toContain('camera-full');
   });
 
   it('sfx rules, zoom.followClicks and captionLook validate; bad values are rejected', () => {
@@ -108,17 +129,13 @@ describe('built-in templates', () => {
     expect(TemplateFileSchema.parse({ ...base, zoom: {} }).zoom?.followClicks).toBe(false);
     expect(TemplateFileSchema.safeParse({ ...base, captionLook: { size: 0.05, box: false, stroke: { color: '#000', widthRatio: 0.1 } } }).success).toBe(true);
     expect(TemplateFileSchema.safeParse({ ...base, captionLook: { size: -1, box: false } }).success).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, pipeline: ['ingest', 'publish'] }).success).toBe(false);
+    expect(TemplateFileSchema.safeParse({ ...base, pipeline: ['ingest', 'derive'] }).success).toBe(false);
   });
 
-  it('expands the pipeline per docs/18', () => {
-    expect(expandPipeline(loadTemplate('talk'))).toEqual([
-      'ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check',
-      'derive:tiktok', 'check:tiktok', 'derive:youtube-shorts', 'check:youtube-shorts',
-      'thumbnail', 'metadata', 'review', 'final', 'final:tiktok', 'final:youtube-shorts', 'publish',
-    ]);
-    expect(expandPipeline({ pipeline: ['ingest', 'final'], outputs: undefined })).toEqual(['ingest', 'final']);
-    expect(expandPipeline({ pipeline: ['ingest'], outputs: { tiktok: { enabled: false, derive: 'vertical' } } })).toEqual(['ingest']);
-    expect(expandPipeline({ pipeline: ['ingest'], outputs: { tiktok: { enabled: true, derive: 'vertical' } } })).toEqual(['ingest', 'derive:tiktok', 'check:tiktok', 'final:tiktok', 'publish']);
+  it('initialStatus follows the template pipeline exactly', () => {
+    expect(initialStatus(loadTemplate('tech')).map((s) => s.step)).toEqual(loadTemplate('tech').pipeline);
+    expect(initialStatus({ pipeline: ['ingest', 'final'] })).toEqual([{ step: 'ingest', state: 'todo' }, { step: 'final', state: 'todo' }]);
   });
 });
 
@@ -279,8 +296,10 @@ describe('nextStep', () => {
   const tpl = (): Template => loadTemplate('talk-youtube');
   const ctx = (o: Partial<NextContext> = {}): NextContext => ({ hasTakes: true, hasTranscript: true, openItems: 0, lastCheckFailed: 0, ...o });
   const status = (t: Template, done: PipelineStep[], extra: Partial<Record<PipelineStep, StepState['state']>> = {}): StepState[] =>
-    expandPipeline(t).map((step) => ({ step, state: extra[step] ?? (done.includes(step) ? 'done' : 'todo') }));
-  const upTo = (t: Template, step: PipelineStep): PipelineStep[] => expandPipeline(t).slice(0, expandPipeline(t).indexOf(step));
+    t.pipeline.map((step) => ({ step, state: extra[step] ?? (done.includes(step) ? 'done' : 'todo') }));
+  const upTo = (t: Template, step: PipelineStep): PipelineStep[] => t.pipeline.slice(0, t.pipeline.indexOf(step));
+  /** A template with a human review step (older projects / user templates). */
+  const withReview = (): Template => ({ ...tpl(), pipeline: ['ingest', 'sync', 'transcribe', 'rough-cut', 'captions', 'preview', 'check', 'review', 'final', 'thumbnail', 'metadata'] });
 
   it('initialStatus is all todo', () => {
     expect(initialStatus(tpl()).every((s) => s.state === 'todo')).toBe(true);
@@ -298,8 +317,7 @@ describe('nextStep', () => {
 
   it('walks the pipeline in order, one step at a time', () => {
     const t = tpl();
-    for (const step of expandPipeline(t)) {
-      if (step === 'review' || step === 'publish') continue;
+    for (const step of t.pipeline) {
       const n = nextStep(t, status(t, upTo(t, step)), ctx());
       expect(n.step, `after ${upTo(t, step).at(-1)}`).toBe(step);
       expect(n.state).toBe('ready');
@@ -350,20 +368,34 @@ describe('nextStep', () => {
 
   it('check failed → check again with preview first; 0 failures passes', () => {
     const t = tpl();
-    const st = status(t, upTo(t, 'derive:tiktok'));
+    const st = status(t, upTo(t, 'final'));
     const n = nextStep(t, st, ctx({ lastCheckFailed: 2 }));
     expect(n).toMatchObject({ step: 'check', state: 'ready' });
     expect(n.commands).toContain('solocut check --json');
-    expect(nextStep(t, st, ctx({ lastCheckFailed: 0 }))).toMatchObject({ step: 'derive:tiktok', state: 'ready', variant: 'tiktok' });
+    expect(n.do).toContain('solocut step check needs-human');
+    expect(nextStep(t, st, ctx({ lastCheckFailed: 0 }))).toMatchObject({ step: 'final', state: 'ready' });
   });
 
-  it('review waits for a human; autopilot skips to final; done review → final per target', () => {
+  it('a check the agent cannot fix (needs-human) does not stop autopilot; it does stop a human-driven run', () => {
     const t = tpl();
+    const st = status(t, upTo(t, 'final'), { check: 'needs-human' });
+    expect(nextStep(t, st, ctx({ autopilot: true, lastCheckFailed: 1 })).step).toBe('final');
+    expect(nextStep(t, st, ctx({ lastCheckFailed: 1 }))).toMatchObject({ step: 'check', state: 'needs-human' });
+  });
+
+  it('final comes right after check (no human review step); one command per target', () => {
+    const t = tpl();
+    const n = nextStep(t, status(t, upTo(t, 'final')), ctx());
+    expect(n.step).toBe('final');
+    expect(n.commands).toEqual(['solocut render --final --target youtube --json']);
+  });
+
+  it('a template with review: waits for a human; autopilot skips to final', () => {
+    const t = withReview();
     const st = status(t, upTo(t, 'review'));
     expect(nextStep(t, st, ctx()).state).toBe('needs-human');
     const ap = nextStep(t, st, ctx({ autopilot: true }));
     expect(ap.step).toBe('final');
-    expect(ap.commands).toEqual(['solocut render --final --target youtube --json']);
     expect(nextStep(t, status(t, upTo(t, 'final')), ctx()).step).toBe('final');
   });
 
@@ -385,11 +417,13 @@ describe('nextStep', () => {
     expect(nextStep(t, st, ctx()).step).toBe('captions');
   });
 
-  it('everything done → done; English text', () => {
+  it('everything done → done; English text; never asks to publish', () => {
     const t = tpl();
-    const n = nextStep(t, status(t, expandPipeline(t)), ctx({ lang: 'en' }));
+    const n = nextStep(t, status(t, t.pipeline), ctx({ lang: 'en' }));
     expect(n).toMatchObject({ step: 'done', state: 'done', commands: [] });
-    expect(n.why).toMatch(/All template steps/);
+    expect(n.why).toMatch(/video is finished/);
+    expect(n.do).toMatch(/Do not publish/);
+    expect(nextStep(t, status(t, t.pipeline), ctx()).why).toContain('投稿画面');
   });
 
   it('a needs-human step note becomes the reason', () => {
@@ -415,11 +449,11 @@ describe('nextStep', () => {
 
   it('round-5 steps: analyze after sync, masks before preview (tech), commands name the new CLI', () => {
     const tech = loadTemplate('tech');
-    const p = expandPipeline(tech);
+    const p = tech.pipeline;
     expect(p.indexOf('analyze')).toBe(p.indexOf('sync') + 1);
     expect(p.indexOf('masks')).toBeLessThan(p.indexOf('preview'));
     expect(p.indexOf('masks')).toBeGreaterThan(p.indexOf('layout'));
-    expect(expandPipeline(loadTemplate('talk'))).not.toContain('masks');
+    expect(loadTemplate('talk').pipeline).not.toContain('masks');
     expect(stepText('masks', 'ja').commands[0]).toBe('solocut masks from-analysis --json');
     expect(stepText('sfx', 'en').commands[0]).toBe('solocut sfx apply --json');
     expect(stepText('layout', 'en').commands[0]).toBe('solocut tracks apply --json');
@@ -430,55 +464,51 @@ describe('nextStep', () => {
     expect(STEP_DEPS.preview).toContain('masks');
   });
 
-  describe('variants (docs/18)', () => {
-    const v = (o: Partial<{ exists: boolean; stale: boolean; lastCheckFailed: number }> = {}) => ({ exists: true, stale: false, lastCheckFailed: 0, ...o });
+  describe('publish.json (metadata / thumbnail)', () => {
+    const pub = (o: Partial<NonNullable<NextContext['publish']>> = {}) => ({ valid: true, thumbnail: true, ...o });
 
-    it('derive steps follow prompts/vertical.md and carry the variant', () => {
-      const t = tpl();
-      const n = nextStep(t, status(t, upTo(t, 'derive:tiktok')), ctx());
-      expect(n).toMatchObject({ step: 'derive:tiktok', state: 'ready', variant: 'tiktok', prompt: t.promptFiles.vertical });
-      expect(n.commands[0]).toBe('solocut derive --target tiktok --json');
-      const c = nextStep(t, status(t, upTo(t, 'check:youtube-shorts')), ctx());
-      expect(c.commands).toEqual(['solocut render --preview --variant youtube-shorts --json', 'solocut check --variant youtube-shorts --json']);
-    });
-
-    it('a stale or missing variant is derived again; a failed variant check is redone', () => {
+    it('metadata and thumbnail pass by the file even when nobody marked them done', () => {
       const t = tpl();
       const st = status(t, upTo(t, 'thumbnail'));
-      expect(nextStep(t, st, ctx({ variants: { tiktok: v(), 'youtube-shorts': v() } })).step).toBe('thumbnail');
-      expect(nextStep(t, st, ctx({ variants: { tiktok: v({ stale: true }), 'youtube-shorts': v() } }))).toMatchObject({ step: 'derive:tiktok', state: 'ready' });
-      expect(nextStep(t, st, ctx({ variants: { tiktok: v(), 'youtube-shorts': v({ exists: false }) } })).step).toBe('derive:youtube-shorts');
-      expect(nextStep(t, st, ctx({ variants: { tiktok: v({ lastCheckFailed: 1 }), 'youtube-shorts': v() } })).step).toBe('check:tiktok');
+      expect(nextStep(t, st, ctx({ publish: pub() })).step).toBe('done');
+      expect(nextStep(t, st, ctx({ publish: pub({ thumbnail: false }) }))).toMatchObject({ step: 'thumbnail', state: 'ready' });
+      expect(nextStep(t, st, ctx({ publish: pub({ valid: false, problems: ['title is empty'] }) }))).toMatchObject({ step: 'metadata', state: 'ready' });
+      expect(nextStep(t, st, ctx({ publish: pub({ valid: false, problems: ['title is empty'] }) })).why).toContain('title is empty');
     });
 
-    it('thumbnail and metadata list commands for every video', () => {
+    it('marked done but the file is missing or broken → do it again', () => {
       const t = tpl();
-      const n = nextStep(t, status(t, upTo(t, 'thumbnail')), ctx());
-      expect(n.commands.some((c) => c.includes('--variant tiktok'))).toBe(true);
-      expect(n.commands.some((c) => c.includes('--variant youtube-shorts'))).toBe(true);
+      const st = status(t, t.pipeline);
+      expect(nextStep(t, st, ctx({ publish: pub({ valid: false }) }))).toMatchObject({ step: 'metadata', state: 'ready' });
+      expect(nextStep(t, st, ctx({ publish: pub({ thumbnail: false }) }))).toMatchObject({ step: 'thumbnail', state: 'ready' });
+      expect(nextStep(t, st, ctx({ publish: pub({ thumbnail: false }), lang: 'en' })).why).toMatch(/thumbnail/);
     });
 
-    it('finals per variant, then publish always waits for a human (also on autopilot)', () => {
+    it('skipped thumbnail passes without an image; without publish info the status decides', () => {
       const t = tpl();
-      expect(nextStep(t, status(t, upTo(t, 'final:tiktok')), ctx()).commands).toEqual(['solocut render --final --variant tiktok --json']);
-      const p = nextStep(t, status(t, upTo(t, 'publish')), ctx({ autopilot: true }));
-      expect(p).toMatchObject({ step: 'publish', state: 'needs-human', commands: [] });
+      const st = status(t, t.pipeline, { thumbnail: 'skipped' });
+      expect(nextStep(t, st, ctx({ publish: pub({ thumbnail: false }) })).step).toBe('done');
+      expect(nextStep(t, status(t, t.pipeline), ctx()).step).toBe('done');
     });
 
-    it('while the review waits, a variant step can run meanwhile', () => {
+    it('the steps name publish.json, meta check and thumb pick; prompts/metadata.md is attached', () => {
       const t = tpl();
-      const st = status(t, upTo(t, 'derive:tiktok'), { 'rough-cut': 'done' });
-      st.find((x) => x.step === 'review')!.state = 'todo';
-      const n = nextStep(t, status(t, upTo(t, 'review'), { 'final:tiktok': 'todo' }), ctx());
-      expect(n).toMatchObject({ step: 'review', state: 'needs-human' });
-      expect(st.length).toBe(expandPipeline(t).length);
+      const m = nextStep(t, status(t, upTo(t, 'metadata')), ctx({ publish: pub({ valid: false }) }));
+      expect(m.do).toContain('publish.json');
+      expect(m.commands).toContain('solocut meta check --json');
+      expect(m.prompt).toBe(t.promptFiles.metadata);
+      const th = nextStep(t, status(t, upTo(t, 'thumbnail')), ctx({ publish: pub({ thumbnail: false }) }));
+      expect(th.commands.some((c) => c.startsWith('solocut thumb pick'))).toBe(true);
+      expect(stepText('thumbnail', 'ja').do).toContain('API キーは使わない');
     });
 
-    it('AGENTS.md lists the variant steps and the vertical prompt', () => {
-      const md = generateAgentsMd(tpl(), { dir: '/p', title: 'x', lang: 'ja' });
-      expect(md).toContain('**derive:tiktok**');
-      expect(md).toContain('prompts/vertical.md');
-      expect(md).toContain('**publish**');
+    it('AGENTS.md lists one video, publish.json and no derive/variant steps', () => {
+      const md = generateAgentsMd(loadTemplate('tech'), { dir: '/p', title: 'x', lang: 'ja' });
+      expect(md).toContain('publish.json');
+      expect(md).not.toMatch(/derive(?!d)/);
+      expect(md).not.toContain('--variant');
+      expect(md).not.toContain('**publish**');
+      expect(md).not.toContain('判定モデルの結果');
     });
   });
 });
@@ -492,13 +522,13 @@ describe('nextStep never dead-ends', () => {
 
   it.each(['tech', 'talk', 'tech-tutorial', 'talk-tiktok', 'shorts-from-long'])('%s: every state gives a command or a human action', (id) => {
     const t = loadTemplate(id);
-    const pipeline = expandPipeline(t);
+    const pipeline = t.pipeline;
     for (let k = 0; k < 400; k++) {
       const status = pipeline.map((step) => ({ step, state: pick(STATES), ...(rnd() < 0.2 ? { note: 'n' } : {}) }));
-      const vs = Object.fromEntries(derivedTargets(t).map((v) => [v, { exists: rnd() < 0.6, stale: rnd() < 0.3, lastCheckFailed: rnd() < 0.3 ? 2 : 0 }]));
       const n = nextStep(t, status, {
         hasTakes: rnd() < 0.8, hasTranscript: rnd() < 0.7, openItems: rnd() < 0.3 ? 2 : 0, lastCheckFailed: rnd() < 0.3 ? 1 : 0,
-        autopilot: rnd() < 0.5, stopBefore: rnd() < 0.5 ? ['publish'] : [], lang: pick(['ja', 'en'] as const), variants: vs,
+        autopilot: rnd() < 0.5, stopBefore: rnd() < 0.5 ? ['final'] : [], lang: pick(['ja', 'en'] as const),
+        ...(rnd() < 0.5 ? { publish: { valid: rnd() < 0.5, thumbnail: rnd() < 0.5 } } : {}),
         ...(rnd() < 0.5 ? { cameras: Math.floor(rnd() * 3) } : {}),
       });
       const where = `${id} #${k}: ${JSON.stringify(n)}`;

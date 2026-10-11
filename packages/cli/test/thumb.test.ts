@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  THUMB_SIZES, ThumbError, generateBases, generateCodex, generateGemini, generateOpenAI, layoutTitle, pickCandidates, scoreGray,
+  PROVIDERS, THUMB_SIZES, ThumbError, generateBases, generateCodex, layoutTitle, pickCandidates, scoreGray,
   titleAss, titleSvg, type GenRequest,
 } from '../src/thumb.js';
 
@@ -15,7 +15,6 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const req = (o: Partial<GenRequest> = {}): GenRequest => ({ frame: join(dir, 'frame.png'), prompt: 'a thumbnail', n: 2, format: 'youtube', outDir: dir, ...o });
-const PNG = Buffer.alloc(300, 1).toString('base64');
 
 function gray(w: number, h: number, f: (x: number, y: number) => number): Uint8Array {
   const a = new Uint8Array(w * h);
@@ -91,48 +90,8 @@ describe('title layout', () => {
 });
 
 describe('providers', () => {
-  it('openai: multipart edits request with the frame, key from SOLOCUT_OPENAI_API_KEY', async () => {
-    let seen: { url: string; auth: string; form: FormData } | null = null;
-    const fetch = (async (url: string, init: RequestInit) => {
-      seen = { url, auth: String((init.headers as Record<string, string>).authorization), form: init.body as FormData };
-      return new Response(JSON.stringify({ data: [{ b64_json: PNG }, { b64_json: PNG }] }));
-    }) as unknown as typeof globalThis.fetch;
-    const out = await generateOpenAI(req({ references: [join(dir, 'frame.png')] }), { env: { SOLOCUT_OPENAI_API_KEY: 'sk-x' }, fetch });
-    expect(out).toHaveLength(2);
-    expect(readFileSync(out[0]!).length).toBe(300);
-    expect(seen!.url).toBe('https://api.openai.com/v1/images/edits');
-    expect(seen!.auth).toBe('Bearer sk-x');
-    expect(seen!.form.get('model')).toBe('gpt-image-2');
-    expect(seen!.form.get('size')).toBe('1536x1024');
-    expect(seen!.form.getAll('image[]')).toHaveLength(2);
-  });
-
-  it('openai: missing key, HTTP error, empty or tiny data', async () => {
-    await expect(generateOpenAI(req(), { env: {} })).rejects.toThrow(/no API key/);
-    const err = (async () => new Response('{"error":"bad"}', { status: 400 })) as unknown as typeof fetch;
-    await expect(generateOpenAI(req(), { env: { OPENAI_API_KEY: 'k' }, fetch: err })).rejects.toThrow(/HTTP 400/);
-    const empty = (async () => new Response('{"data":[]}')) as unknown as typeof fetch;
-    await expect(generateOpenAI(req(), { env: { OPENAI_API_KEY: 'k' }, fetch: empty })).rejects.toThrow(/no data/);
-    const tiny = (async () => new Response(JSON.stringify({ data: [{ b64_json: 'AAAA' }] }))) as unknown as typeof fetch;
-    await expect(generateOpenAI(req(), { env: { OPENAI_API_KEY: 'k' }, fetch: tiny })).rejects.toThrow(/too small/);
-  });
-
-  it('gemini: one generateContent per image with the frame inline', async () => {
-    const calls: { url: string; body: { contents: { parts: unknown[] }[]; generationConfig: { imageConfig: { aspectRatio: string } } }; key: string }[] = [];
-    const fetch = (async (url: string, init: RequestInit) => {
-      calls.push({ url, body: JSON.parse(String(init.body)), key: String((init.headers as Record<string, string>)['x-goog-api-key']) });
-      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'here' }, { inlineData: { mimeType: 'image/png', data: PNG } }] } }] }));
-    }) as unknown as typeof globalThis.fetch;
-    const out = await generateGemini(req({ format: 'shorts' }), { env: { SOLOCUT_GEMINI_API_KEY: 'g' }, fetch, model: 'nano-banana-x' });
-    expect(out).toHaveLength(2);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]!.url).toContain('/models/nano-banana-x:generateContent');
-    expect(calls[0]!.key).toBe('g');
-    expect(calls[0]!.body.generationConfig.imageConfig.aspectRatio).toBe('9:16');
-    expect(calls[0]!.body.contents[0]!.parts).toHaveLength(2);
-    const noImage = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'sorry' }] } }] }))) as unknown as typeof globalThis.fetch;
-    await expect(generateGemini(req(), { env: { GEMINI_API_KEY: 'g' }, fetch: noImage })).rejects.toThrow(/no image data/);
-    await expect(generateGemini(req(), { env: {} })).rejects.toThrow(/no API key/);
+  it('only subscription-based generation exists: no API-key providers (openai / gemini)', () => {
+    expect(Object.keys(PROVIDERS)).toEqual(['codex']);
   });
 
   it('codex: runs codex exec with the frame and picks up new files from $CODEX_HOME/generated_images', async () => {
@@ -170,15 +129,14 @@ describe('providers', () => {
 
   it('generateBases fails over in order and falls back to the frame', async () => {
     const fail = async () => ({ code: 1, stdout: '', stderr: 'boom' });
-    const r = await generateBases(['codex', 'openai', 'gemini'], req(), { env: { CODEX_HOME: join(dir, 'h') }, run: fail });
+    const r = await generateBases(['codex'], req(), { env: { CODEX_HOME: join(dir, 'h') }, run: fail });
     expect(r.provider).toBe('frame');
     expect(r.images).toEqual([join(dir, 'frame.png'), join(dir, 'frame.png')]);
-    expect(r.errors).toHaveLength(3);
-    expect(r.errors[1]).toMatch(/openai: no API key/);
-    const fetch = (async () => new Response(JSON.stringify({ data: [{ b64_json: PNG }, { b64_json: PNG }, { b64_json: PNG }] }))) as unknown as typeof globalThis.fetch;
-    const r2 = await generateBases(['codex', 'openai'], req(), { env: { CODEX_HOME: join(dir, 'h'), OPENAI_API_KEY: 'k' }, run: fail, fetch });
-    expect(r2.provider).toBe('openai');
-    expect(r2.images).toHaveLength(2);
+    expect(r.errors).toHaveLength(1);
+    // an old settings value naming an API provider is reported, never called
+    const r2 = await generateBases(['openai' as never, 'gemini' as never], req(), { env: { OPENAI_API_KEY: 'k', GEMINI_API_KEY: 'g' } });
+    expect(r2.provider).toBe('frame');
+    expect(r2.errors).toEqual(['openai: unknown provider', 'gemini: unknown provider']);
     expect((await generateBases(['frame'], req(), { env: {} })).errors).toEqual([]);
     expect(new ThumbError('codex', 'x').message).toBe('codex: x');
   });

@@ -160,22 +160,6 @@ describe('glossary terms stay whole through the CLI caption paths', () => {
     }
   });
 
-  it('derive (vertical variant captions) keeps the terms whole too', async () => {
-    const { Sandbox } = await import('./helpers.js');
-    const { readFileSync } = await import('node:fs');
-    const sb = new Sandbox();
-    try {
-      const dir = await project(sb);
-      expect((await sb.run(['captions', 'build', '--json'], { cwd: dir })).json.ok).toBe(true);
-      const r = await sb.run(['derive', '--target', 'tiktok', '--selection', 'seg_1', '--json'], { cwd: dir });
-      expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
-      expect(r.json.captions).toBeGreaterThan(0);
-      assertWhole(JSON.parse(readFileSync(join(dir, 'variants', 'tiktok', 'timeline.json'), 'utf8')).captions);
-    } finally {
-      sb.dispose();
-    }
-  });
-
   it('captionGlossary: the terms plus the misheard spans to keep whole', async () => {
     const { captionGlossary } = await import('../src/commands/media.js');
     expect(captionGlossary(['まず', 'クロード', '、', 'M', '、', 'P', 'を'], [{ term: 'CLAUDE.md' }], 'ja')).toEqual(['CLAUDE.md', 'クロード、M、P']);

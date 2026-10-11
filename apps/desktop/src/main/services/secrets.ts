@@ -1,24 +1,12 @@
-// API keys and OAuth tokens, encrypted with Electron safeStorage (Keychain / DPAPI / libsecret). Only the
-// ciphertext touches disk (userData/secrets.json). Without OS encryption (bare Linux) values live in memory
-// for this session only (docs/14). Keys reach the CLI and agent terminals only as SOLOCUT_* env vars.
+// OAuth tokens of the publishing accounts, encrypted with Electron safeStorage (Keychain / DPAPI / libsecret). Only
+// the ciphertext touches disk (userData/secrets.json). Without OS encryption (bare Linux) values live in memory for
+// this session only (docs/14). The app has no API keys: images and judgements run inside the agents' subscriptions.
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const SECRET_NAMES = ['openai', 'gemini', 'decide', 'typesafe', 'youtube.clientId', 'youtube.clientSecret', 'youtube.refreshToken'] as const;
+export const SECRET_NAMES = ['youtube.clientId', 'youtube.clientSecret', 'youtube.refreshToken', 'tiktok.tokens'] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
-
-/** Secrets that are exported to child processes, and their variable names. */
-export const SECRET_ENV: Partial<Record<SecretName, string>> = {
-  openai: 'SOLOCUT_OPENAI_API_KEY',
-  gemini: 'SOLOCUT_GEMINI_API_KEY',
-  decide: 'SOLOCUT_DECIDE_API_KEY',
-  typesafe: 'SOLOCUT_TYPESAFE_API_KEY',
-};
-
-export function isSecretName(n: unknown): n is SecretName {
-  return typeof n === 'string' && (SECRET_NAMES as readonly string[]).includes(n);
-}
 
 const memory = new Map<SecretName, string>();
 let cache: Record<string, string> | null = null;
@@ -91,27 +79,7 @@ export function setSecret(name: SecretName, value: string | null): { persisted: 
   return { persisted: true };
 }
 
-/** Which secrets are set (never the values, and without decrypting: no keychain prompt just to open Settings). */
-export function secretStatus(): Record<SecretName, { set: boolean; hint?: string }> {
-  const out = {} as Record<SecretName, { set: boolean; hint?: string }>;
-  const stored = load();
-  for (const n of SECRET_NAMES) {
-    const m = memory.get(n);
-    out[n] = m ? { set: true, hint: maskHint(m) } : stored[n] ? { set: true, hint: '••••' } : { set: false };
-  }
-  return out;
-}
-
-export function maskHint(v: string): string {
-  return v.length <= 8 ? '••••' : `${v.slice(0, 3)}…${v.slice(-4)}`;
-}
-
-/** SOLOCUT_* variables for CLI children and agent terminals. */
-export function secretEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [name, varName] of Object.entries(SECRET_ENV)) {
-    const v = getSecret(name as SecretName);
-    if (v && varName) env[varName] = v;
-  }
-  return env;
+/** Whether a secret is stored, without decrypting it (no keychain prompt just to show the account rows). */
+export function hasSecret(name: SecretName): boolean {
+  return memory.has(name) || Boolean(load()[name]);
 }

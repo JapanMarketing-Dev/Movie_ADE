@@ -4,7 +4,7 @@
 
 ## 方針
 
-- **設定の正本は JSON ファイル**。設定画面は、その JSON を読み書きする窓口にすぎない
+- **設定の正本は JSON ファイル**。ただしアプリでは JSON を見せない。設定画面は Ferret と同じ、ふつうの項目（スイッチ・選択・入力欄）だけで、変えるとすぐこのファイルに保存される
 - JSON Schema を公開し、エディタの補完・検証と、エージェントによる変更に使う
 - アプリはファイルの変更を監視し、手で書き換えても、エージェントが書き換えても、すぐに反映する
 - 不正な値は読み込まずにエラーを表示し、最後に正しく読めた設定で動き続ける（壊れた JSON でアプリが起動しない、を防ぐ）
@@ -13,13 +13,13 @@
 
 | ファイル | 範囲 | 例 |
 |---|---|---|
-| `~/.solocut/settings.json` | 利用者全体 | 言語、エージェントの優先順位、判定モデル、画像生成、文字起こし、録画のデバイス、ショートカット、更新、クラッシュレポート |
+| `~/.solocut/settings.json` | 利用者全体 | 保存先のマスタフォルダ、撮影後の自動編集、2つのプロンプト、言語、エージェントの優先順位、文字起こし、録画のデバイス、更新、クラッシュレポート |
 | `<project>/solocut.json` | プロジェクト | 使うテンプレート、出力先、ツールのバージョン、プロジェクトだけの上書き |
 | `templates/<id>/template.yaml` | テンプレート | 見た目、編集方針、手順（[04](./04_templates_and_agents.md)） |
 
 プロジェクトの設定は、利用者全体の設定を上書きする（同じキーならプロジェクトの値が優先）。
 
-API キーは JSON に書かない。`settings.json` には `"apiKeyRef": "openai"` のような参照だけを書き、実体は OS の安全な保管庫に置く。エージェントにもキーは見えない。
+アプリは API キーを扱わない。画像生成はエージェントが Codex（ChatGPT のサブスク）や Gemini CLI（Gemini のサブスク）に頼んで行い、判定モデルは使わなくても全体が動く（既定はオフ）。OS の安全な保管庫に置くのは、投稿先（YouTube・TikTok）の OAuth のトークンだけ。
 
 ## settings.json の例
 
@@ -44,19 +44,10 @@ API キーは JSON に書かない。`settings.json` には `"apiKeyRef": "opena
     "keystrokeOverlay": true
   },
   "transcription": { "engine": "whisper.cpp", "model": "large-v3-turbo-q5", "language": "ja" },
-  "decision": {
-    "provider": "ollama", "model": "qwen3-vl",
-    "limits": { "perProjectUsd": 2, "perDayUsd": 5 },
-    "cloudConsent": false
-  },
-  "imageGen": {
-    "order": ["codex", "gemini", "openai"],
-    "providers": {
-      "codex": { "via": "subscription" },
-      "gemini": { "via": "api", "apiKeyRef": "gemini" },   // サブスクのログインだけで生成できるかは実装時に確認
-      "openai": { "via": "api", "apiKeyRef": "openai", "model": "gpt-image-2" }
-    }
-  },
+  "videos": { "root": "~/Movies/Solocut" },                // マスタフォルダ。動画ごとに <root>/<日付>-<名前>/ を作る
+  "autopilot": { "autoStart": true },                      // 撮影後に起動プロンプトを自動で送る（docs/13）
+  "prompts": { "finish": "…", "publish": "…" },            // 省略 = 組み込みの文（docs/13）
+  "decision": { "provider": "off" },                       // 任意。既定はオフで、なくても全体が動く（画面には出さない）
   "library": { "catalog": "solocut-default", "download": "on-demand", "cacheLimitGB": 2, "autoCredits": true },
   "archive": { "autoRegister": ["export", "publish"], "keepPreview": true, "analytics": { "youtube": false } },
   "benchmark": { "keepThumbnails": false, "maxMinutes": 3 },

@@ -4,7 +4,6 @@ import type { AppInfo } from '@shared/types';
 import { useST, type SKey } from '../shell/i18n';
 import { settingsStore, useStore } from '../shell/stores';
 import { TextField } from '../ui';
-import { SettingsFileCard } from './SettingsFileCard';
 import { SETTINGS_SECTIONS, activeSectionAt, filterSettingsSections, type SettingsSectionId } from './settingsSections';
 import {
   AboutSection,
@@ -12,14 +11,10 @@ import {
   AgentsSection,
   AppearanceSection,
   CrashReportsSection,
-  DecisionSection,
   GeneralSection,
-  ImageGenSection,
   LanguageSection,
   LayoutSection,
-  LibrarySection,
   PromptsSection,
-  PublishingSection,
   RecordingSection,
   TranscriptionSection,
   UpdatesSection,
@@ -36,9 +31,8 @@ function PageSection({ id, title, children }: { id: SettingsSectionId; title: st
 
 /**
  * Settings page (ported from Ferret src/renderer/components/SettingsPage.tsx, following the VS Code / Orca settings
- * page). Section list on the left, a search box and every section stacked on the right. Changes save right away to
- * ~/.solocut/settings.json through main (the file stays the source of truth, docs/11); the JSON itself can be edited
- * in the Monaco editor of the file card.
+ * page). Section list on the left, a search box and every section stacked on the right: plain controls only, no JSON.
+ * Changes save right away to ~/.solocut/settings.json through main (docs/11).
  */
 export function SettingsPage({
   info,
@@ -85,18 +79,14 @@ export function SettingsPage({
   const json = settings.json ?? {};
   const sections: Record<SettingsSectionId, ReactNode> = {
     general: <GeneralSection json={json} />,
+    prompts: <PromptsSection />,
+    agents: <AgentsSection json={json} />,
+    accounts: <AccountsSection />,
+    recording: <RecordingSection json={json} />,
+    transcription: <TranscriptionSection json={json} />,
     appearance: <AppearanceSection json={json} />,
     language: <LanguageSection json={json} />,
     layout: <LayoutSection />,
-    recording: <RecordingSection json={json} />,
-    transcription: <TranscriptionSection json={json} />,
-    decision: <DecisionSection json={json} />,
-    imageGen: <ImageGenSection json={json} />,
-    agents: <AgentsSection json={json} />,
-    accounts: <AccountsSection />,
-    prompts: <PromptsSection />,
-    library: <LibrarySection json={json} />,
-    publishing: <PublishingSection json={json} />,
     updates: <UpdatesSection json={json} info={info} />,
     crashReports: <CrashReportsSection json={json} />,
     about: <AboutSection info={info} onShowOnboarding={onShowOnboarding} />,
@@ -135,7 +125,6 @@ export function SettingsPage({
           </div>
           <div className="st-page__scroll" ref={scrollRef} onScroll={onScroll}>
             <p className="st-note st-page__autosave">{t('settings.autosave')}</p>
-            <SettingsFileCard />
             {visible.length === 0 ? (
               <p className="st-page__empty">{t('settings.searchEmpty', { query })}</p>
             ) : (

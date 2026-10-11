@@ -57,7 +57,7 @@ function canvasPoint(t: Timeline, seg: Segment, sourceId: string, p: { x: number
   const region = videoRegions(seg, t.canvas).find((r) => r.source === sourceId && r.kind === 'video');
   if (!region) return null;
   const f = region.focus === undefined ? undefined : Array.isArray(region.focus) ? focusAt(region.focus, rel) : region.focus;
-  const r = sourceRectToCanvas({ x: p.x * src.size.width - 0.5, y: p.y * src.size.height - 0.5, w: 1, h: 1 }, src.size, region.rect, region.fit, f);
+  const r = sourceRectToCanvas({ x: p.x * src.size.width - 0.5, y: p.y * src.size.height - 0.5, w: 1, h: 1 }, src.size, region.rect, region.fit, f, region.scale);
   return r ? { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) } : null;
 }
 

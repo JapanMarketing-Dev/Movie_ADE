@@ -1,4 +1,4 @@
-# 画面と顔の切り替え（tech-tutorial）
+# 画面と顔の切り替え
 
 区間ごとに、画面と顔のどちらを主にするかを決める。`solocut edit setVideo` でレイアウトを、`setCamera` でカメラを選ぶ。使えるレイアウトは screen-with-wipe / screen-full / camera-full / scene。
 
@@ -27,3 +27,9 @@
 - 3 秒未満でレイアウトを行き来しない（minShotSec 3）
 - 同じレイアウトが 90 秒を超えたら、章の区切りか scene を挟めないか検討する
 - 顔のカメラは、目線が外れている（画面を見ている）区間でもワイプなら使ってよい。camera-full にするのは、カメラを見て話している区間だけ
+
+## 人物のカメラと顔の位置
+- カメラが複数あるときは、take.json で役割が main のカメラ（素材の role が front。`solocut multicam material` の cameras[].role）が人物のカメラ。迷ったらこのカメラを選ぶ。ほかのカメラは、人物のカメラで顔が見えない区間や、手元・別の角度を見せたい区間だけに使う
+- 人物のカメラでは、顔がカメラの枠の中央に来るように切り抜く。カメラを決めたら `solocut tracks apply` を実行すると、顔の解析からなめらかに追う切り抜き（全画面は軽い寄り、丸ワイプは中央合わせ）が入る
+- 顔が見えない（faceVisible が低い）カメラを camera-full にしない
+- 判定モデルは使わない。区間ごとの判断は material の数値（faceVisible、lookingAtCamera、speaking）を見て自分で決め、理由を --reason に書く。自信がない切り替えには needsReview を付ける

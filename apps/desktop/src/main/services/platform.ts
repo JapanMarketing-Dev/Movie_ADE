@@ -2,14 +2,13 @@
 // Everything here converts package types to the app's shared types and never throws to the IPC layer for
 // "package not ready" situations: callers get empty lists and an error string instead.
 import { AGENTS, detectAgents, getAgent, launchCommand } from '@solocut/agents';
-import { getArchive, listArchive, searchArchive } from '@solocut/archive';
 import {
-  PromptsSchema,
   SettingsSchema,
-  loadPrompts,
+  defaultPromptText,
+  isPromptId,
   loadSettings,
-  renderPrompt,
-  saveSettings,
+  promptsFromSettings,
+  renderPromptById,
   setSetting,
   settingsPath,
   stripJsonComments,
@@ -18,8 +17,6 @@ import { listTemplates } from '@solocut/templates';
 import { solocutHome, toolStatus } from '@solocut/toolchain';
 import type {
   AgentStatus,
-  ArchiveDetail,
-  ArchiveListItem,
   Lang,
   OsName,
   PromptButton,
@@ -27,9 +24,6 @@ import type {
   ToolState,
   ValidationResult,
 } from '../../shared/types';
-import { timelineOverview } from '../../shared/project';
-import { mediaUrl } from '../../shared/ipc';
-import { existsSync } from 'node:fs';
 import { delimiter } from 'node:path';
 import { searchDirs, shellPathIsProvisional } from '../shellPath';
 import { join } from 'node:path';
@@ -91,10 +85,6 @@ export function settingsFile(): string {
   return settingsPath();
 }
 
-export function promptsFile(): string {
-  return join(solocutHome(), 'prompts.json');
-}
-
 interface ZodIssueLike {
   path: (string | number)[];
   message: string;
@@ -107,7 +97,7 @@ function zodErrors(err: unknown): string[] {
 
 function parseJsonText(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
   try {
-    return { ok: true, value: JSON.parse(stripJsonComments(text)) }; // settings and prompts accept jsonc comments
+    return { ok: true, value: JSON.parse(stripJsonComments(text)) }; // settings.json accepts jsonc comments
   } catch (e) {
     return { ok: false, error: `JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -120,10 +110,6 @@ export function validateSettingsText(text: string): ValidationResult & { value?:
   return r.success ? { ok: true, errors: [], value: r.data } : { ok: false, errors: zodErrors(r.error) };
 }
 
-export function writeSettingsValue(value: unknown): void {
-  saveSettings(value as Parameters<typeof saveSettings>[0]);
-}
-
 export function setSettingValue(key: string, value: unknown): ValidationResult {
   try {
     setSetting(key, value);
@@ -133,46 +119,37 @@ export function setSettingValue(key: string, value: unknown): ValidationResult {
   }
 }
 
-export function validatePromptsText(text: string): ValidationResult {
-  const p = parseJsonText(text);
-  if (!p.ok) return { ok: false, errors: [p.error] };
-  const r = PromptsSchema.safeParse(p.value);
-  return r.success ? { ok: true, errors: [] } : { ok: false, errors: zodErrors(r.error) };
-}
-
 // ---------- prompts ----------
+// Two prompts only (finish / publish): built-in texts, overridable in settings.json (prompts.finish / prompts.publish).
 
-interface PromptLike {
-  id: string;
-  label?: { ja?: string; en?: string } | string;
-  agent?: string;
-  autopilot?: boolean;
-  hidden?: boolean;
+function promptSettings(): Parameters<typeof promptsFromSettings>[0] {
+  try {
+    return loadSettings();
+  } catch {
+    return undefined;
+  }
 }
 
-function promptsFor(dir?: string): PromptLike[] {
-  const list = loadPrompts(dir) as unknown;
-  return Array.isArray(list) ? (list.filter((p) => isObj(p) && typeof p.id === 'string') as unknown as PromptLike[]) : [];
-}
-
-export function promptButtons(dir?: string): PromptButton[] {
+export function promptButtons(_dir?: string): PromptButton[] {
   const lang = language();
-  return promptsFor(dir)
-    .filter((p) => !p.hidden)
-    .map((p) => {
-      const label = typeof p.label === 'string' ? p.label : (p.label?.[lang] ?? p.label?.ja ?? p.label?.en ?? p.id);
-      const b: PromptButton = { id: p.id, label };
-      if (p.agent) b.agent = p.agent;
-      if (p.autopilot) b.autopilot = true;
-      return b;
-    });
+  return promptsFromSettings(promptSettings()).map((p) => {
+    const b: PromptButton = {
+      id: p.id,
+      label: p.label[lang],
+      text: p.body[lang] ?? p.body.ja ?? '',
+      defaultText: defaultPromptText(p.id, lang),
+    };
+    if (p.agent && p.agent !== 'default') b.agent = p.agent;
+    if (p.autopilot) b.autopilot = true;
+    if (p.overridden) b.overridden = true;
+    return b;
+  });
 }
 
-export function renderPromptText(id: string, dir: string | undefined, vars: Record<string, string>): { text: string; agent?: string } {
-  const p = promptsFor(dir).find((x) => x.id === id);
-  if (!p) throw new Error(`prompt not found: ${id}`);
-  const text = renderPrompt(p as unknown as Parameters<typeof renderPrompt>[0], vars, language());
-  return p.agent ? { text, agent: p.agent } : { text };
+export function renderPromptText(id: string, _dir: string | undefined, vars: Record<string, string>): { text: string; agent?: string } {
+  if (!isPromptId(id)) throw new Error(`prompt not found: ${id}`);
+  const { text, prompt } = renderPromptById(id, vars, language(), promptSettings());
+  return prompt.agent && prompt.agent !== 'default' ? { text, agent: prompt.agent } : { text };
 }
 
 // ---------- templates ----------
@@ -246,42 +223,3 @@ export async function tools(): Promise<ToolState[]> {
   });
 }
 
-// ---------- archive ----------
-
-function archiveItem(e: unknown): ArchiveListItem {
-  const o = isObj(e) ? e : {};
-  const summary = isObj(o.summary) ? o.summary : o;
-  const id = String(o.id ?? '');
-  const item: ArchiveListItem = { id, title: String(summary.title ?? o.title ?? id), raw: e };
-  const kind = summary.kind ?? o.kind;
-  const template = isObj(summary.template) ? summary.template.id : (summary.template ?? o.template);
-  const created = o.createdAt ?? o.created ?? summary.created;
-  const dur = summary.durationSec ?? o.durationSec;
-  if (typeof kind === 'string') item.kind = kind;
-  if (typeof template === 'string') item.template = template;
-  if (typeof created === 'string') item.createdAt = created;
-  if (typeof dur === 'number') item.durationSec = dur;
-  if (typeof o.projectDir === 'string') item.projectDir = o.projectDir;
-  const thumb = typeof o.thumbnail === 'string' ? o.thumbnail : join(home(), 'archive', id, 'thumbnail.jpg');
-  if (id && existsSync(thumb)) item.thumbnailUrl = mediaUrl(thumb);
-  return item;
-}
-
-export function archiveList(query?: string): ArchiveListItem[] {
-  const list = (query && query.trim() ? searchArchive(query.trim()) : listArchive({ limit: 500 })) as unknown[];
-  return list.map(archiveItem);
-}
-
-export function archiveGet(id: string): ArchiveDetail | null {
-  const r = getArchive(id) as unknown as { entry: unknown; timeline: unknown; stats: unknown } | null;
-  if (!r) return null;
-  return {
-    entry: archiveItem(r.entry),
-    stats: isObj(r.stats) ? r.stats : {},
-    overview: r.timeline ? timelineOverview(r.timeline) : undefined,
-  } as ArchiveDetail;
-}
-
-export function archiveRoot(): string {
-  return join(home(), 'archive');
-}

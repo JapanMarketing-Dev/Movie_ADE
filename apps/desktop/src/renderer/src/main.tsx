@@ -13,7 +13,8 @@ import './styles/shell.css';
 import './styles/screens.css';
 import { App } from './App';
 import { setReporter } from '@shared/report';
-import { Teleprompter } from './screens/Teleprompter';
+import { RegionPicker } from './screens/RegionPicker';
+import { LangContext } from './i18n';
 
 // The renderer SDK forwards to main over IPC (main's beforeSend scrubs and gates every event); only start it when
 // main has crash reports on. Handled failures (src/shared/report.ts) go the same way.
@@ -31,9 +32,18 @@ void window.solocut.invoke('app:info').then((i) => {
   });
 });
 
+// `region=<displayId>`: the drag-to-select overlay for the recording region (main/services/regionPicker.ts)
 const hash = new URLSearchParams(location.hash.slice(1));
-const tele = hash.get('teleprompter');
+const region = hash.get('region');
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>{tele !== null ? <Teleprompter dir={tele} /> : <App />}</StrictMode>,
+  <StrictMode>
+    {region !== null ? (
+      <LangContext.Provider value={hash.get('lang') === 'en' ? 'en' : 'ja'}>
+        <RegionPicker />
+      </LangContext.Provider>
+    ) : (
+      <App />
+    )}
+  </StrictMode>,
 );

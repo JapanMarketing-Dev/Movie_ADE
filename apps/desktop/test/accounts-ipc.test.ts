@@ -11,11 +11,15 @@ import { AccountsService } from '../src/main/accounts/service';
 import { UsageService } from '../src/main/usage/service';
 
 describe('accounts IPC registry', () => {
-  it('channel lists match the maps and do not clash with the main registry', () => {
+  it('channel lists match the maps and are merged into the main registry exactly once', () => {
     expect(ACCOUNTS_INVOKE_CHANNELS).toContain('usage:meters');
     expect(ACCOUNTS_EVENT_CHANNELS).toContain('failover:notice');
-    for (const c of ACCOUNTS_INVOKE_CHANNELS) expect((INVOKE_CHANNELS as readonly string[]).includes(c)).toBe(false);
-    for (const c of ACCOUNTS_EVENT_CHANNELS) expect((EVENT_CHANNELS as readonly string[]).includes(c)).toBe(false);
+    // the preload only lets registry channels through, so every accounts channel must be in it (once)
+    const count = (list: readonly string[], c: string) => list.filter((x) => x === c).length;
+    for (const c of ACCOUNTS_INVOKE_CHANNELS) expect(count(INVOKE_CHANNELS, c)).toBe(1);
+    for (const c of ACCOUNTS_EVENT_CHANNELS) expect(count(EVENT_CHANNELS, c)).toBe(1);
+    expect(new Set(INVOKE_CHANNELS).size).toBe(INVOKE_CHANNELS.length);
+    expect(new Set(EVENT_CHANNELS).size).toBe(EVENT_CHANNELS.length);
     expect(isAccountsInvokeChannel('accounts:list')).toBe(true);
     expect(isAccountsInvokeChannel('constructor')).toBe(false);
     expect(isAccountsEventChannel('usage:changed')).toBe(true);

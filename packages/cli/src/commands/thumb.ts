@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   durationFrames, frameToSeconds, frameToTimecode, sourceLocalSeconds, takeFrameToSeconds, timecodeToFrame, timelineFrameToTake,
   type Output, type Target, type Timeline,
@@ -13,11 +13,11 @@ import {
   DEFAULT_TITLE_STYLE, THUMB_SIZES, generateBases, layoutTitle, pickCandidates, scoreGray, titleAss, titleSvg,
   type GenContext, type ThumbFormat, type ThumbProvider,
 } from '../thumb.js';
-import { allTimelines, captionsLib, freshPreview, glossaryOf, media } from './media.js';
-import { apiKeyFor } from '../keys.js';
+import { captionsLib, freshPreview, glossaryOf, media } from './media.js';
 import { ensureFonts } from '../fonts.js';
 import { decisionSetup, isSkip } from '../decision.js';
 import { emptyOutput } from './meta.js';
+import { PUBLISH_FILE, defaultPublish, projectFileExists, readPublish, safeRelPath, type PublishJson } from '../publishJson.js';
 
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -56,16 +56,22 @@ function thumbsDir(p: Project): string {
 
 const relp = (p: Project, abs: string) => abs.slice(p.dir.length + 1).split('\\').join('/');
 
-/** Mark the thumbnail step done once every video (main + existing variants) has a thumbnail on its outputs. */
-function updateThumbnailStep(p: Project): void {
-  const all = allTimelines(p);
-  const missing = all.filter((x) => {
-    const tl = readTimeline(x);
-    const targets = x.variant ? [x.variant] : tl.meta.targets;
-    return targets.some((target) => !tl.outputs.find((o) => o.target === target)?.thumbnail);
-  }).map((x) => x.variant ?? 'main');
-  if (missing.length) setStep(p, 'thumbnail', 'running', `missing: ${missing.join(', ')}`);
-  else setStep(p, 'thumbnail', 'done');
+/** The thumbnail step is done once publish.json "thumbnail" names an existing image (SPEC publish.json). */
+export function updateThumbnailStep(p: Project): boolean {
+  const r = readPublish(p.dir);
+  const rel = r && !r.error && r.raw && typeof r.raw === 'object' ? (r.raw as { thumbnail?: unknown }).thumbnail : undefined;
+  const ok = typeof rel === 'string' && !!safeRelPath(rel) && /\.(png|jpe?g)$/i.test(rel) && projectFileExists(p.dir, safeRelPath(rel)!);
+  if (ok) setStep(p, 'thumbnail', 'done');
+  else setStep(p, 'thumbnail', 'running', 'publish.json: thumbnail');
+  return ok;
+}
+
+/** Point publish.json "thumbnail" at a project-relative image, keeping everything else (a fresh file when missing). */
+export function setPublishThumbnail(p: Project, title: string, rel: string): void {
+  const r = readPublish(p.dir);
+  if (r?.error) throw new CliError('invalid-publish', `publish.json: ${r.error}`);
+  const base = r && r.raw && typeof r.raw === 'object' && !Array.isArray(r.raw) ? (r.raw as PublishJson) : defaultPublish(title);
+  writeAtomic(join(p.dir, PUBLISH_FILE), JSON.stringify({ ...base, thumbnail: rel }, null, 2) + '\n');
 }
 
 // ---------- candidates ----------
@@ -222,9 +228,10 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, {
     frame: { type: 'string' }, n: { type: 'string' }, provider: { type: 'string', multiple: true }, title: { type: 'string' }, 'no-title': { type: 'boolean' },
     prompt: { type: 'string' }, formats: { type: 'string' }, reference: { type: 'string' },
-  }, { max: 0, usage: 'solocut thumb gen [--frame <frame|timecode>] [--n 3] [--provider codex|openai|gemini|frame] [--title "見出し"] [--formats youtube,shorts]' });
+  }, { max: 0, usage: 'solocut thumb gen [--frame <frame|timecode>] [--n 3] [--provider codex|frame] [--title "見出し"]' });
   const n = intOpt(values.n, 'n') ?? 3;
   if (!(n >= 1 && n <= 6)) throw new CliError('usage', '--n must be 1..6');
+  for (const pr of values.provider ?? []) if (!['codex', 'frame'].includes(pr)) throw new CliError('usage', t(ctx, `使えない provider です: ${pr}（codex か frame。API キーの画像生成は使いません）`, `unknown provider: ${pr} (codex or frame; no API-key image generation)`));
   const p = openProject(ctx);
   const tl = readTimeline(p);
   const settings = loadSettings();
@@ -257,16 +264,11 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
     direction ? `Direction from the template:\n${direction}` : '',
     'Leave clear space for a large title that will be added later.',
   ].filter(Boolean).join('\n');
-  const order = (values.provider ?? settings.imageGen.order) as ThumbProvider[];
-  for (const pr of order) if (!['codex', 'openai', 'gemini', 'frame'].includes(pr)) throw new CliError('usage', `unknown provider: ${pr}`);
+  // images come from the user's subscriptions only (Codex), never from paid image APIs; 'frame' needs nothing
+  const order = ((values.provider ?? settings.imageGen.order) as string[]).filter((x): x is ThumbProvider => x === 'codex' || x === 'frame');
+  if (!order.length) order.push('frame');
   const formats = formatsFor(tl, values.formats, p.variant);
-  // image providers read SOLOCUT_OPENAI_API_KEY / SOLOCUT_GEMINI_API_KEY; an apiKeyRef in settings maps to its own env
-  const keyEnv: NodeJS.ProcessEnv = { ...ctx.io.env };
-  for (const prov of ['openai', 'gemini'] as const) {
-    const k = apiKeyFor(ctx.io.env, settings.imageGen.providers[prov]?.apiKeyRef, prov, { decision: false });
-    if (k) keyEnv[`SOLOCUT_${prov.toUpperCase()}_API_KEY`] = k;
-  }
-  const gctx: GenContext = { env: keyEnv };
+  const gctx: GenContext = { env: { ...ctx.io.env } };
   const model = (prov: string) => settings.imageGen.providers[prov]?.model;
   const results: { format: ThumbFormat; file: string; base: string; provider: ThumbProvider }[] = [];
   const errors: string[] = [];
@@ -316,6 +318,8 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
     return [{ op: 'setOutput' as const, output: { ...base, thumbnail: { path: r.file, frame, generatedBy: r.provider } } }];
   });
   if (ops.length) await applyEdit(p, ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: 'thumb gen' });
+  const first = results.find((x) => x.format === 'youtube') ?? results[0];
+  if (first && !p.variant) setPublishThumbnail(p, tl.meta.title, first.file);
   updateThumbnailStep(p);
   const images = results.map((r) => ({ path: r.file, provider: r.provider, format: r.format, size: `${THUMB_SIZES[r.format].width}x${THUMB_SIZES[r.format].height}` }));
   emit(ctx, { variant: p.variant ?? 'main', frame, timecode: frameToTimecode(frame, tl.canvas.fps), title, typeset: title ? (features.svg ? 'svg' : 'ass') : 'none', images, thumbnails: results, errors }, () => [
@@ -327,18 +331,20 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
 
 /** `thumb pick <path>`: use this image as the video's thumbnail (outputs[].thumbnail). */
 async function cmdPick(ctx: Ctx, args: string[]): Promise<void> {
-  const { values, positionals } = opts(args, { target: { type: 'string' }, frame: { type: 'string' } }, { min: 1, max: 1, usage: 'solocut thumb pick <image> [--variant v] [--target t]' });
+  const { values, positionals } = opts(args, { target: { type: 'string' }, frame: { type: 'string' } }, { min: 1, max: 1, usage: 'solocut thumb pick <image>' });
   const p = openProject(ctx);
   const tl = readTimeline(p);
   const abs = resolve(ctx.io.cwd, positionals[0]!);
   if (!existsSync(abs)) throw new CliError('not-found', t(ctx, `画像がありません: ${positionals[0]}`, `image not found: ${positionals[0]}`));
-  if (!abs.startsWith(p.dir)) throw new CliError('usage', t(ctx, 'プロジェクトの中の画像を指定してください', 'the image must be inside the project'));
+  if (!abs.startsWith(p.dir + sep)) throw new CliError('usage', t(ctx, 'プロジェクトの中の画像を指定してください', 'the image must be inside the project'));
   const target = (values.target ?? p.variant ?? tl.meta.targets[0] ?? 'youtube') as Target;
   if (p.variant && target !== p.variant) throw new CliError('usage', `variant ${p.variant} only has the ${p.variant} output`);
   const frame = values.frame !== undefined ? parseFrame(ctx, tl, values.frame) : tl.outputs.find((o) => o.target === target)?.thumbnail?.frame ?? 0;
   const base: Output = tl.outputs.find((o) => o.target === target) ?? emptyOutput(tl, target);
   const path = relp(p, abs);
+  if (!/\.(png|jpe?g)$/i.test(path)) throw new CliError('usage', t(ctx, 'サムネイルは PNG か JPEG にしてください', 'the thumbnail must be a PNG or JPEG'));
   await applyEdit(p, [{ op: 'setOutput', output: { ...base, thumbnail: { path, frame, generatedBy: base.thumbnail?.generatedBy ?? 'human' } } }], { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: 'thumb pick' });
+  if (!p.variant) setPublishThumbnail(p, tl.meta.title, path);
   updateThumbnailStep(p);
   emit(ctx, { variant: p.variant ?? 'main', target, thumbnail: { path, frame } }, () => t(ctx, `${target} のサムネイルを ${path} にしました`, `${target} thumbnail: ${path}`));
 }
@@ -348,5 +354,5 @@ export async function cmdThumb(ctx: Ctx, args: string[]): Promise<void> {
   if (sub === 'candidates') return cmdCandidates(ctx, rest);
   if (sub === 'gen') return cmdGen(ctx, rest);
   if (sub === 'pick') return cmdPick(ctx, rest);
-  throw new CliError('usage', 'usage: solocut thumb candidates [--n 6] | gen [--frame <tc>] [--n 3] [--provider …] [--title …] | pick <image> [--variant v]');
+  throw new CliError('usage', 'usage: solocut thumb candidates [--n 6] | gen [--frame <tc>] [--n 3] [--provider …] [--title …] | pick <image>');
 }

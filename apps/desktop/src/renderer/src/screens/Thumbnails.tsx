@@ -1,80 +1,35 @@
+// Thumbnails (docs/10): the agent makes them from the video's content (Codex = ChatGPT subscription image generation,
+// or Gemini CLI) and saves them under thumbnails/. Here the person picks one; the pick is written to publish.json.
 import { useCallback, useEffect, useState } from 'react';
-import { Check, ImagePlus, RefreshCw, Sparkles, Star } from 'lucide-react';
-import { Button, Segmented, Select, SettingRow, Skeleton } from '../ui';
-import { useST } from '../shell/i18n';
-import type { ProjectInfo, ThumbCandidate, ThumbImage, Variant } from '@shared/types';
+import { Check, FolderOpen, ImagePlus } from 'lucide-react';
+import { Button, EmptyState, Skeleton } from '../ui';
+import type { ThumbFile } from '@shared/publish';
+import type { ProjectInfo } from '@shared/types';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
+import { sendToAgent } from '../terminal/agentSend';
 
 export function Thumbnails({ project, toast }: { project: ProjectInfo | null; toast: (m: string) => void }) {
   const t = useT();
-  const st = useST();
-  const [cands, setCands] = useState<ThumbCandidate[] | null>(null);
-  const [candErr, setCandErr] = useState<string | null>(null);
-  const [frame, setFrame] = useState<number | null>(null);
-  const [providers, setProviders] = useState<string[]>([]);
-  const [provider, setProvider] = useState('');
-  const [title, setTitle] = useState('');
-  const [n, setN] = useState(3);
-  const [busy, setBusy] = useState<'cands' | 'gen' | null>(null);
-  const [images, setImages] = useState<ThumbImage[]>([]);
-  // YouTube main → 16:9; Shorts → 9:16 (TikTok takes a cover frame time instead of an image)
-  const [variant, setVariant] = useState<Variant>('main');
   const dir = project?.dir ?? null;
+  const [images, setImages] = useState<ThumbFile[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const loadCands = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!dir) return;
-    setBusy('cands');
-    setCandErr(null);
-    try {
-      const r = await api.invoke('thumbs:candidates', dir, variant);
-      if (r.ok && r.data) {
-        setCands(r.data);
-        setFrame((f) => f ?? r.data![0]?.frame ?? null);
-      } else {
-        setCands([]);
-        setCandErr(r.error ?? t('common.error'));
-      }
-    } finally {
-      setBusy(null);
-    }
-  }, [dir, variant, t]);
+    const [list, view] = await Promise.all([api.invoke('thumbs:list', dir), api.invoke('publish:load', dir)]);
+    setImages(list);
+    setSelected(view.spec?.thumbnail ?? null);
+  }, [dir]);
 
   useEffect(() => {
-    setCands(null);
-    setFrame(null);
-    setImages([]);
-    if (!dir) return;
-    void api.invoke('thumbs:providers').then((p) => {
-      setProviders(p);
-      setProvider((cur) => cur || p[0] || '');
-    });
-    void api.invoke('thumbs:existing', dir).then(setImages);
-    void loadCands();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir, variant]);
+    setImages(null);
+    void load();
+  }, [load]);
+  useEffect(() => api.on('publish:changed', (d) => d === dir && void load()), [dir, load]);
 
-  const generate = async () => {
-    if (!dir || frame === null) return;
-    setBusy('gen');
-    try {
-      const r = await api.invoke('thumbs:generate', dir, { frame, n, provider, title, variant });
-      if (!r.ok || !r.data) toast(`${t('thumb.genFailed')}: ${r.error ?? ''}`);
-      else setImages((cur) => [...r.data!, ...cur.filter((c) => !r.data!.some((x) => x.path === c.path))]);
-    } catch (e) {
-      toast(errMsg(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const toggleFav = async (img: ThumbImage) => {
-    if (!dir) return;
-    const favs = await api.invoke('thumbs:favorite', dir, img.path, !img.favorite, variant);
-    setImages((xs) => xs.map((x) => ({ ...x, favorite: favs.some((f) => x.path.endsWith(f)) })));
-  };
-
-  if (!project) {
+  if (!project || !dir) {
     return (
       <div className="ws">
         <div className="titlebar">
@@ -85,121 +40,77 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
     );
   }
 
-  const picked = cands?.find((c) => c.frame === frame);
-  const vertical = variant !== 'main';
+  const ask = async () => {
+    setBusy(true);
+    try {
+      const res = await sendToAgent({ text: t('thumb.request'), projectDir: dir }, { launch: null });
+      toast(res.ok ? t('thumb.sent') : res.message);
+    } catch (e) {
+      toast(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pick = async (img: ThumbFile) => {
+    const next = selected === img.rel ? null : img.rel;
+    const r = await api.invoke('publish:setThumbnail', dir, next ? img.path : null);
+    if (!r.ok) toast(`${t('thumb.pickFailed')}: ${r.error ?? ''}`);
+    else setSelected(next);
+  };
+
   return (
     <div className="ws thumbs">
       <div className="titlebar">
         <span className="title">{t('nav.thumbnails')}</span>
         <span className="dim">{project.title}</span>
         <span className="grow" />
-        <Segmented
-          ariaLabel={st('thumb.size')}
-          size="sm"
-          value={variant}
-          onChange={setVariant}
-          options={[
-            { value: 'main', label: `${t('var.main')} 16:9` },
-            { value: 'youtube-shorts', label: `${t('var.shorts')} 9:16` },
-          ]}
-        />
-        <Button size="sm" variant="ghost" icon={<RefreshCw size={13} className={busy === 'cands' ? 'spin' : ''} />} disabled={busy !== null} onClick={() => void loadCands()}>
-          {t('thumb.candidates')}
+        <Button size="sm" variant="ghost" icon={<FolderOpen size={13} />} onClick={() => void api.invoke('app:showInFolder', `${dir}/thumbnails`)}>
+          thumbnails/
+        </Button>
+        <Button size="sm" variant="primary" icon={<ImagePlus size={13} />} busy={busy} onClick={() => void ask()}>
+          {t('thumb.ask')}
         </Button>
       </div>
-      <div className="thumbs__body">
-        <section className="thumbs__main">
-          <div className="thumbs__step">
-            <span className="thumbs__num">1</span>
-            <h2 className="thumbs__h">{st('thumb.pickFrame')}</h2>
-            <span className="thumbs__hint">{st('thumb.pickHint')}</span>
+      <div className="thumbs__main">
+        {images === null ? (
+          <div className="thumbs__grid">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} height={160} />
+            ))}
           </div>
-          {cands === null ? (
-            <div className={`thumbs__grid${vertical ? ' is-vertical' : ''}`}>
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} height={vertical ? 200 : 110} />
-              ))}
-            </div>
-          ) : cands.length === 0 ? (
-            <div className="notice">{candErr ?? t('thumb.noCandidates')}</div>
-          ) : (
-            <div className={`thumbs__grid${vertical ? ' is-vertical' : ''}`}>
-              {cands.map((c) => (
-                <button key={c.frame} type="button" className={`thumbs__card${frame === c.frame ? ' is-selected' : ''}`} onClick={() => setFrame(c.frame)}>
+        ) : images.length === 0 ? (
+          <EmptyState
+            title={t('thumb.emptyTitle')}
+            description={t('thumb.emptyText')}
+            actions={
+              <Button variant="primary" icon={<ImagePlus size={14} />} busy={busy} onClick={() => void ask()}>
+                {t('thumb.ask')}
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <p className="thumbs__hint">{t('thumb.pickHint')}</p>
+            <div className="thumbs__grid">
+              {images.map((img) => (
+                <button
+                  key={img.rel}
+                  type="button"
+                  className={`thumbs__card${selected === img.rel ? ' is-selected' : ''}`}
+                  aria-pressed={selected === img.rel}
+                  onClick={() => void pick(img)}
+                >
                   <span className="thumbs__img">
-                    <img src={api.mediaUrl(c.image)} alt="" loading="lazy" />
-                    <span className="thumbs__tc">{c.timecode || c.frame}</span>
-                    {frame === c.frame && <Check size={14} className="thumbs__check" aria-hidden="true" />}
+                    <img src={api.mediaUrl(img.path, img.mtimeMs)} alt="" loading="lazy" />
+                    {selected === img.rel && <Check size={14} className="thumbs__check" aria-hidden="true" />}
                   </span>
-                  {c.score !== undefined && (
-                    <span className="thumbs__score" title={st('thumb.score')}>
-                      <span className="thumbs__score-bar" style={{ transform: `scaleX(${Math.max(0, Math.min(1, c.score))})` }} />
-                      <span className="thumbs__score-num">{Math.round(c.score * 100)}</span>
-                    </span>
-                  )}
+                  <span className="thumbs__name mono">{img.rel.replace(/^thumbnails\//, '')}</span>
                 </button>
               ))}
             </div>
-          )}
-          <div className="thumbs__step">
-            <span className="thumbs__num">2</span>
-            <h2 className="thumbs__h">{t('thumb.results')}</h2>
-            <span className="thumbs__hint">{st('thumb.resultsHint')}</span>
-          </div>
-          {images.length === 0 ? (
-            <div className="thumbs__empty">{t('thumb.noResults')}</div>
-          ) : (
-            <div className={`thumbs__grid thumbs__grid--large${vertical ? ' is-vertical' : ''}`}>
-              {images.map((img) => (
-                <div key={img.path} className={`thumbs__card thumbs__card--result${img.favorite ? ' is-fav' : ''}`}>
-                  <span className="thumbs__img">
-                    <img src={api.mediaUrl(img.path)} alt="" loading="lazy" />
-                    <button type="button" className={`thumbs__fav${img.favorite ? ' is-on' : ''}`} title={t('thumb.favorite')} aria-pressed={img.favorite} onClick={() => void toggleFav(img)}>
-                      <Star size={14} fill={img.favorite ? 'currentColor' : 'none'} />
-                    </button>
-                  </span>
-                  <span className="thumbs__provider">{img.provider ?? img.path.split(/[\\/]/).pop()}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-        <aside className="thumbs__side">
-          <h2 className="thumbs__h">{st('thumb.generate')}</h2>
-          <div className="thumbs__picked">
-            {picked ? <img src={api.mediaUrl(picked.image)} alt="" /> : <span>{st('thumb.noFrame')}</span>}
-          </div>
-          <SettingRow label={t('thumb.frame')}>
-            <code className="st-value st-value--mono">{picked?.timecode || frame || '—'}</code>
-          </SettingRow>
-          <SettingRow label={t('thumb.provider')}>
-            <Select ariaLabel={t('thumb.provider')} value={provider} options={providers.map((p) => ({ value: p, label: p }))} onChange={setProvider} />
-          </SettingRow>
-          <label className="thumbs__field">
-            <span className="st-row__label">{t('thumb.title')}</span>
-            <input className="input" type="text" value={title} placeholder={t('thumb.titlePlaceholder')} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <SettingRow label={t('thumb.count')}>
-            <Segmented
-              ariaLabel={t('thumb.count')}
-              size="sm"
-              value={String(n) as '1' | '2' | '3' | '4'}
-              onChange={(v) => setN(Number(v))}
-              options={(['1', '2', '3', '4'] as const).map((x) => ({ value: x, label: x }))}
-            />
-          </SettingRow>
-          <p className="st-note">{t('thumb.note')}</p>
-          <span className="thumbs__grow" />
-          <Button
-            variant="primary"
-            className="thumbs__go"
-            icon={busy === 'gen' ? <Sparkles size={15} className="spin" /> : <ImagePlus size={15} />}
-            disabled={busy !== null || frame === null}
-            onClick={() => void generate()}
-          >
-            {busy === 'gen' ? t('thumb.generating') : t('thumb.generate')}
-          </Button>
-        </aside>
+          </>
+        )}
       </div>
     </div>
   );

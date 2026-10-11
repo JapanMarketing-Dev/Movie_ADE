@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { progress, progressDone, type Ctx } from '../src/ctx.js';
@@ -46,50 +46,133 @@ async function seed() {
   expect(r.json, r.stdout).toMatchObject({ ok: true });
 }
 
-describe('meta', () => {
-  it('sets metadata, writes metadata.md with chapters and credits, and credits.txt', async () => {
+describe('meta (publish.json)', () => {
+  const pub = () => JSON.parse(readFileSync(join(dir, 'publish.json'), 'utf8'));
+  const stepState = (step: string) => JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8')).find((s: { step: string }) => s.step === step)?.state;
+
+  it('set writes publish.json: title, tags, description with chapters and credits added once; the metadata step is done', async () => {
     await seed();
-    const r = await run(['meta', 'set', '--title', '設定は3つだけ', '--description', 'Claude Code の設定のコツ。', '--tags', '#claude, 設定 ,AI', '--candidates', '案A', '--candidates', '案B']);
-    expect(r.json, r.stdout).toMatchObject({ ok: true, targets: ['youtube'] });
-    const out = timeline().outputs[0];
-    expect(out.metadata).toEqual({ title: '設定は3つだけ', titleCandidates: ['案A', '案B'], description: 'Claude Code の設定のコツ。', tags: ['claude', '設定', 'AI'], chapters: true });
-    const md = readFileSync(join(dir, 'renders', 'youtube', 'metadata.md'), 'utf8');
-    expect(md).toContain('# 設定は3つだけ');
-    expect(md).toContain('00:00 はじめに\n00:20 設定ファイル\n00:40 まとめ');
-    expect(md).toContain('クレジット:\n音楽: 魔王魂\n効果音: OtoLogic');
-    expect(readFileSync(join(dir, 'renders', 'youtube', 'credits.txt'), 'utf8')).toBe('音楽: 魔王魂\n効果音: OtoLogic\n');
-    const st = JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8'));
-    expect(st.find((s: { step: string }) => s.step === 'metadata').state).toBe('done');
-    // partial update keeps the rest
-    await run(['meta', 'set', '--description', '新しい説明']);
-    expect(timeline().outputs[0].metadata).toMatchObject({ title: '設定は3つだけ', description: '新しい説明' });
+    const r = await run(['meta', 'set', '--title', ' 設定は3つだけ ', '--description', 'Claude Code の設定のコツ。', '--tags', '#claude, 設定 ,AI,claude']);
+    expect(r.json, r.stdout).toMatchObject({ ok: true, file: 'publish.json', valid: true });
+    const p = pub();
+    expect(p).toMatchObject({ video: 'renders/youtube/final.mp4', title: '設定は3つだけ', tags: ['claude', '設定', 'AI'] });
+    expect(p.youtube).toMatchObject({ privacy: 'private', categoryId: '28', madeForKids: false, chapters: true });
+    expect(p.tiktok).toMatchObject({ enabled: false, privacy: 'SELF_ONLY' });
+    expect(p.description).toBe('Claude Code の設定のコツ。\n\n00:00 はじめに\n00:20 設定ファイル\n00:40 まとめ\n\nクレジット:\n音楽: 魔王魂\n効果音: OtoLogic');
+    expect(stepState('metadata')).toBe('done');
+    // setting the same description again does not duplicate chapters or credits
+    await run(['meta', 'set', '--description', p.description]);
+    expect(pub().description).toBe(p.description);
+    // a partial update keeps the rest; no per-target files any more
+    await run(['meta', 'set', '--privacy', 'unlisted', '--tiktok', '--tiktok-caption', 'みじかい']);
+    expect(pub()).toMatchObject({ title: '設定は3つだけ', youtube: { privacy: 'unlisted', chapters: true }, tiktok: { enabled: true, caption: 'みじかい' } });
+    expect(existsSync(join(dir, 'renders', 'youtube', 'metadata.md'))).toBe(false);
     const show = await run(['meta', 'show']);
+    expect(show.json).toMatchObject({ exists: true, valid: true, publish: { title: '設定は3つだけ' } });
     expect(show.json.chapters.text).toContain('00:40 まとめ');
     expect(show.json.credits).toEqual(['音楽: 魔王魂', '効果音: OtoLogic']);
   });
 
-  it('per-target file input, vertical canvas, invalid values', async () => {
+  it('--no-chapters leaves the chapter list out; unknown fields the agent wrote by hand are kept', async () => {
     await seed();
-    writeFileSync(join(sb.root, 'm.json'), JSON.stringify({ youtube: { title: 'Y' }, tiktok: { title: 'T', tags: ['x'] } }));
-    const r = await run(['meta', 'set', '--target', 'youtube', '--target', 'tiktok', '--file', join(sb.root, 'm.json')]);
-    expect(r.json, r.stdout).toMatchObject({ ok: true });
-    const tk = timeline().outputs.find((o: { target: string }) => o.target === 'tiktok');
-    expect(tk.canvas).toMatchObject({ width: 1080, height: 1920 });
-    expect(tk.metadata).toMatchObject({ title: 'T', tags: ['x'], chapters: false });
-    expect(existsSync(join(dir, 'renders', 'tiktok', 'metadata.md'))).toBe(true);
-    expect((await run(['meta', 'set', '--title', 'x'.repeat(101)])).code).toBe(2);
-    expect((await run(['meta', 'set', '--target', 'myspace', '--title', 'x'])).code).toBe(2);
-    writeFileSync(join(sb.root, 'bad.json'), JSON.stringify({ title: 3 }));
-    expect((await run(['meta', 'set', '--file', join(sb.root, 'bad.json')])).code).toBe(2);
-    expect((await run(['meta', 'set', '--file', join(sb.root, 'nope.json')])).json.error.code).toBe('not-found');
+    writeFileSync(join(dir, 'publish.json'), JSON.stringify({ video: 'renders/youtube/final.mp4', title: 'A', description: '', tags: [], notes: 'keep me' }));
+    await run(['meta', 'set', '--description', '本文', '--no-chapters']);
+    expect(pub().description).toBe('本文\n\nクレジット:\n音楽: 魔王魂\n効果音: OtoLogic');
+    expect(pub().notes).toBe('keep me');
+    expect(pub().youtube.chapters).toBe(false);
   });
 
-  it('omits chapters YouTube would reject', async () => {
-    await run(['edit', '--ops', JSON.stringify([{ op: 'addSource', id: 'cam', source: cam }, { op: 'setOutline', outline: [{ id: 'ch_1', title: 'a', start: 0, end: 300, points: [], importance: 'core' }] }, { op: 'addSegment', segment: seg('seg_1', 0, 300) }])]);
-    await run(['meta', 'set', '--title', 'x']);
-    const md = readFileSync(join(dir, 'renders', 'youtube', 'metadata.md'), 'utf8');
-    expect(md).toContain('チャプターを付けられません: YouTube needs at least 3 chapters');
-    expect(readFileSync(join(dir, 'renders', 'youtube', 'credits.txt'), 'utf8')).toBe('');
+  it('--file takes publish.json itself or the older per-target shape', async () => {
+    writeFileSync(join(sb.root, 'p.json'), JSON.stringify({ title: 'From file', tags: ['a', '#b', 'a'], youtube: { privacy: 'public' } }));
+    expect((await run(['meta', 'set', '--file', join(sb.root, 'p.json')])).json.ok).toBe(true);
+    expect(pub()).toMatchObject({ title: 'From file', tags: ['a', 'b'], youtube: { privacy: 'public', categoryId: '28' } });
+    writeFileSync(join(sb.root, 'old.json'), JSON.stringify({ youtube: { title: 'Old shape', tags: ['x'], titleCandidates: ['c'] }, tiktok: { title: 'ignored' } }));
+    expect((await run(['meta', 'set', '--file', join(sb.root, 'old.json')])).json.ok).toBe(true);
+    expect(pub()).toMatchObject({ title: 'Old shape', tags: ['x'] });
+    expect(pub().titleCandidates).toBeUndefined();
+    expect((await run(['meta', 'set', '--file', join(sb.root, 'nope.json')])).json.error.code).toBe('not-found');
+    writeFileSync(join(sb.root, 'arr.json'), '[1]');
+    expect((await run(['meta', 'set', '--file', join(sb.root, 'arr.json')])).code).toBe(2);
+    writeFileSync(join(sb.root, 'broken.json'), '{');
+    expect((await run(['meta', 'set', '--file', join(sb.root, 'broken.json')])).json.error.code).toBe('invalid-json');
+  });
+
+  it('boundaries: 100-char title is fine, 101 is not valid; bad privacy / video path / publishAt are refused', async () => {
+    const ok = await run(['meta', 'set', '--title', 'あ'.repeat(100), '--description', 'd', '--tags', 'a']);
+    expect(ok.json).toMatchObject({ ok: true, valid: true });
+    const long = await run(['meta', 'set', '--title', 'あ'.repeat(101)]);
+    expect(long.json).toMatchObject({ ok: true, valid: false }); // written (the agent fixes it next), but not done
+    expect(stepState('metadata')).toBe('running');
+    expect((await run(['meta', 'check'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--privacy', 'friends'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--video', '../../etc/passwd.mp4'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--publish-at', '2001-01-01T00:00:00Z'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--publish-at', 'tomorrow'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--category', 'gaming'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--target', 'myspace', '--title', 'x'])).code).toBe(2);
+    expect((await run(['meta', 'set', '--chapters', '--no-chapters'])).code).toBe(2);
+    expect((await run(['meta', 'set', '--tiktok', '--no-tiktok'])).code).toBe(2);
+    expect(pub().youtube.privacy).toBe('private'); // refused sets changed nothing
+  });
+
+  it('check: missing file, broken JSON, valid file; a broken publish.json is never overwritten by set', async () => {
+    expect((await run(['meta', 'check'])).json.error.code).toBe('no-publish');
+    expect((await run(['meta', 'show'])).json).toMatchObject({ ok: true, exists: false });
+    writeFileSync(join(dir, 'publish.json'), '{ nope');
+    expect((await run(['meta', 'check'])).json.error.code).toBe('invalid-publish');
+    expect((await run(['meta', 'set', '--title', 'x'])).json.error.code).toBe('invalid-publish');
+    expect(readFileSync(join(dir, 'publish.json'), 'utf8')).toBe('{ nope');
+    writeFileSync(join(dir, 'publish.json'), JSON.stringify({ video: 'renders/youtube/final.mp4', title: 'T', description: 'D', tags: ['t'] }));
+    const c = await run(['meta', 'check']);
+    expect(c.json).toMatchObject({ ok: true, valid: true });
+    expect(c.json.problems.some((p: { field: string }) => p.field === 'video')).toBe(true); // not rendered yet: a warning
+    expect(stepState('metadata')).toBe('done');
+  });
+
+  it('next: metadata passes by publish.json alone; thumbnail by an existing image in it', async () => {
+    const all = ['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check', 'final'];
+    for (const s of all) await run(['step', s, 'done']);
+    mkdirSync(join(dir, 'derived', 'transcripts'), { recursive: true });
+    writeFileSync(join(dir, 'derived', 'transcripts', 'main.json'), '{"words":[]}');
+    await run(['edit', '--ops', JSON.stringify([{ op: 'addSource', id: 'cam', source: cam }])]);
+    expect((await run(['next'])).json.step).toBe('thumbnail');
+    writeFileSync(join(dir, 'publish.json'), JSON.stringify({ video: 'renders/youtube/final.mp4', title: 'T', description: 'D', tags: ['t'], thumbnail: 'thumbnails/thumb-1.png' }));
+    expect((await run(['next'])).json).toMatchObject({ step: 'thumbnail', state: 'ready' });
+    mkdirSync(join(dir, 'thumbnails'), { recursive: true });
+    writeFileSync(join(dir, 'thumbnails', 'thumb-1.png'), Buffer.alloc(100, 1));
+    expect((await run(['next'])).json).toMatchObject({ step: 'done', state: 'done' });
+    writeFileSync(join(dir, 'publish.json'), JSON.stringify({ video: 'renders/youtube/final.mp4', title: '', description: 'D', tags: ['t'], thumbnail: 'thumbnails/thumb-1.png' }));
+    const n = await run(['next']);
+    expect(n.json).toMatchObject({ step: 'metadata', state: 'ready' });
+    expect(n.json.why).toContain('title');
+  });
+
+  it('thumb pick sets publish.json "thumbnail" (inside the project, PNG/JPEG only) and finishes the step', async () => {
+    await seed();
+    mkdirSync(join(dir, 'thumbnails'), { recursive: true });
+    writeFileSync(join(dir, 'thumbnails', 'a.png'), Buffer.alloc(100, 1));
+    writeFileSync(join(dir, 'thumbnails', 'a.gif'), Buffer.alloc(100, 1));
+    const r = await run(['thumb', 'pick', join(dir, 'thumbnails', 'a.png')]);
+    expect(r.json, r.stdout).toMatchObject({ ok: true });
+    expect(pub()).toMatchObject({ thumbnail: 'thumbnails/a.png', video: 'renders/youtube/final.mp4', title: '設定のコツ' });
+    expect(stepState('thumbnail')).toBe('done');
+    expect((await run(['thumb', 'pick', join(dir, 'thumbnails', 'a.gif')])).code).toBe(2);
+    writeFileSync(join(sb.root, 'outside.png'), Buffer.alloc(100, 1));
+    expect((await run(['thumb', 'pick', join(sb.root, 'outside.png')])).code).toBe(2);
+    // a sibling folder whose name starts like the project is still outside
+    mkdirSync(`${dir}-other`, { recursive: true });
+    writeFileSync(join(`${dir}-other`, 'x.png'), Buffer.alloc(100, 1));
+    expect((await run(['thumb', 'pick', join(`${dir}-other`, 'x.png')])).code).toBe(2);
+    expect(pub().thumbnail).toBe('thumbnails/a.png');
+  });
+
+  it('thumb gen refuses paid image APIs', async () => {
+    await seed();
+    for (const prov of ['openai', 'gemini']) {
+      const r = await run(['thumb', 'gen', '--frame', '10', '--provider', prov]);
+      expect(r.code, prov).toBe(2);
+      expect(r.json.error.message).toMatch(/codex|frame/);
+    }
   });
 });
 
@@ -169,7 +252,7 @@ describe('mcp end to end', () => {
     const msgs = out.trim().split('\n').map((l) => JSON.parse(l));
     expect(msgs).toHaveLength(2);
     expect(msgs[0].result.serverInfo.name).toBe('solocut');
-    expect(JSON.parse(msgs[1].result.content[0].text).steps).toHaveLength(22);
+    expect(JSON.parse(msgs[1].result.content[0].text).steps).toHaveLength(14);
   });
 });
 

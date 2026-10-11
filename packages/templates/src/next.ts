@@ -4,8 +4,8 @@ import type { Template } from './load.js';
 // `solocut next`: from status.json and each step's pass condition, return exactly one next thing to do
 // (docs/04 「solocut next の動き」, docs/13 autopilot).
 
-/** A base step, or a per-variant step of docs/18: derive:<v>, check:<v>, final:<v>, and publish. */
-export type PipelineStep = StepId | `derive:${string}` | `check:${string}` | `final:${string}` | 'publish';
+/** A step of the template pipeline (one video per project: no per-variant steps). */
+export type PipelineStep = StepId;
 
 export interface StepState {
   step: PipelineStep;
@@ -26,8 +26,6 @@ export interface NextStep {
   blocking?: string[];
   /** While waiting for a human: a later step that can already be done. */
   meanwhile?: PipelineStep;
-  /** The variant this step works on (docs/18). */
-  variant?: string;
 }
 
 export interface NextContext {
@@ -43,8 +41,11 @@ export interface NextContext {
   /** Steps where autopilot always stops (settings.autopilot.stopBefore). */
   stopBefore?: string[];
   lang?: 'ja' | 'en';
-  /** Derived variants (docs/18): whether each exists, is stale against the main timeline, and its last check. */
-  variants?: Record<string, { exists: boolean; stale: boolean; lastCheckFailed: number }>;
+  /**
+   * publish.json (the post the human approves in the app): metadata passes when it is valid (title, video…),
+   * thumbnail when it names an existing image. Without this, both steps pass on their status alone.
+   */
+  publish?: { valid: boolean; thumbnail: boolean; problems?: string[] };
   /** Camera sources in the project: with fewer than 2 there is nothing to switch, so multicam passes. */
   cameras?: number;
 }
@@ -105,7 +106,10 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
     commands: ['solocut propose cuts --json', 'solocut tl summary --json', 'solocut edit <op> ... --reason "<why>"', 'solocut step rough-cut done'],
   },
   multicam: {
-    do: { ja: 'prompts/multicam.md に沿って区間ごとのカメラを決める', en: 'Choose the camera per segment following prompts/multicam.md' },
+    do: {
+      ja: 'prompts/multicam.md に沿って区間ごとのカメラを決める。人物のカメラ（material の person）を優先し、suggestions を目安に自分で判断する（判定モデルは不要）。迷う切り替えには needsReview を付ける',
+      en: 'Choose the camera per segment following prompts/multicam.md. Prefer the person camera (material "person"); use "suggestions" as a guide and decide yourself (no decision model). Mark unsure switches needsReview',
+    },
     commands: [
       'solocut multicam material --json', 'solocut edit split-for-switch --segment <segment> --at <sourceFrame,…> --reason "<why>"',
       'solocut edit setCamera --id <segment> --camera <source> --reason "<why>"', 'solocut step multicam done',
@@ -120,7 +124,10 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
     commands: ['solocut sfx apply --json', 'solocut edit addSfx --sfx \'{…}\' --reason "<why>"', 'solocut step sfx done'],
   },
   layout: {
-    do: { ja: '区間ごとのレイアウト（ワイプ・全画面など）を決める', en: 'Set the layout of each segment (wipe, full screen…)' },
+    do: {
+      ja: '区間ごとのレイアウト（ワイプ・全画面など）を決め、solocut tracks apply で人物の顔をカメラの枠の中央に保つ切り抜きとズーム・クリック表示を入れる',
+      en: 'Set the layout of each segment (wipe, full screen…), then run solocut tracks apply: it keeps the person\'s face centred in the camera frame and adds zooms and click overlays',
+    },
     commands: ['solocut tracks apply --json', 'solocut edit setVideo --id <segment> --video \'{"layout":"…"}\' --reason "<why>"', 'solocut step layout done'],
   },
   preview: {
@@ -140,111 +147,57 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
     commands: ['solocut render --final --json'],
   },
   thumbnail: {
-    do: { ja: 'prompts/thumbnail.md に沿ってサムネイルの候補を作る', en: 'Make thumbnail candidates following prompts/thumbnail.md' },
-    commands: ['solocut frame --at <frame> --json', 'solocut step thumbnail done'],
+    do: {
+      ja: 'prompts/thumbnail.md に沿ってサムネイルの画像を作り（画像生成は Codex か Gemini のサブスクリプションに頼む。API キーは使わない）、publish.json の thumbnail に書く',
+      en: 'Make the thumbnail image following prompts/thumbnail.md (ask Codex or Gemini on their subscriptions; no API keys) and set publish.json "thumbnail"',
+    },
+    commands: ['solocut frame --at <frame> --json', 'solocut thumb pick <image> --json'],
   },
   metadata: {
-    do: { ja: 'タイトル・説明文・チャプターを renders/<target>/metadata.md に書く', en: 'Write title, description and chapters to renders/<target>/metadata.md' },
-    commands: ['solocut tl summary --json', 'solocut step metadata done'],
+    do: {
+      ja: 'prompts/metadata.md に沿って、タイトル・説明文・タグを publish.json に書く（投稿はしない）',
+      en: 'Write the title, description and tags to publish.json following prompts/metadata.md (do not publish)',
+    },
+    commands: ['solocut tl summary --json', 'solocut meta set --title "…" --description "…" --tags a,b --json', 'solocut meta check --json'],
   },
 };
 
-/** Variants a template derives (outputs with `derive`, enabled), in a stable order. */
-export function derivedTargets(t: Pick<Template, 'outputs'>): string[] {
-  const order = ['tiktok', 'youtube-shorts', 'instagram-reels', 'youtube'];
-  return Object.entries(t.outputs ?? {})
-    .filter(([, o]) => o && o.enabled !== false && o.derive)
-    .map(([k]) => k)
-    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+export function stepText(step: PipelineStep, lang: 'ja' | 'en' = 'ja'): { do: string; commands: string[] } {
+  const t = STEP_TEXT[step];
+  return { do: t.do[lang], commands: [...t.commands] };
 }
 
-/** The template pipeline with per-variant steps: derive:v and check:v after check, final:v after final, then publish. */
-export function expandPipeline(t: Pick<Template, 'pipeline' | 'outputs'>): PipelineStep[] {
-  const vs = derivedTargets(t);
-  if (!vs.length) return [...t.pipeline];
-  const out: PipelineStep[] = [];
-  const afterCheck = t.pipeline.includes('check') ? 'check' : t.pipeline.includes('preview') ? 'preview' : null;
-  for (const s of t.pipeline) {
-    out.push(s);
-    if (s === afterCheck) for (const v of vs) out.push(`derive:${v}`, `check:${v}`);
-    if (s === 'final') for (const v of vs) out.push(`final:${v}`);
+export function initialStatus(t: Pick<Template, 'pipeline'>): StepState[] {
+  return t.pipeline.map((step) => ({ step, state: 'todo' }));
+}
+
+/** Whether a step's own condition (a file the step produces) is met, when the project reports it. */
+function fileCondition(step: PipelineStep, ctx: NextContext): { ok: boolean; why: { ja: string; en: string } } | null {
+  if (step === 'metadata' && ctx.publish) {
+    const more = ctx.publish.problems?.length ? `: ${ctx.publish.problems.slice(0, 3).join(' / ')}` : '';
+    return { ok: ctx.publish.valid, why: { ja: `publish.json がないか、内容が足りません${more}`, en: `publish.json is missing or incomplete${more}` } };
   }
-  if (!afterCheck) for (const v of vs) out.push(`derive:${v}`, `check:${v}`);
-  if (!t.pipeline.includes('final')) for (const v of vs) out.push(`final:${v}`);
-  out.push('publish');
-  return out;
-}
-
-export function splitStep(step: string): { base: string; variant?: string } {
-  const i = step.indexOf(':');
-  return i < 0 ? { base: step } : { base: step.slice(0, i), variant: step.slice(i + 1) };
-}
-
-function depsOf(step: PipelineStep, pipeline: PipelineStep[]): PipelineStep[] {
-  const { base, variant } = splitStep(step);
-  if (variant) {
-    if (base === 'derive') return ['check'];
-    if (base === 'check') return [`derive:${variant}`];
-    if (base === 'final') return [`check:${variant}`, 'review'];
+  if (step === 'thumbnail' && ctx.publish) {
+    return { ok: ctx.publish.thumbnail, why: { ja: 'publish.json の thumbnail が、存在する画像を指していません', en: 'publish.json "thumbnail" does not point to an existing image' } };
   }
-  if (step === 'publish') return pipeline.filter((p) => p === 'final' || p.startsWith('final:'));
-  return STEP_DEPS[step as StepId] ?? [];
-}
-
-const VARIANT_TEXT: Record<'derive' | 'check' | 'final', { do: L; commands: (v: string) => string[] }> = {
-  derive: {
-    do: { ja: '本編から縦型の版を作る（見どころを選び、9:16 に組み替え、字幕を作り直す）。prompts/vertical.md に従う', en: 'Derive the vertical version from the main video (pick highlights, reframe to 9:16, rebuild captions) following prompts/vertical.md' },
-    commands: (v) => [`solocut derive --target ${v} --json`, `solocut tl summary --variant ${v} --json`],
-  },
-  check: {
-    do: { ja: '縦型の版のプレビューを書き出し、チェックして直す', en: 'Render the vertical preview, check it and fix failures' },
-    commands: (v) => [`solocut render --preview --variant ${v} --json`, `solocut check --variant ${v} --json`],
-  },
-  final: {
-    do: { ja: '縦型の版を本番の画質で書き出す', en: 'Render the vertical version at final quality' },
-    commands: (v) => [`solocut render --final --variant ${v} --json`],
-  },
-};
-
-export function stepText(step: PipelineStep, lang: 'ja' | 'en' = 'ja', variants: string[] = []): { do: string; commands: string[] } {
-  const { base, variant } = splitStep(step);
-  if (variant && (base === 'derive' || base === 'check' || base === 'final')) {
-    const vt = VARIANT_TEXT[base];
-    return { do: `${vt.do[lang]}（${variant}）`, commands: vt.commands(variant) };
-  }
-  if (step === 'publish') {
-    return lang === 'ja'
-      ? { do: '投稿は人が承認してから。アプリの「投稿」画面で3本の内容を確認・承認してもらう', commands: [] }
-      : { do: 'Publishing needs a human: they review and approve all posts in the app\'s Publish screen', commands: [] };
-  }
-  const t = STEP_TEXT[step as StepId];
-  const commands = [...t.commands];
-  // thumbnails and post text are made for every video (docs/18)
-  if (variants.length && step === 'thumbnail') commands.push(...variants.map((v) => `solocut thumb gen --variant ${v} --title "<${lang === 'ja' ? '見出し' : 'headline'}>" --json`));
-  if (variants.length && step === 'metadata') commands.push(...variants.map((v) => `solocut meta set --variant ${v} --title "…" --description "…" --tags a,b --json`));
-  return { do: t.do[lang], commands };
-}
-
-export function initialStatus(t: Pick<Template, 'pipeline' | 'outputs'>): StepState[] {
-  return expandPipeline(t).map((step) => ({ step, state: 'todo' }));
+  return null;
 }
 
 export function nextStep(template: Template, status: StepState[], ctx: NextContext): NextStep {
   const lang = ctx.lang ?? 'ja';
   const ja = lang === 'ja';
-  const pipeline = expandPipeline(template);
-  const variants = derivedTargets(template);
+  const pipeline: PipelineStep[] = [...template.pipeline];
   const stateOf = (s: PipelineStep) => status.find((x) => x.step === s)?.state ?? 'todo';
   /** multicam with one camera (or none) has nothing to decide. */
   const notNeeded = (s: PipelineStep) => s === 'multicam' && ctx.cameras !== undefined && ctx.cameras < 2;
-  const isPassed = (s: PipelineStep) => !pipeline.includes(s) || notNeeded(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped';
+  /** A file condition that holds passes the step even when nobody marked it done. */
+  const fileOk = (s: PipelineStep) => fileCondition(s, ctx)?.ok === true;
+  const isPassed = (s: PipelineStep) => !pipeline.includes(s) || notNeeded(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped' || fileOk(s);
 
   const make = (step: PipelineStep, state: NextStep['state'], why: string, extra: Partial<NextStep> = {}): NextStep => {
-    const txt = stepText(step, lang, variants);
+    const txt = stepText(step, lang);
     const out: NextStep = { step, state, why, do: txt.do, commands: txt.commands, ...extra };
-    const { base, variant } = splitStep(step);
-    if (variant) out.variant = variant;
-    const prompt = template.promptFiles?.[base === 'derive' ? 'vertical' : step];
+    const prompt = template.promptFiles?.[step];
     if (prompt && !out.prompt) out.prompt = prompt;
     if (step === 'final' && !extra.commands) out.commands = template.targets.map((t) => `solocut render --final --target ${t} --json`);
     return out;
@@ -255,7 +208,7 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
     const i = pipeline.indexOf(blocked);
     return pipeline.slice(i + 1).find((s) => {
       const st = stateOf(s);
-      return s !== 'publish' && (st === 'todo' || st === 'running') && depsOf(s, pipeline).every((d) => d !== blocked && isPassed(d));
+      return (st === 'todo' || st === 'running') && !fileOk(s) && (STEP_DEPS[s] ?? []).every((d) => d !== blocked && isPassed(d));
     });
   };
 
@@ -266,7 +219,7 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
     if (m) {
       extra.meanwhile = m;
       extra.do = ja ? `${base}待つ間に ${m} の手順へ進めます` : `${base} Meanwhile you can do ${m}.`;
-      extra.commands = stepText(m, lang, variants).commands;
+      extra.commands = stepText(m, lang).commands;
     }
     if (blocking?.length) extra.blocking = blocking;
     return make(step, 'needs-human', why, extra);
@@ -295,30 +248,22 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
     }
     if (step === 'check' && st === 'done' && ctx.lastCheckFailed > 0) {
       return make(step, 'ready', ja ? `前回のチェックで ${ctx.lastCheckFailed} 件が不合格でした` : `${ctx.lastCheckFailed} item(s) failed in the last check`, {
-        do: ja ? 'checks/<run>/report.md を読んで直し、もう一度チェックする' : 'Read checks/<run>/report.md, fix the failures and check again',
+        do: ja
+          ? 'checks/<run>/report.md を読んで直し、もう一度チェックする。素材が原因で直せない項目（マイクの音が小さいなど）は、理由を書いて `solocut step check needs-human --note "<理由>"` にして先へ進む（人が最後に確認する）'
+          : 'Read checks/<run>/report.md, fix the failures and check again. If an item cannot be fixed from the media (e.g. a very quiet mic), mark it with `solocut step check needs-human --note "<why>"` and move on (the human sees it at the end)',
         commands: ['solocut render --preview --json', 'solocut check --json'],
       });
     }
-    {
-      const { base, variant } = splitStep(step);
-      const vs = variant ? ctx.variants?.[variant] : undefined;
-      if (base === 'derive' && variant && st === 'done' && vs && (!vs.exists || vs.stale)) {
-        return make(step, 'ready', vs.exists
-          ? (ja ? `本編が変わりました。${variant} の版を作り直してください（人が直した部分は保たれます）` : `The main video changed; re-derive ${variant} (human edits are kept)`)
-          : (ja ? `${variant} の版がありません` : `The ${variant} version is missing`));
-      }
-      if (base === 'check' && variant && st === 'done' && vs && vs.lastCheckFailed > 0) {
-        return make(step, 'ready', ja ? `${variant} の前回のチェックで ${vs.lastCheckFailed} 件が不合格でした` : `${vs.lastCheckFailed} item(s) failed in the last ${variant} check`);
-      }
-      if (step === 'publish' && st !== 'done' && st !== 'skipped') {
-        return waitFor(step, ja ? '3本の動画がそろいました。投稿は人の承認が必要です' : 'All videos are ready; publishing needs a human approval');
-      }
+    const cond = fileCondition(step, ctx);
+    if (cond && st !== 'skipped') {
+      if (cond.ok) continue;
+      if (st === 'done') return make(step, 'ready', cond.why[lang]);
     }
     if (st === 'done' || st === 'skipped' || notNeeded(step)) continue;
 
     if (st === 'needs-human') {
       // autopilot proceeds with the most likely answer, except sync (a wrong sync breaks everything) and review
-      if (ctx.autopilot && step !== 'sync' && step !== 'review' && step !== 'publish') continue;
+      if (ctx.autopilot && step !== 'sync' && step !== 'review') continue;
       const why = note ?? (ja ? 'この手順は人の判断を待っています' : 'This step is waiting for a human');
       return waitFor(step, why, step === 'rough-cut' ? ctx.openItemRefs : undefined);
     }
@@ -334,15 +279,17 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
       if (ctx.autopilot) continue; // autopilot finishes first; the human reviews the finished video
       return waitFor(step, ja ? 'プレビューとチェックが済みました。人の確認とフィードバックを待ちます' : 'Preview and checks are done; waiting for the human review');
     }
-    const why = note ?? (ja ? `テンプレート ${template.id} の次の手順です` : `Next step of template ${template.id}`);
+    const why = note ?? (cond ? cond.why[lang] : ja ? `テンプレート ${template.id} の次の手順です` : `Next step of template ${template.id}`);
     return make(step, 'ready', why);
   }
 
   return {
     step: 'done',
     state: 'done',
-    why: ja ? 'テンプレートの手順がすべて終わりました' : 'All template steps are done',
-    do: ja ? '.solocut/handoff.md に、やったこと・残っていること・次の一手を書いてください' : 'Write what you did, what remains and the next move to .solocut/handoff.md',
+    why: ja ? '動画ができました。人がアプリの投稿画面で確認し、OK なら投稿します' : 'The video is finished. A human checks it in the app\'s Publish screen and posts it when OK',
+    do: ja
+      ? '.solocut/handoff.md に、やったこと・残っていること・人に確認してほしいこと（needsReview）を書いてください。投稿はしないでください'
+      : 'Write what you did, what remains and what the human should check (needsReview) to .solocut/handoff.md. Do not publish',
     commands: [],
   };
 }

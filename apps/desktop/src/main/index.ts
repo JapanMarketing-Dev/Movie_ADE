@@ -1,6 +1,6 @@
 import './env-setup';
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, Menu, powerMonitor, session, shell, type WebContents } from 'electron';
-import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AppInfo, CaptureSource, SettingsDoc } from '../shared/types';
 import { assertAllHandled, emit, handle, on, setTrustedOrigin } from './ipc';
@@ -25,16 +25,19 @@ import { agentPrefsFromSettings } from '@solocut/agents';
 import * as recorder from './services/recorder';
 import { initSentry, sentryEnabled } from './services/sentry';
 import { Updater } from './update/updater';
+import { agentBlocksRestart } from './update/policy';
 import * as feedback from './services/feedback';
 import * as thumbs from './services/thumbs';
-import * as secrets from './services/secrets';
 import * as publish from './publish/publish';
 import * as youtube from './publish/youtube';
+import * as tiktok from './publish/tiktok';
+import { PublishHandoff, PublishWatcher } from './publish/handoff';
 import { AnalysisRunner } from './services/analysis';
 import { warmLoginShellPath } from './shellPath';
 import { reportHandled } from '../shared/report';
 import { startCursorLog, stopAllCursorLogs, stopCursorLog } from './services/cursor';
-import { intentUrl, libNameFor, parseProgress, UPLOAD_PAGES } from '../shared/publish';
+import * as regionPicker from './services/regionPicker';
+import { libNameFor, parseProgress, TIKTOK_UPLOAD_PAGE } from '../shared/publish';
 
 const log = (msg: string) => console.log(`[solocut] ${msg}`);
 
@@ -59,7 +62,6 @@ void warmLoginShellPath(join(app.getPath('userData'), 'shell-path.json'));
 if (!app.requestSingleInstanceLock()) app.quit();
 
 let mainWindow: BrowserWindow | null = null;
-let teleprompter: BrowserWindow | null = null;
 let pendingCapture: { sourceId: string | null; systemAudio: boolean } = { sourceId: null, systemAudio: false };
 let settingsWatcher: FSWatcher | null = null;
 
@@ -120,9 +122,11 @@ const accountsStack = createAccountsStack({
   emit: (channel, ...args) => emitAccounts(channel, ...args),
   host: failoverHost,
   isWindowActive: () => Boolean(mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()),
+  // not adopted as a pane tab: the renderer's login dialog attaches to it (works on every screen, with or without a project)
   openLoginTab: async (launch) =>
     safeAsync(
-      () => openMainTerminal({ size: { cols: 120, rows: 32 }, command: argvToLine(launch.argv, process.platform === 'win32' ? 'powershell' : 'posix'), title: launch.title, env: launch.env }),
+      async () =>
+        (await terminals.create({ size: { cols: 100, rows: 28 }, command: argvToLine(launch.argv, process.platform === 'win32' ? 'powershell' : 'posix'), title: launch.title, env: launch.env })).id,
       null,
     ),
 });
@@ -152,9 +156,27 @@ const analysis = new AnalysisRunner({
   log,
 });
 const watcher = new project.ProjectWatcher((dir, what) => emit(mainWc(), 'project:changed', dir, what));
+// `solocut publish upload` (agent) → the app uploads with its tokens and answers in publish-result.json (docs/14)
+const publishHandoff = new PublishHandoff({
+  upload: { youtube: youtube.uploadToYouTube, tiktok: tiktok.uploadToTikTok },
+  record: async (dir, target, status, url) => {
+    await runCli(['publish', 'record', '--target', target, '--status', status, ...(url ? ['--url', url] : [])], { cwd: dir }).catch(() => undefined);
+  },
+  onChange: (dir) => emit(mainWc(), 'publish:changed', dir),
+});
+const publishWatcher = new PublishWatcher((dir, what) => {
+  if (what === 'request') void publishHandoff.check(dir).catch((e: unknown) => log(`publish hand-off: ${e instanceof Error ? e.message : String(e)}`));
+  emit(mainWc(), 'publish:changed', dir);
+});
 const updater = new Updater({
   onState: (s) => emit(mainWc(), 'update:state', s),
   isBusy: () => recorder.activeTakes() > 0,
+  // a ready update restarts by itself only when nothing records, no agent works and the user is away
+  activity: () => ({
+    recording: recorder.activeTakes() > 0,
+    agentsBusy: agentWatch.tabs().filter((t) => t.agentId && agentBlocksRestart(t.state)).length,
+    userIdleMs: powerMonitor.getSystemIdleTime() * 1000,
+  }),
   log,
   report: (err, op) => reportHandled(err, { area: 'update', op }),
 });
@@ -217,7 +239,7 @@ function createMainWindow(): void {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
-    teleprompter?.close();
+    regionPicker.cancelPick();
   });
   mainWindow.webContents.on('render-process-gone', (_e, d) => {
     log(`renderer gone: ${d.reason}`);
@@ -234,8 +256,12 @@ async function captureScreens(outDir: string): Promise<void> {
   if (!wc) return;
   mkdirSync(outDir, { recursive: true });
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  const screens = (process.env.SOLOCUT_CAPTURE_SCREENS ?? 'home,workspace,record,thumbnails,publish,archive,library,settings').split(',');
+  const screens = (process.env.SOLOCUT_CAPTURE_SCREENS ?? 'home,workspace,record,thumbnails,publish,library,settings').split(',');
   await wait(2500);
+  if (process.env.SOLOCUT_CAPTURE_PROJECT) {
+    emit(wc, 'project:openRequest', process.env.SOLOCUT_CAPTURE_PROJECT);
+    await wait(2500);
+  }
   for (const s of screens) {
     emit(wc, 'app:navigate', s);
     if (s === 'workspace' && process.env.SOLOCUT_CAPTURE_CMD) {
@@ -253,28 +279,6 @@ async function captureScreens(outDir: string): Promise<void> {
     writeFileSync(`${outDir}/${s}.png`, img.toPNG());
   }
   app.quit();
-}
-
-function openTeleprompter(dir: string | null): void {
-  if (!dir) {
-    teleprompter?.close();
-    return;
-  }
-  if (teleprompter && !teleprompter.isDestroyed()) {
-    teleprompter.focus();
-    return;
-  }
-  teleprompter = new BrowserWindow({
-    width: 520,
-    height: 360,
-    alwaysOnTop: true,
-    backgroundColor: '#000000',
-    title: 'Solocut — Teleprompter',
-    webPreferences: secureWebPreferences(),
-  });
-  lockNavigation(teleprompter);
-  teleprompter.on('closed', () => (teleprompter = null));
-  loadRenderer(teleprompter, `teleprompter=${encodeURIComponent(dir)}`);
 }
 
 // ---- recording hotkeys ----
@@ -300,11 +304,6 @@ function readDoc(path: string, validate: (t: string) => { errors: string[] }): S
   const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
   return { path, text, errors: text ? validate(text).errors : [] };
 }
-function atomicWrite(path: string, text: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(`${path}.tmp`, text);
-  renameSync(`${path}.tmp`, path);
-}
 function watchSettings(): void {
   const path = platform.settingsFile();
   const dir = dirname(path);
@@ -312,7 +311,7 @@ function watchSettings(): void {
   let t: NodeJS.Timeout | null = null;
   try {
     settingsWatcher = watch(dir, { persistent: false }, (_e, name) => {
-      if (name !== 'settings.json' && name !== 'prompts.json') return;
+      if (name !== 'settings.json') return;
       if (t) clearTimeout(t);
       t = setTimeout(() => emit(mainWc(), 'settings:changed'), 300);
     });
@@ -348,14 +347,12 @@ function registerIpc(): void {
   handle('app:openScreenSettings', () => openScreenRecordingSettings());
 
   handle('project:recent', () => project.recentProjects());
-  handle('project:create', (_e, o) => project.createProject(o));
+  handle('project:create', (_e, o) => project.createProject(o ?? {}));
+  handle('videos:list', () => project.videos());
   handle('project:open', (_e, dir) => project.openProject(dir));
   handle('project:snapshot', (_e, dir, variant) => project.snapshot(dir, variant ?? 'main'));
   handle('project:review', (_e, dir, item, decision, variant) => project.review(dir, item, decision, variant ?? 'main'));
-  handle('project:readScript', (_e, dir) => project.readScript(dir));
   handle('project:cli', (_e, dir, args) => runCli(args, { cwd: dir }));
-
-  handle('templates:list', () => safe(() => platform.templates(), []));
 
   // accountId / env are main-only options (failover, account login); never taken from the renderer
   handle('terminal:create', (_e, o) => {
@@ -415,28 +412,8 @@ function registerIpc(): void {
     return r.ok ? { ok: true } : { ok: false, error: r.error ?? 'install failed' };
   });
 
-  handle('archive:list', (_e, q) => {
-    allowMediaRoot(safe(() => platform.archiveRoot(), ''));
-    return safe(() => platform.archiveList(q), []);
-  });
-  handle('archive:get', (_e, id) => safe(() => platform.archiveGet(id), null));
-  handle('archive:useAsReference', (_e, dir, id) => project.useAsReference(dir, id));
-
   handle('settings:read', () => readDoc(platform.settingsFile(), platform.validateSettingsText));
-  handle('settings:validate', (_e, text) => platform.validateSettingsText(text));
-  handle('settings:write', (_e, text) => {
-    const v = platform.validateSettingsText(text);
-    if (v.ok) platform.writeSettingsValue(v.value);
-    return { ok: v.ok, errors: v.errors };
-  });
   handle('settings:set', (_e, key, value) => platform.setSettingValue(key, value));
-  handle('prompts:readFile', () => readDoc(platform.promptsFile(), platform.validatePromptsText));
-  handle('prompts:validate', (_e, text) => platform.validatePromptsText(text));
-  handle('prompts:writeFile', (_e, text) => {
-    const v = platform.validatePromptsText(text);
-    if (v.ok) atomicWrite(platform.promptsFile(), text.endsWith('\n') ? text : text + '\n');
-    return v;
-  });
 
   handle('record:sources', async (): Promise<CaptureSource[]> => {
     if (process.env.SOLOCUT_CAPTURE) return []; // screenshots must not show the real desktop
@@ -469,8 +446,32 @@ function registerIpc(): void {
     recorder.endTake(takeId);
     if (recorder.activeTakes() === 0) unregisterHotkeys();
   });
-  handle('record:teleprompter', (_e, dir) => openTeleprompter(dir));
-  handle('record:cursorStart', (_e, takeId, sourceId, epochStartMs) => startCursorLog(takeId, recorder.sessionDir(takeId), sourceId, epochStartMs));
+  handle('record:cursorStart', (_e, takeId, sourceId, epochStartMs, region) =>
+    startCursorLog(takeId, recorder.sessionDir(takeId), sourceId, epochStartMs, region),
+  );
+  handle('record:displays', () => regionPicker.listDisplays());
+  handle('record:pickRegion', (_e, displayId) =>
+    regionPicker.pickRegion(
+      displayId,
+      {
+        webPreferences: secureWebPreferences,
+        load: loadRenderer,
+        lock: lockNavigation,
+        hideApp: () => {
+          const w = mainWindow;
+          if (!w || !w.isVisible()) return () => undefined;
+          w.hide();
+          return () => {
+            if (w.isDestroyed()) return;
+            w.show();
+            w.focus();
+          };
+        },
+      },
+      safe(() => platform.language(), 'ja'),
+    ),
+  );
+  handle('record:regionDone', (e, rect) => regionPicker.regionDone(e.sender, rect));
 
   handle('analysis:start', (_e, dir) => {
     if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
@@ -494,65 +495,29 @@ function registerIpc(): void {
   handle('feedback:finish', (_e, dir, id, session, variant) => feedback.finishFeedback(dir, id, session, variant && variant !== 'main' ? variant : undefined));
   handle('feedback:update', (_e, dir, id, items, variant) => feedback.updateFeedback(dir, id, items, variant && variant !== 'main' ? variant : undefined));
 
-  handle('thumbs:candidates', (_e, dir, variant) => thumbs.candidates(dir, variant ?? 'main'));
-  handle('thumbs:existing', (_e, dir) => thumbs.existing(dir));
-  handle('thumbs:generate', (_e, dir, o) => thumbs.generate(dir, o));
-  handle('thumbs:favorite', async (_e, dir, path, on, variant) => {
-    if (on) await thumbs.pick(dir, path, variant ?? 'main');
-    return thumbs.setFavorite(dir, path, on);
-  });
-  handle('thumbs:providers', () => {
-    const order = platform.getPath(platform.settingsObject(), 'imageGen.order');
-    const list = Array.isArray(order) ? order.filter((x): x is string => typeof x === 'string') : [];
-    return list.length > 0 ? list : ['codex', 'openai', 'gemini'];
-  });
+  handle('thumbs:list', (_e, dir) => thumbs.listThumbnails(dir));
 
-  handle('publish:draft', (_e, dir) => publish.loadDraft(dir));
-  handle('publish:youtubeStatus', () => ({ clientSet: Boolean(secrets.getSecret('youtube.clientId')), connected: youtube.youtubeConnected() }));
-  handle('publish:youtubeConnect', async () => {
+  handle('publish:load', (_e, dir) => publish.loadView(dir));
+  handle('publish:setThumbnail', (_e, dir, path) => {
+    if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
+    return publish.setThumbnail(dir, path);
+  });
+  handle('publish:accounts', () => ({ youtube: youtube.youtubeStatus(), tiktok: tiktok.tiktokStatus() }));
+  handle('publish:connect', async (_e, target) => {
     try {
-      await youtube.connectYouTube();
-      return { ok: true };
+      const r = target === 'tiktok' ? await tiktok.connectTikTok() : await youtube.connectYouTube();
+      return { ok: true, ...r };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   });
-  handle('publish:youtubeDisconnect', () => youtube.disconnectYouTube());
-  handle('publish:saveMeta', (_e, dir, target, meta) => publish.saveMeta(dir, target, meta));
-  handle('publish:youtubeUpload', async (_e, dir, form, target) => {
-    const base = { at: new Date().toISOString(), project: dir, target: target ?? 'youtube', method: 'api-byo' as const, privacy: form.publishAt ? 'private' : form.privacy,
-      disclosures: { madeForKids: form.madeForKids === true, containsSyntheticMedia: form.containsSyntheticMedia } };
-    try {
-      const r = await youtube.uploadToYouTube(form, (p) => emit(mainWc(), 'publish:progress', p));
-      publish.appendHistory({ ...base, status: form.publishAt ? 'scheduled' : 'published', url: r.url, remoteId: r.videoId });
-      await publish.recordPublish(dir, target ?? 'youtube', form.publishAt ? 'scheduled' : 'published', r.url, r.warnings);
-      return { ok: true, url: r.url, videoId: r.videoId, warnings: r.warnings };
-    } catch (e) {
-      const error = e instanceof Error ? e.message : String(e);
-      emit(mainWc(), 'publish:progress', { phase: 'error', message: error });
-      publish.appendHistory({ ...base, status: 'failed', error });
-      return { ok: false, warnings: [], error };
-    }
-  });
-  handle('publish:openIntent', (_e, dir, p, text, url) => {
-    void shell.openExternal(intentUrl(p, text, url));
-    publish.appendHistory({ at: new Date().toISOString(), project: dir, target: p, method: 'intent', status: 'opened', ...(url ? { url } : {}) });
-  });
-  handle('publish:manual', (_e, dir, target, file) => {
-    if (file) shell.showItemInFolder(file);
-    void shell.openExternal(UPLOAD_PAGES[target]);
-    publish.appendHistory({ at: new Date().toISOString(), project: dir, target, method: 'manual', status: 'opened' });
-  });
-
-  handle('secrets:status', () => ({ persistent: secrets.persistent(), items: secrets.secretStatus() }));
-  handle('secrets:set', (_e, name, value) => {
-    if (!secrets.isSecretName(name) || name === 'youtube.refreshToken') throw new Error(`unknown secret: ${name}`);
-    return secrets.setSecret(name, value);
-  });
+  handle('publish:disconnect', (_e, target) => (target === 'tiktok' ? tiktok.disconnectTikTok() : youtube.disconnectYouTube()));
+  handle('publish:openTikTokUpload', (_e, dir) => tiktok.openTikTokUpload(publish.loadView(dir).videoPath, TIKTOK_UPLOAD_PAGE));
 
   on('project:watch', (_e, dir) => {
     if (dir) allowMediaRoot(dir);
     watcher.watch(dir);
+    publishWatcher.watch(dir ? [dir] : []);
     terminals.setCwd(dir);
   });
   // a reloaded renderer never acks what was sent to the old page: start the flow-control count over
@@ -678,6 +643,7 @@ app.on('will-quit', () => {
   agentWatch.stop();
   terminals.disposeAll();
   watcher.close();
+  publishWatcher.close();
   settingsWatcher?.close();
   stopAllCursorLogs();
   recorder.endAll();

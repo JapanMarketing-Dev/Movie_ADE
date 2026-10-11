@@ -1,39 +1,33 @@
 // The single IPC channel registry. Every channel the renderer may use is declared here with its types;
 // the preload exposes only these names and main registers a handler for every invoke channel.
+import type { DisplayInfo, Rect, Region } from './region';
 import type {
   AnalysisJob,
   AnalysisStatus,
   TakeCursorInfo,
   AgentStatus,
   AppInfo,
-  ArchiveDetail,
-  ArchiveListItem,
   CaptureSource,
   CliResult,
   FeedbackImport,
   FeedbackItem,
   FeedbackSession,
-  PublishDraft,
-  SecretInfo,
-  ThumbCandidate,
-  ThumbImage,
-  YouTubeForm,
-  YouTubeProgress,
   MediaPermissionState,
   ProjectInfo,
   ProjectSnapshot,
   PromptButton,
   RecentProject,
+  VideoList,
   ReviewItem,
   SettingsDoc,
   TakeMeta,
-  TemplateInfo,
   ToolState,
   TrackOpen,
   UpdateState,
   ValidationResult,
   Variant,
 } from './types';
+import type { PublishAccounts, PublishTargetId, PublishView, ThumbFile } from './publish';
 import type { AccountsEventChannel, AccountsEventMap, AccountsInvokeChannel, AccountsInvokeMap } from './ipc-accounts';
 import { ACCOUNTS_EVENT_CHANNELS, ACCOUNTS_INVOKE_CHANNELS } from './ipc-accounts';
 import type {
@@ -59,14 +53,14 @@ export interface InvokeMap extends AccountsInvokeMap {
   'app:openScreenSettings': { args: []; result: void };
 
   'project:recent': { args: []; result: RecentProject[] };
-  'project:create': { args: [opts: { parentDir: string; title: string; template: string; language: 'ja' | 'en' }]; result: CliResult<ProjectInfo> };
+  /** a new video in the master folder (parentDir defaults to settings `videos.root`); template and language are fixed by the app */
+  'project:create': { args: [opts?: { parentDir?: string; title?: string }]; result: CliResult<ProjectInfo> };
+  /** the videos in the master folder, newest first */
+  'videos:list': { args: []; result: VideoList };
   'project:open': { args: [dir: string]; result: ProjectInfo };
   'project:snapshot': { args: [dir: string, variant?: Variant]; result: ProjectSnapshot };
   'project:review': { args: [dir: string, item: ReviewItem, decision: 'accept' | 'reject', variant?: Variant]; result: CliResult };
-  'project:readScript': { args: [dir: string]; result: string | null };
   'project:cli': { args: [dir: string, args: string[]]; result: CliResult };
-
-  'templates:list': { args: []; result: TemplateInfo[] };
 
   'terminal:create': { args: [opts: TerminalCreateOptions]; result: TerminalTabInfo };
   'terminal:close': { args: [id: string]; result: void };
@@ -93,17 +87,9 @@ export interface InvokeMap extends AccountsInvokeMap {
   'tools:status': { args: []; result: ToolState[] };
   'tools:install': { args: [name: string]; result: { ok: boolean; path?: string; error?: string } };
 
-  'archive:list': { args: [query?: string]; result: ArchiveListItem[] };
-  'archive:get': { args: [id: string]; result: ArchiveDetail | null };
-  'archive:useAsReference': { args: [dir: string, id: string]; result: CliResult };
 
   'settings:read': { args: []; result: SettingsDoc };
-  'settings:validate': { args: [text: string]; result: ValidationResult };
-  'settings:write': { args: [text: string]; result: ValidationResult };
   'settings:set': { args: [key: string, value: unknown]; result: ValidationResult };
-  'prompts:readFile': { args: []; result: SettingsDoc };
-  'prompts:validate': { args: [text: string]; result: ValidationResult };
-  'prompts:writeFile': { args: [text: string]; result: ValidationResult };
 
   'record:sources': { args: []; result: CaptureSource[] };
   'record:selectSource': { args: [id: string | null, systemAudio: boolean]; result: void };
@@ -113,8 +99,13 @@ export interface InvokeMap extends AccountsInvokeMap {
   'record:closeTrack': { args: [takeId: string, file: string]; result: number };
   'record:writeMeta': { args: [takeId: string, meta: TakeMeta]; result: void };
   'record:end': { args: [takeId: string]; result: void };
-  'record:teleprompter': { args: [dir: string | null]; result: void };
-  'record:cursorStart': { args: [takeId: string, sourceId: string | null, epochStartMs: number]; result: TakeCursorInfo };
+  'record:cursorStart': { args: [takeId: string, sourceId: string | null, epochStartMs: number, region?: Region | null]; result: TakeCursorInfo };
+  /** displays (DIP bounds + scaleFactor) for the region picker and the crop */
+  'record:displays': { args: []; result: DisplayInfo[] };
+  /** opens the drag-to-select overlay on a display; the picked region (display pixels) or null when cancelled */
+  'record:pickRegion': { args: [displayId: string]; result: Region | null };
+  /** the overlay's answer: the dragged rectangle in DIP relative to the display, or null (Esc) */
+  'record:regionDone': { args: [rect: Rect | null]; result: void };
 
   'analysis:start': { args: [dir: string]; result: AnalysisStatus };
   'analysis:cancel': { args: []; result: AnalysisStatus };
@@ -131,29 +122,15 @@ export interface InvokeMap extends AccountsInvokeMap {
   'feedback:finish': { args: [dir: string, id: string, session: FeedbackSession, variant?: Variant]; result: CliResult<FeedbackImport> };
   'feedback:update': { args: [dir: string, id: string, items: FeedbackItem[], variant?: Variant]; result: CliResult<FeedbackImport> };
 
-  'thumbs:candidates': { args: [dir: string, variant?: Variant]; result: CliResult<ThumbCandidate[]> };
-  'thumbs:existing': { args: [dir: string]; result: ThumbImage[] };
-  'thumbs:generate': { args: [dir: string, o: { frame: number; n: number; provider?: string; title?: string; variant?: Variant }]; result: CliResult<ThumbImage[]> };
-  'thumbs:favorite': { args: [dir: string, path: string, on: boolean, variant?: Variant]; result: string[] };
-  'thumbs:providers': { args: []; result: string[] };
+  'thumbs:list': { args: [dir: string]; result: ThumbFile[] };
 
-  'publish:draft': { args: [dir: string]; result: PublishDraft };
-  'publish:youtubeStatus': { args: []; result: { clientSet: boolean; connected: boolean } };
-  'publish:youtubeConnect': { args: []; result: { ok: boolean; error?: string } };
-  'publish:youtubeDisconnect': { args: []; result: void };
-  'publish:youtubeUpload': {
-    args: [dir: string, form: YouTubeForm, target?: 'youtube' | 'youtube-shorts'];
-    result: { ok: boolean; url?: string; videoId?: string; warnings: string[]; error?: string };
-  };
-  'publish:saveMeta': {
-    args: [dir: string, target: 'youtube' | 'tiktok' | 'youtube-shorts', meta: { title: string; description: string; tags: string[] }];
-    result: CliResult;
-  };
-  'publish:openIntent': { args: [dir: string, platform: 'x' | 'threads' | 'facebook', text: string, url: string]; result: void };
-  'publish:manual': { args: [dir: string, target: 'tiktok' | 'instagram', file: string]; result: void };
-
-  'secrets:status': { args: []; result: { persistent: boolean; items: Record<string, SecretInfo> } };
-  'secrets:set': { args: [name: string, value: string | null]; result: { persisted: boolean } };
+  'publish:load': { args: [dir: string]; result: PublishView };
+  'publish:setThumbnail': { args: [dir: string, path: string | null]; result: { ok: boolean; error?: string } };
+  'publish:accounts': { args: []; result: PublishAccounts };
+  'publish:connect': { args: [target: PublishTargetId]; result: { ok: boolean; name?: string; error?: string } };
+  'publish:disconnect': { args: [target: PublishTargetId]; result: void };
+  /** reveal the video and open TikTok's upload page (the path when the TikTok API is not available) */
+  'publish:openTikTokUpload': { args: [dir: string]; result: void };
 }
 
 /** renderer -> main, fire and forget (ipcRenderer.send / ipcMain.on) */
@@ -179,14 +156,15 @@ export interface EventMap extends AccountsEventMap {
   'terminal:exit': [id: string, code: number];
   /** a tab's agent / state / title changed */
   'agent:state': [info: AgentTabInfo];
-  'project:changed': [dir: string, what: 'timeline' | 'status' | 'renders' | 'project'];
+  'project:changed': [dir: string, what: 'timeline' | 'status' | 'renders' | 'project' | 'takes'];
   'settings:changed': [];
   'tools:progress': [name: string, received: number, total?: number];
   'record:hotkey': [kind: 'ng' | 'important'];
   'update:state': [state: UpdateState];
   'app:navigate': [screen: string];
   'project:openRequest': [dir: string];
-  'publish:progress': [p: YouTubeProgress];
+  /** publish.json, the hand-off request / result or thumbnails/ changed */
+  'publish:changed': [dir: string];
   'analysis:state': [s: AnalysisStatus];
 }
 
@@ -203,26 +181,23 @@ const invoke: Record<InvokeChannel, true> = {
   'app:info': true, 'app:openExternal': true, 'app:showInFolder': true, 'app:chooseFolder': true,
   'app:permissions': true, 'app:askMediaAccess': true, 'app:openScreenSettings': true,
   'project:recent': true, 'project:create': true, 'project:open': true, 'project:snapshot': true,
-  'project:review': true, 'project:readScript': true, 'project:cli': true,
-  'templates:list': true,
+  'project:review': true, 'project:cli': true,
+  'videos:list': true,
   'terminal:create': true, 'terminal:close': true, 'terminal:list': true, 'terminal:attach': true, 'terminal:cwd': true,
   'terminal:agentState': true, 'terminal:writeClipboard': true, 'terminal:programCopy': true, 'terminal:paste': true,
   'agent:tabs': true, 'agent:send': true,
   'agents:list': true, 'prompts:list': true, 'prompts:render': true,
   'tools:status': true, 'tools:install': true,
-  'archive:list': true, 'archive:get': true, 'archive:useAsReference': true,
-  'settings:read': true, 'settings:validate': true, 'settings:write': true, 'settings:set': true,
-  'prompts:readFile': true, 'prompts:validate': true, 'prompts:writeFile': true,
+  'settings:read': true, 'settings:set': true,
   'record:sources': true, 'record:selectSource': true, 'record:begin': true, 'record:openTrack': true,
   'record:append': true, 'record:closeTrack': true, 'record:writeMeta': true, 'record:end': true,
-  'record:teleprompter': true, 'record:cursorStart': true,
+  'record:cursorStart': true, 'record:displays': true, 'record:pickRegion': true, 'record:regionDone': true,
   'analysis:start': true, 'analysis:cancel': true, 'analysis:status': true, 'analysis:nextJob': true, 'analysis:result': true, 'analysis:fail': true,
   'update:state': true, 'update:check': true, 'update:restart': true,
   'feedback:begin': true, 'feedback:finish': true, 'feedback:update': true,
-  'thumbs:candidates': true, 'thumbs:existing': true, 'thumbs:generate': true, 'thumbs:favorite': true, 'thumbs:providers': true,
-  'publish:draft': true, 'publish:youtubeStatus': true, 'publish:youtubeConnect': true, 'publish:youtubeDisconnect': true,
-  'publish:youtubeUpload': true, 'publish:openIntent': true, 'publish:saveMeta': true, 'publish:manual': true,
-  'secrets:status': true, 'secrets:set': true,
+  'thumbs:list': true,
+  'publish:load': true, 'publish:setThumbnail': true, 'publish:accounts': true, 'publish:connect': true, 'publish:disconnect': true,
+  'publish:openTikTokUpload': true,
 };
 const send: Record<SendChannel, true> = {
   'terminal:write': true, 'terminal:resize': true, 'terminal:ack': true, 'terminal:visible': true, 'terminal:screen': true,
@@ -232,7 +207,7 @@ const events: Record<EventChannel, true> = {
   ...accountsEvents,
   'terminal:adopt': true,
   'terminal:data': true, 'terminal:exit': true, 'agent:state': true, 'project:changed': true, 'settings:changed': true,
-  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true, 'analysis:state': true,
+  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:changed': true, 'analysis:state': true,
 };
 
 export const INVOKE_CHANNELS = Object.freeze(Object.keys(invoke) as InvokeChannel[]);

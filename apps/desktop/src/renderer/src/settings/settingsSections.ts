@@ -7,18 +7,14 @@
  */
 export const SETTINGS_SECTIONS = [
   'general',
+  'prompts',
+  'agents',
+  'accounts',
+  'recording',
+  'transcription',
   'appearance',
   'language',
   'layout',
-  'recording',
-  'transcription',
-  'decision',
-  'imageGen',
-  'agents',
-  'accounts',
-  'prompts',
-  'library',
-  'publishing',
   'updates',
   'crashReports',
   'about',
@@ -27,30 +23,24 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
 
 const SECTION_KEYWORDS: Record<SettingsSectionId, readonly string[]> = {
-  general: ['settings.json', 'json', 'file', 'autopilot', 'stop before', 'fix loops', 'export', 'targets', 'archive', 'benchmark',
-    '設定ファイル', 'オートパイロット', '書き出し', '出力先', 'アーカイブ', '過去の動画', 'ベンチマーク'],
+  general: ['folder', 'master folder', 'location', 'save', 'storage', 'videos', 'root', 'autopilot', 'auto start', 'automatic', 'after recording',
+    'フォルダ', 'マスタフォルダ', '保存先', '保存', '場所', '動画', '自動', '撮影後', 'おまかせ'],
+  prompts: ['prompt', 'startup', 'finish', 'publish', 'post', 'request', 'reset', 'default', 'template', 'thumbnail', 'illustration',
+    'プロンプト', '起動', '完成', '投稿', '依頼', '既定', '戻す', 'サムネイル', 'イラスト'],
+  agents: ['agent', 'claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot', 'custom', 'order', 'failover', 'update', 'command', 'install',
+    'エージェント', '順番', '優先', '切り替え', '引き継ぎ', 'カスタム', 'コマンド', '更新', 'インストール'],
+  accounts: ['account', 'login', 'sign in', 'usage', 'limit', 'switch', 'claude', 'codex', 'youtube', 'tiktok', 'connect', 'publish',
+    'アカウント', 'ログイン', '使用量', '上限', '切り替え', '連携', '接続', '投稿'],
+  recording: ['recording', 'camera', 'screen', 'mic', 'microphone', 'fps', 'resolution', 'system audio', 'sync marker', 'hotkey', 'ng', 'keystroke',
+    '撮影', '録画', 'カメラ', '画面', 'マイク', '解像度', 'PCの音', '同期', '目印', 'ホットキー', 'キー操作'],
+  transcription: ['transcription', 'whisper', 'model', 'speech', 'language', 'large', 'small', '文字起こし', 'モデル', '言語'],
   appearance: ['ui scale', 'zoom', 'size', 'accent', 'dark', 'theme', '拡大', '大きさ', '文字の大きさ', '色', 'ダーク', '外観'],
   language: ['language', 'locale', 'english', 'japanese', 'interface', '言語', '英語', '日本語', '表示'],
   layout: ['layout', 'panel', 'sidebar', 'terminal', 'center', 'preview', 'shortcut', 'keyboard',
     'レイアウト', 'パネル', 'サイドバー', 'ターミナル', 'プレビュー', 'ショートカット', 'キー'],
-  recording: ['recording', 'camera', 'screen', 'mic', 'microphone', 'fps', 'resolution', 'system audio', 'sync marker', 'hotkey', 'ng', 'keystroke',
-    '撮影', '録画', 'カメラ', '画面', 'マイク', '解像度', 'PCの音', '同期', '目印', 'ホットキー', 'キー操作'],
-  transcription: ['transcription', 'whisper', 'model', 'speech', 'language', 'large', 'small', '文字起こし', 'モデル', '言語'],
-  decision: ['decision', 'judge', 'check', 'subscription', 'claude', 'codex', 'gemini', 'ollama', 'openai', 'typesafe', 'budget', 'limit', 'cloud', 'consent', 'usd',
-    '判定', '判定モデル', 'チェック', 'サブスク', '上限', '費用', '同意', 'クラウド'],
-  imageGen: ['image', 'thumbnail', 'codex', 'gemini', 'openai', 'gpt-image', '画像', '画像生成', 'サムネイル'],
-  agents: ['agent', 'claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot', 'custom', 'order', 'failover', 'update', 'command',
-    'エージェント', '順番', '優先', '切り替え', '引き継ぎ', 'カスタム', 'コマンド', '更新'],
-  accounts: ['account', 'login', 'sign in', 'usage', 'limit', 'api key', 'key', 'youtube', 'oauth', 'keychain',
-    'アカウント', 'ログイン', '使用量', '上限', 'キー', '保管庫'],
-  prompts: ['prompt', 'prompts.json', 'request', 'autopilot', 'button', 'hide', 'プロンプト', '依頼', 'ボタン', '非表示'],
-  library: ['library', 'tools', 'ffmpeg', 'ffprobe', 'whisper', 'fonts', 'download', 'install', 'cache', 'credits', 'assets', 'sfx', 'bgm',
-    'ライブラリ', 'ツール', 'ダウンロード', 'インストール', 'キャッシュ', 'クレジット', '素材', '効果音'],
-  publishing: ['publish', 'youtube', 'tiktok', 'shorts', 'instagram', 'x', 'threads', 'facebook', 'upload', 'client id',
-    '投稿', '告知', 'アップロード', 'クライアント'],
   updates: ['update', 'version', 'channel', 'beta', 'stable', 'auto', '更新', 'バージョン', 'ベータ', '自動'],
   crashReports: ['crash', 'report', 'sentry', 'privacy', 'telemetry', 'クラッシュ', 'レポート', 'プライバシー'],
-  about: ['about', 'version', 'solocut', 'license', 'mit', 'github', 'バージョン', 'について', 'ライセンス'],
+  about: ['about', 'version', 'solocut', 'license', 'mit', 'github', 'cli', 'onboarding', 'バージョン', 'について', 'ライセンス', 'はじめに'],
 };
 
 /** Fold full-width and case. */
@@ -102,9 +92,14 @@ export function parseSettingsText(text: string | undefined): Record<string, unkn
   }
 }
 
-/** Move `id` to the front of an order list (agents.order, imageGen.order), keeping the rest in order without duplicates. */
-export function preferFirst(order: readonly string[], id: string): string[] {
-  return [id, ...order.filter((x) => x !== id)];
+/**
+ * What to save for a prompt textarea (settings `prompts.finish` / `prompts.publish`): undefined (= remove the key, use
+ * the built-in default) when the text is blank or the same as the default, else the text as typed.
+ */
+export function promptSettingValue(draft: string, defaultText: string): string | undefined {
+  if (!draft.trim()) return undefined;
+  if (draft.trim() === defaultText.trim()) return undefined;
+  return draft;
 }
 
 /** Move an item up (-1) or down (+1) in a list; out-of-range moves return the same order. */

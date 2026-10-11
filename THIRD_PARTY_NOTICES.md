@@ -54,7 +54,6 @@ header.
 | apps/desktop/src/renderer/src/shell/QuickOpen.tsx | src/renderer/src/components/quick-open-file-list.ts |
 | apps/desktop/src/renderer/src/shell/search.ts | src/renderer/src/components/quick-open-file-list.ts |
 | apps/desktop/src/renderer/src/shell/PaneTabs.tsx | src/renderer/src/components/tab-bar/ |
-| apps/desktop/src/renderer/src/settings/monaco.ts | src/renderer/src/lib/monaco-setup.ts |
 | apps/desktop/src/shared/usage.ts | src/shared/rate-limit-types.ts, src/shared/rate-limit-reset-format.ts, src/renderer/src/lib/window-label-formatter.ts, src/renderer/src/components/status-bar/tooltip.tsx, src/renderer/src/components/status-bar/UsageRosterPanel.tsx |
 | apps/desktop/src/shared/accounts.ts | src/shared/managed-account-types.ts |
 | apps/desktop/src/main/usage/credentials.ts | src/main/rate-limits/claude-oauth-credentials.ts, src/main/rate-limits/codex-backend-auth.ts |
@@ -88,6 +87,6 @@ The renderer shell is ported from Ferret (`src/renderer/…`): `ui/*` (Button, S
 Field → TextField, Row → ListRow, EmptyState, Progress, RecordButton, ErrorBoundary, IconTile), `shell/TitleBar.tsx`
 (TitleBar), `shell/LayoutToggles.tsx`, `shell/ProjectMenu.tsx`, `shell/StatusBar.tsx` (StatusBar, StatusPopover),
 `shell/Sidebar.tsx`, `shell/QuickOpen.tsx`, `shell/shortcut.ts` (lib/shortcut.ts), `settings/SettingsPage.tsx`,
-`settings/SettingsFileCard.tsx`, `settings/JsonFileEditor.tsx` (SettingsJsonEditor.tsx), `settings/settingsSections.ts`
+`settings/settingsSections.ts`
 (lib/settingsSections.ts), `onboarding/*` (onboarding/), and the styles `styles/fonts.css`, `styles/ui.css`,
 `styles/shell-ported.css`, `styles/settings.css`.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { AppInfo, Lang, ProjectInfo, ProjectSnapshot, PromptButton, RecentProject, Variant } from '@shared/types';
+import type { AppInfo, Lang, ProjectInfo, ProjectSnapshot, PromptButton, RecentProject } from '@shared/types';
 import { LangContext } from './i18n';
 import { api, errMsg } from './lib/api';
 import { recorder, type RecStatus } from './lib/recorder';
@@ -8,7 +8,6 @@ import { onFailoverNotice } from './shell/agentUsage';
 import { Home } from './screens/Home';
 import { Workspace } from './screens/Workspace';
 import { Record } from './screens/Record';
-import { ArchiveScreen } from './screens/Archive';
 import { Library } from './screens/Library';
 import { Thumbnails } from './screens/Thumbnails';
 import { Publish } from './screens/Publish';
@@ -21,7 +20,8 @@ import { PaneTabs } from './shell/PaneTabs';
 import { QuickOpen, type PaletteItem } from './shell/QuickOpen';
 import { layoutStore, layoutToSettings, useLayout } from './shell/layout';
 import { setSetting, settingsStore, useStore } from './shell/stores';
-import { modeOf, needsProject, parseScreen, screenForMode, showsVariant, VARIANT_ORDER, type Mode, type Screen } from './shell/modes';
+import { modeOf, needsProject, parseNavigateDetail, parseScreen, screenForMode, type Mode, type Screen } from './shell/modes';
+import { AccountLoginDialog } from './components/AgentAccounts';
 import { setShortcutPlatform, shortcutFor, shortcutLabel } from './shell/shortcut';
 import { formatElapsed } from './shell/format';
 import { SettingsPage } from './settings/SettingsPage';
@@ -48,27 +48,18 @@ export function App() {
   );
 }
 
-function useProjectSnapshots(dir: string | null, variants: readonly Variant[]): Partial<Record<Variant, ProjectSnapshot>> {
-  const [snaps, setSnaps] = useState<Partial<Record<Variant, ProjectSnapshot>>>({});
+/** Snapshot of the open project (one 16:9 video per project), reloaded when the project changes on disk. */
+function useProjectSnapshot(dir: string | null): ProjectSnapshot | null {
+  const [snap, setSnap] = useState<ProjectSnapshot | null>(null);
   const seq = useRef(0);
   const load = useCallback(async () => {
-    if (!dir) return setSnaps({});
     const my = ++seq.current;
+    if (!dir) return setSnap(null);
     const main = await api.invoke('project:snapshot', dir, 'main').catch(() => null);
-    if (my !== seq.current) return;
-    if (!main) return setSnaps({});
-    const next: Partial<Record<Variant, ProjectSnapshot>> = { main };
-    const others = variants.filter((v) => v !== 'main' && main.variants.includes(v));
-    const rest = await Promise.all(others.map((v) => api.invoke('project:snapshot', dir, v).catch(() => null)));
-    if (my !== seq.current) return;
-    others.forEach((v, i) => {
-      const s = rest[i];
-      if (s) next[v] = s;
-    });
-    setSnaps(next);
-  }, [dir, variants]);
+    if (my === seq.current) setSnap(main);
+  }, [dir]);
   useEffect(() => {
-    setSnaps({});
+    setSnap(null);
     void load();
     let timer = 0;
     const off = api.on('project:changed', (d) => {
@@ -81,7 +72,7 @@ function useProjectSnapshots(dir: string | null, variants: readonly Variant[]): 
       window.clearTimeout(timer);
     };
   }, [dir, load]);
-  return snaps;
+  return snap;
 }
 
 function Shell({ onLang }: { onLang: (l: Lang) => void }) {
@@ -93,7 +84,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
   const [screen, setScreenRaw] = useState<Screen>('home');
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [recent, setRecent] = useState<RecentProject[]>([]);
-  const [variant, setVariant] = useState<Variant>('main');
   const [rec, setRec] = useState<RecStatus>(recorder.get());
   const [publishTab, setPublishTab] = useState<'publish' | 'thumbnails'>('publish');
   const [palette, setPalette] = useState<null | { query: string }>(null);
@@ -101,7 +91,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
   const [onboarding, setOnboarding] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState<{ section: SettingsSectionId; nonce: number } | null>(null);
   const recording = rec.state !== 'idle';
-  const snapshots = useProjectSnapshots(project?.dir ?? null, VARIANT_ORDER);
+  const snapshot = useProjectSnapshot(project?.dir ?? null);
   const lastScreen = useRef<Screen>('home');
   useTick(rec.state === 'recording');
 
@@ -142,10 +132,19 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       if (sc) setScreen(sc);
     });
     const off3 = recorder.subscribe(setRec);
+    // screens ask for a screen change without a prop chain (Home after creating a video: 'record')
+    const onNavigate = (e: Event) => {
+      const sc = parseNavigateDetail((e as CustomEvent<unknown>).detail);
+      if (!sc) return;
+      setPalette(null);
+      setScreen(sc);
+    };
+    window.addEventListener('solocut:navigate', onNavigate);
     return () => {
       off1();
       off2();
       off3();
+      window.removeEventListener('solocut:navigate', onNavigate);
     };
   }, [loadInfo, loadRecent, setScreen]);
 
@@ -199,13 +198,13 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       .catch(() => setPrompts([]));
   }, [project?.dir]);
 
+  // resolves after the screen is set, so a caller can navigate on afterwards (Home: new video → 'record')
   const openProject = useCallback(
-    async (dir: string) => {
+    async (dir: string, target: Screen = 'workspace') => {
       try {
         const p = await api.invoke('project:open', dir);
         setProject(p);
-        setVariant('main');
-        setScreen('workspace');
+        setScreen(target);
         void loadRecent();
       } catch (e) {
         pushToast({ tone: 'danger', message: errMsg(e) });
@@ -309,7 +308,8 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       if (!r.exists) continue;
       items.push({ id: r.dir, kind: 'project', label: r.title, keywords: r.dir, hint: r.dir, run: () => void openProject(r.dir) });
     }
-    for (const p of prompts) items.push({ id: p.id, kind: 'prompt', label: p.label, keywords: `${p.id} prompt プロンプト`, hint: p.agent && p.agent !== 'default' ? `→ ${p.agent}` : undefined, run: () => void sendPrompt(p) });
+    // one startup prompt (動画を完成させて); posting goes through the Publish screen's OK button
+    for (const p of prompts.filter((x) => x.id === 'finish')) items.push({ id: p.id, kind: 'prompt', label: p.label, keywords: `${p.id} prompt プロンプト`, hint: p.agent && p.agent !== 'default' ? `→ ${p.agent}` : undefined, run: () => void sendPrompt(p) });
     const screens: { s: Screen; key: Parameters<typeof t>[0] }[] = [
       { s: 'home', key: 'nav.home' },
       { s: 'record', key: 'mode.record' },
@@ -317,7 +317,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       { s: 'review', key: 'mode.review' },
       { s: 'publish', key: 'mode.publish' },
       { s: 'thumbnails', key: 'nav.thumbnails' },
-      { s: 'archive', key: 'nav.archive' },
       { s: 'library', key: 'nav.library' },
       { s: 'settings', key: 'common.settings' },
     ];
@@ -346,9 +345,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
         project={project}
         recent={recent}
         mode={mode}
-        variant={variant}
-        variants={snapshots.main?.variants ?? ['main']}
-        showVariant={showsVariant(screen)}
         recording={recording}
         recordLabel={recordLabel}
         recordDisabled={rec.state === 'stopping' || (!project && !recording)}
@@ -357,7 +353,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
         onNewProject={newProject}
         onRefreshRecent={() => void loadRecent()}
         onMode={onMode}
-        onVariant={setVariant}
         onRecord={onRecord}
         onSettings={() => openSettings()}
       />
@@ -368,13 +363,11 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
               screen={screen}
               project={project}
               recent={recent}
-              snapshots={snapshots}
-              variant={variant}
+              snapshot={snapshot}
               onNavigate={setScreen}
               onOpenProject={(d) => void openProject(d)}
               onNewProject={newProject}
               onOpenFolder={() => void openFolder()}
-              onVariant={setVariant}
               onRefreshRecent={() => void loadRecent()}
             />
           </ErrorBoundary>
@@ -394,7 +387,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
           <div className="main__screens">
             <ErrorBoundary name="screens" text={ebText}>
               <div className={`screen ${screen === 'home' ? '' : 'hidden'}`}>
-                <Home info={info} onOpen={(d) => void openProject(d)} toast={toast} />
+                <Home info={info} onOpen={(d) => openProject(d)} onCreated={() => setScreen('record')} toast={toast} />
               </div>
               {/* Workspace stays mounted so terminals keep running while other screens are shown */}
               <div className={`screen ${wsVisible ? '' : 'hidden'}`}>
@@ -403,8 +396,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
                   visible={wsVisible}
                   toast={toast}
                   onRecord={() => setScreen('record')}
-                  variant={variant}
-                  onVariantChange={setVariant}
                   focus={screen === 'review' ? 'review' : 'edit'}
                   showTerminal={layout.terminal}
                   showCenter={layout.center}
@@ -421,12 +412,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
               )}
               {screen === 'publish' && (
                 <div className="screen">
-                  <Publish project={project} toast={toast} onOpenSettings={() => openSettings('publishing')} />
-                </div>
-              )}
-              {screen === 'archive' && (
-                <div className="screen">
-                  <ArchiveScreen project={project} toast={toast} />
+                  <Publish project={project} toast={toast} onOpenSettings={() => openSettings('accounts')} />
                 </div>
               )}
               {screen === 'library' && (
@@ -452,13 +438,14 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       </div>
       <StatusBar
         info={info}
-        snapshot={snapshots.main ?? null}
+        snapshot={snapshot}
         recording={recording}
         recStartedAtMs={rec.startedAtMs}
         onOpenSettings={openSettings}
         onOpenLibrary={() => setScreen('library')}
         onOpenEdit={() => setScreen('workspace')}
       />
+      <AccountLoginDialog />
       {palette && <QuickOpen items={paletteItems} initialQuery={palette.query} onClose={() => setPalette(null)} />}
       {onboarding && (
         <OnboardingFlow

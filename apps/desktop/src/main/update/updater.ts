@@ -10,6 +10,8 @@
 // - stale downloads (older versions, partial files) are removed at startup and after each download
 // - installs on quit only when background updates are on or the user pressed "restart to update", never while a
 //   recording or render is running
+// - a ready update restarts the app by itself when nothing would be lost (policy.ts: not while recording or while an
+//   agent works; by itself only when the user is away, otherwise the footer offers it)
 import { app, net } from 'electron';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -45,6 +47,7 @@ import {
   type ReadyRecord,
 } from './logic';
 import { UpdateLoop, type CheckOutcome } from './loop';
+import { RestartWatch, type UpdateActivity } from './policy';
 
 interface Ready {
   version: string;
@@ -57,6 +60,8 @@ export interface UpdaterDeps {
   onState: (s: UpdateState) => void;
   /** recording / rendering: do not check in the background, do not apply */
   isBusy: () => boolean;
+  /** recording, busy agent tabs and system idle time, for restarting into a ready update (default: isBusy only) */
+  activity?: () => UpdateActivity;
   log: (msg: string) => void;
   /** unexpected failures (not network) go to Sentry */
   report?: (err: unknown, op: string) => void;
@@ -83,9 +88,22 @@ export class Updater {
   private autoInstall = false;
   private loop: UpdateLoop | null = null;
   private applied = false;
+  private readonly restartWatch: RestartWatch;
 
   constructor(private deps: UpdaterDeps) {
     this.state = { status: 'idle', current: this.version() };
+    this.restartWatch = new RestartWatch({
+      ready: () => this.ready !== null && !this.applied,
+      auto: () => this.autoInstall,
+      activity: () => this.deps.activity?.() ?? { recording: this.deps.isBusy(), agentsBusy: 0, userIdleMs: 0 },
+      onWaiting: (reason) => {
+        if (reason !== this.state.blockedBy) this.set({ blockedBy: reason });
+      },
+      restart: () => {
+        this.relaunch = true;
+        (this.deps.quit ?? (() => app.quit()))();
+      },
+    });
   }
 
   private version(): string {
@@ -137,11 +155,13 @@ export class Updater {
         now: this.deps.now,
       });
       this.loop.start();
+      this.restartWatch.start();
     });
   }
 
   stop(): void {
     this.loop?.stop();
+    this.restartWatch.stop();
   }
 
   /** powerMonitor 'resume' */
@@ -232,6 +252,7 @@ export class Updater {
     this.ready = { version: manifest.version, flavor, file: path, sha256: hash };
     await this.saveReady({ version: manifest.version, flavor, name: file.name, sha256: hash });
     this.set({ status: 'ready', progress: 1 });
+    this.restartWatch.evaluate();
   }
 
   private async get(url: string): Promise<Response> {
@@ -348,16 +369,14 @@ export class Updater {
     this.set({ status: 'ready', latest: usable.version, progress: 1 });
   }
 
-  /** "Restart" pill: quit now; the will-quit hook applies the update and relaunches. Not while recording. */
+  /**
+   * "Restart" pill: quit now (the will-quit hook applies the update and relaunches), or, while recording / an agent
+   * works, as soon as that ends.
+   */
   restartToUpdate(): void {
     if (!this.ready) return;
-    if (this.deps.isBusy()) {
-      this.set({ blockedBy: 'busy' });
-      return;
-    }
-    this.relaunch = true;
-    this.set({ blockedBy: undefined });
-    (this.deps.quit ?? (() => app.quit()))();
+    this.set({ restartRequested: true });
+    this.restartWatch.request();
   }
 
   /**

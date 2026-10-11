@@ -246,6 +246,9 @@ console.log('done');
     expect(probeSize(f)).toBe('1280,720');
     expect(statSync(f).size).toBeLessThanOrEqual(2 * 1024 * 1024);
     expect(timeline().outputs[0].thumbnail).toMatchObject({ path: 'renders/thumbnails/youtube-1.jpg', generatedBy: 'frame' });
+    // the post the human approves points at it, so the thumbnail step is done
+    expect(JSON.parse(readFileSync(join(dir, 'publish.json'), 'utf8')).thumbnail).toBe('renders/thumbnails/youtube-1.jpg');
+    expect(JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8')).find((x: { step: string }) => x.step === 'thumbnail').state).toBe('done');
   }, 120_000);
 
   it('thumb gen with a title typesets it (or explains the missing ffmpeg feature)', async () => {
@@ -273,27 +276,6 @@ console.log('done');
     expect((await run(['thumb', 'pick', join(sb.root, 'gen.png')])).code).toBe(2); // outside the project
     expect(r.json.images[0]).toMatchObject({ path: 'renders/thumbnails/youtube-1.jpg', provider: 'codex', size: '1280x720' });
   }, 120_000);
-
-  it('derive a vertical variant, then render --all and check --all make every video', async () => {
-    const d = await run(['derive', '--target', 'tiktok']);
-    expect(d.json, d.stdout + d.stderr).toMatchObject({ ok: true, target: 'tiktok' });
-    const r = await run(['render', '--preview', '--all']);
-    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
-    expect(r.json.results.map((x: { variant: string; output: string }) => [x.variant, x.output])).toEqual([['main', 'renders/youtube/preview.mp4'], ['tiktok', 'renders/tiktok/preview.mp4']]);
-    expect(probeSize(join(dir, 'renders', 'tiktok', 'preview.mp4'))).toMatch(/^\d+,\d+$/);
-    const [w, h] = probeSize(join(dir, 'renders', 'tiktok', 'preview.mp4')).split(',').map(Number);
-    expect(h!).toBeGreaterThan(w!); // 9:16
-    const c = await run(['check', '--all']);
-    expect(c.json, c.stdout + c.stderr).toMatchObject({ ok: true });
-    expect(c.json.results.map((x: { variant: string }) => x.variant)).toEqual(['main', 'tiktok']);
-    expect(c.json.results[1].run).toMatch(/-tiktok$/);
-    const st = JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8'));
-    expect(st.find((s: { step: string }) => s.step === 'check:tiktok').state).toBe('done');
-    const fin = await sb.run(['render', '--final', '--variant', 'tiktok', '--json'], { cwd: dir, env });
-    expect(fin.json, fin.stdout + fin.stderr).toMatchObject({ ok: true, target: 'tiktok', variant: 'tiktok' });
-    expect(fin.json.output).toBe('renders/tiktok/final.mp4');
-    expect((await run(['render', '--all', '--out', 'x.mp4'])).code).toBe(2);
-  }, 300_000);
 
   it('feedback import → feedback.md + images + review state; organize via claude; list/show/done', async () => {
     const s = join(sb.root, 'session');

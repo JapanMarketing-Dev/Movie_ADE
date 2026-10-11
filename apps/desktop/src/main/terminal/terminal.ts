@@ -1,7 +1,7 @@
 // Ported from Ferret src/main/terminal.ts (MIT).
 // Solocut adaptations: SSH projects, accounts, failover, agent mail, the decision relay env and the prewarmed
 // spare shell are dropped. Agents start through the @solocut/agents catalog (agentLaunchLine); the environment
-// comes from solocutEnv() (bundled CLI first on PATH, login-shell PATH, saved secrets) through `appEnv`.
+// comes from solocutEnv() (bundled CLI first on PATH, login-shell PATH) through `appEnv`.
 import { execFile, execFileSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'

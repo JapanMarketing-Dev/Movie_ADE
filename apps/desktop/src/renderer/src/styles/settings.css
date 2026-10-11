@@ -716,109 +716,16 @@
   margin-bottom: var(--space-3);
 }
 
-/* ── 設定: settings.json の欄（SettingsFileCard / SettingsJsonEditor） ── */
+/* ── 設定: 節の並びとボタンの行 ── */
 
 .st-page__sections {
   min-width: 0;
-}
-
-.st-file {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  padding: var(--space-4) 0 var(--space-6);
-  border-bottom: 1px solid var(--color-border);
-  gap: var(--space-2);
-}
-
-.st-file__head {
-  display: flex;
-  align-items: center;
-  color: var(--color-text-muted);
-  gap: var(--space-3);
-}
-
-.st-file__path,
-.st-json__path {
-  overflow: hidden;
-  color: var(--color-text);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .st-file__actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-}
-
-.st-file__error code {
-  font-family: var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.st-file__prompt {
-  margin: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.st-json {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: var(--space-2);
-  gap: var(--space-2);
-}
-
-.st-json__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.st-json__editor {
-  height: 420px;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-/* Ferret の設定を変える skill（AgentSkillCard）。設定の settings.json の欄と、初回セットアップの Agent の手順 */
-.agent-skill {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.agent-skill__text {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.agent-skill__title {
-  font-weight: 600;
-}
-
-.agent-skill__state {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  color: var(--color-success);
 }
 
 /* 拡張機能の「Chrome ウェブストアから入れる」の入力欄は、ボタンの残りの幅を使う */

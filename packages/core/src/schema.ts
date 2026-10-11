@@ -135,10 +135,20 @@ export const FocusSchema = z.strictObject({ x: z.number().min(0).max(1), y: z.nu
 export const FocusKeySchema = z.strictObject({ at: nonNegInt(), x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
 export const FocusValueSchema = z.union([FocusSchema, z.array(FocusKeySchema).min(1)]);
 
+/**
+ * Extra magnification of a cover crop (1 = plain cover). Lets the crop move on an axis the aspect ratio would not crop
+ * (a 16:9 camera in a 16:9 frame), so the person's face can be centred (core centerPerson).
+ */
+export const CropScaleSchema = z.number().min(1).max(2);
+
 export const VideoChoiceSchema = z.discriminatedUnion('layout', [
-  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema, focus: FocusValueSchema.optional() }),
+  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema, focus: FocusValueSchema.optional(), scale: CropScaleSchema.optional() }),
   z.strictObject({ layout: z.literal('screen-full'), screen: SourceIdSchema }),
-  z.strictObject({ layout: z.literal('screen-with-wipe'), screen: SourceIdSchema, camera: SourceIdSchema, wipe: WipeSchema }),
+  z.strictObject({
+    layout: z.literal('screen-with-wipe'), screen: SourceIdSchema, camera: SourceIdSchema, wipe: WipeSchema,
+    /** Where the camera's cover crop inside the wipe sits (and its magnification): the face centred in the wipe. */
+    cameraFocus: FocusValueSchema.optional(), cameraScale: CropScaleSchema.optional(),
+  }),
   z.strictObject({
     layout: z.literal('split-v'), top: SourceIdSchema, bottom: SourceIdSchema,
     topFocus: FocusValueSchema.optional(), bottomFocus: FocusValueSchema.optional(),

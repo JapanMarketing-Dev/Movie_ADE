@@ -179,24 +179,32 @@ function maskFilters(g: Graph, inLabel: string, masks: Mask[], src: Source & { k
 }
 
 type Fit = 'cover' | 'fit';
-function sizeFilter(w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0): string {
+/** Size of the cover scale before the crop: the region magnified by `scale` (even, ≥ the region). */
+export function coverScaleSize(w: number, h: number, scale = 1): { w: number; h: number } {
+  if (!(scale > 1)) return { w, h };
+  return { w: Math.max(w, even(w * scale)), h: Math.max(h, even(h * scale)) };
+}
+
+function sizeFilter(w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0, scale = 1): string {
+  // a cover crop magnified by `scale` can move on both axes (face centring), else only on the cropped one
+  const sc = coverScaleSize(w, h, scale);
   if (fit === 'cover' && focus && Array.isArray(focus)) {
     // moving focus: crop x/y are evaluated per frame; n = frame index in this piece
     const keys = [...focus].sort((a, b) => a.at - b.at);
     const fx = piecewise(`(n+${pieceOffset})`, keys.map((k) => ({ x: k.at, v: k.x })));
     const fy = piecewise(`(n+${pieceOffset})`, keys.map((k) => ({ x: k.at, v: k.y })));
-    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=w=${w}:h=${h}:x='(iw-ow)*(${fx})':y='(ih-oh)*(${fy})',setsar=1`;
+    return `scale=${sc.w}:${sc.h}:force_original_aspect_ratio=increase,crop=w=${w}:h=${h}:x='(iw-ow)*(${fx})':y='(ih-oh)*(${fy})',setsar=1`;
   }
-  if (fit === 'cover' && focus && !Array.isArray(focus) && (focus.x !== 0.5 || focus.y !== 0.5)) {
-    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)*${num(focus.x)}:(ih-oh)*${num(focus.y)},setsar=1`;
+  if (fit === 'cover' && focus && !Array.isArray(focus) && (focus.x !== 0.5 || focus.y !== 0.5 || scale > 1)) {
+    return `scale=${sc.w}:${sc.h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)*${num(focus.x)}:(ih-oh)*${num(focus.y)},setsar=1`;
   }
   return fit === 'cover'
-    ? `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1`
+    ? `scale=${sc.w}:${sc.h}:force_original_aspect_ratio=increase,crop=${w}:${h},setsar=1`
     : `scale=${w}:${h}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
 }
 
 /** Add one video source stream covering the piece; returns the label of an exactly n-frame stream of w x h. */
-function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: number, w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0): string {
+function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: number, w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0, scale = 1): string {
   const { t, rc } = ctx;
   const src = t.sources[srcId];
   if (!src || (src.kind !== 'screen' && src.kind !== 'camera')) throw new Error(`video source not found: ${srcId}`);
@@ -218,7 +226,7 @@ function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: num
   }
   if (drift !== 1) chain.push(`setpts=(PTS-STARTPTS)/${num(drift)}`);
   if (lead > 0) chain.push(`tpad=start_mode=add:start_duration=${num(lead)}:color=black`);
-  chain.push(`fps=${rc.fps.num}/${rc.fps.den}`, sizeFilter(w, h, fit, focus, pieceOffset), `tpad=stop_mode=clone:stop_duration=${num(durSec + 1)}`,
+  chain.push(`fps=${rc.fps.num}/${rc.fps.den}`, sizeFilter(w, h, fit, focus, pieceOffset, scale), `tpad=stop_mode=clone:stop_duration=${num(durSec + 1)}`,
     `trim=end_frame=${n}`, 'setpts=PTS-STARTPTS');
   const out = g.label('s');
   g.filters.push(`[${cur}]${chain.join(',')}[${out}]`);
@@ -291,7 +299,7 @@ function pieceVideo(g: Graph, ctx: Ctx, seg: Segment, o: number, n: number): str
   let base: string;
   switch (v.layout) {
     case 'camera-full':
-      base = sourceStream(g, ctx, v.camera, takeSec, n, W, H, 'cover', v.focus, o);
+      base = sourceStream(g, ctx, v.camera, takeSec, n, W, H, 'cover', v.focus, o, v.scale);
       break;
     case 'screen-full':
       base = sourceStream(g, ctx, v.screen, takeSec, n, W, H, 'fit');
@@ -299,7 +307,7 @@ function pieceVideo(g: Graph, ctx: Ctx, seg: Segment, o: number, n: number): str
     case 'screen-with-wipe': {
       const scr = sourceStream(g, ctx, v.screen, takeSec, n, W, H, 'fit');
       const { d, x, y } = wipeGeometry(v.wipe, W, H);
-      const cam = sourceStream(g, ctx, v.camera, takeSec, n, d, d, 'cover');
+      const cam = sourceStream(g, ctx, v.camera, takeSec, n, d, d, 'cover', v.cameraFocus, o, v.cameraScale);
       const shaped = g.label('w');
       g.filters.push(`[${cam}]format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='${wipeAlpha(v.wipe.shape, d)}'[${shaped}]`);
       let under = scr;

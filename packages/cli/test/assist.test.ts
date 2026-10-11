@@ -358,14 +358,14 @@ describe('mcp tools for round 5', () => {
     await call('sfx_apply', { dryRun: true });
     await call('tracks_apply', { followClicks: false, overlays: false });
     await call('tracks_apply', { followClicks: true });
-    await call('masks_from_analysis', { kind: 'blur', variant: 'tiktok' });
+    await call('masks_from_analysis', { kind: 'blur' });
     await call('multicam_material', {});
     expect(calls).toEqual([
       ['edit', 'split-for-switch', '--segment', 'seg_1', '--at', '10,20', '--reason', 'r', '--json', '--project', '/p'],
       ['sfx', 'apply', '--dry-run', '--json', '--project', '/p'],
       ['tracks', 'apply', '--no-follow-clicks', '--no-overlays', '--json', '--project', '/p'],
       ['tracks', 'apply', '--follow-clicks', '--json', '--project', '/p'],
-      ['masks', 'from-analysis', '--kind', 'blur', '--json', '--project', '/p', '--variant', 'tiktok'],
+      ['masks', 'from-analysis', '--kind', 'blur', '--json', '--project', '/p'],
       ['multicam', 'material', '--json', '--project', '/p'],
     ]);
   });

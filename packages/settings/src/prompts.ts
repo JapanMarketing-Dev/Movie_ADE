@@ -1,326 +1,196 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { z } from 'zod';
-import { solocutHome } from '@solocut/toolchain';
-import { stripJsonComments } from './settings.js';
+import { loadSettings } from './settings.js';
+import type { Settings } from './schema.js';
 
-// Ready-made prompts (docs/13_prompts_and_autopilot.md). Defaults ⊕ ~/.solocut/prompts.json ⊕ <project>/.solocut/prompts.json.
+// The two prompts of the app (docs/13_prompts_and_autopilot.md): `finish` is sent to the agent by itself after a
+// recording (autopilot.autoStart), `publish` after the human pressed「OK・投稿する」. The texts are built in; the user can
+// replace them in settings.json (`prompts.finish` / `prompts.publish`, plain strings). An empty override means the default.
 
-const I18n = z.object({ ja: z.string().optional(), en: z.string().optional() });
+export const PROMPT_IDS = ['finish', 'publish'] as const;
+export type PromptId = (typeof PROMPT_IDS)[number];
+
 const AgentRef = z.string().regex(/^(default|[a-z0-9][a-z0-9-]*|custom:[A-Za-z0-9_.-]+)$/);
 
 export const PromptSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  id: z.enum(PROMPT_IDS),
   label: z.object({ ja: z.string(), en: z.string() }),
   agent: AgentRef.default('default'),
-  body: I18n,
+  body: z.object({ ja: z.string().optional(), en: z.string().optional() }),
   autopilot: z.boolean().optional(),
+  /** true when the body comes from settings.json instead of the built-in default */
+  overridden: z.boolean().optional(),
+  /** kept for older callers (`solocut prompts list --all`); no prompt is hidden any more */
   hidden: z.boolean().optional(),
 });
 export type Prompt = z.infer<typeof PromptSchema>;
 
-/** An entry in prompts.json: overrides a prompt by id, adds a new one, or hides one. */
-export const PromptPatchSchema = z.object({
-  id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
-  label: I18n.optional(),
-  agent: AgentRef.optional(),
-  body: I18n.optional(),
-  autopilot: z.boolean().optional(),
-  hidden: z.boolean().optional(),
-});
-export type PromptPatch = z.infer<typeof PromptPatchSchema>;
+export const PROMPT_VARS = ['project', 'template', 'date'] as const;
 
-export const PromptsSchema = z.object({ $schema: z.string().optional(), prompts: z.array(PromptPatchSchema) });
-export type PromptsFile = z.infer<typeof PromptsSchema>;
+export function isPromptId(id: unknown): id is PromptId {
+  return typeof id === 'string' && (PROMPT_IDS as readonly string[]).includes(id);
+}
 
-export const PROMPT_VARS = ['project', 'template', 'targets', 'latestFeedback', 'latestCheck', 'selection', 'date', 'archive'] as const;
+const PUBLISH_JSON = `{
+  "video": "renders/final.mp4",
+  "thumbnail": "thumbnails/thumb-1.png",
+  "title": "…", "description": "…", "tags": ["…"],
+  "youtube": { "categoryId": "28", "privacy": "private", "madeForKids": false, "containsSyntheticMedia": false, "chapters": true },
+  "tiktok": { "enabled": false, "caption": "…", "privacy": "SELF_ONLY", "allowComment": false, "allowDuet": false, "allowStitch": false, "isAigc": false }
+}`;
 
-const LOOP_JA =
-  '`solocut next --json` を実行し、返ってきた step の `do` と `commands` に従って作業し、もう一度 `solocut next --json` を実行する、を繰り返してください。';
-const LOOP_EN =
-  'Run `solocut next --json`, do what its `do` and `commands` say, then run `solocut next --json` again; repeat.';
+const FINISH_JA = `このプロジェクト（{{project}}）の素材から、投稿できる動画を1本（YouTube 用・16:9）完成させてください。人は見ていません。止まらずに最後まで進めてください。
+
+進め方
+- \`solocut next --autopilot --json\` を実行し、返ってきた step の \`do\` と \`commands\` に従って作業し、また \`solocut next --autopilot --json\` を実行する、を state が done になるか、投稿（publish）の手前で人を待つ状態になるまで繰り返します（テンプレート {{template}} の手順）。
+- 判定モデルは要りません。設定されていなくても止まらず、迷うところは自分で判断して進めます。自信のない箇所は needsReview を付け、「要確認」として .solocut/questions.md に1行ずつ書いて先へ進みます。
+- チェックの不合格は直して \`solocut check\` をやり直します。同じ項目を3回直しても通らなければ「要確認」にして先へ進みます。
+- 人物（メインのカメラ）は常に画面の中央に置きます。顔が画面の中央に来るように切り抜き・配置してください（カメラが複数でも、映っている人物を中央に）。
+
+イラスト・画像
+- 前もってダウンロードはしません。使うと決めた素材だけをその場で取得して assets/ に置きます。
+- 使ってよい無料のライブラリ（各サイトの規約を守ること）:
+  - いらすとや（irasutoya.com）: 1つの作品につき20点まで商用無料。
+  - ソコスト（soco-st.com）: 商用無料・クレジット不要。
+  - ICOOON MONO（icooon-mono.com）: 商用無料・クレジット不要のアイコン。
+  - Loose Drawing（loosedrawing.com）: 商用無料・クレジット不要。
+  - unDraw（undraw.co）: 商用無料・クレジット不要。
+  - Openverse（openverse.org）: CC ライセンスの画像。作品ごとのライセンスに従い、求められるクレジットを入れる。
+  - Pixabay / Unsplash / Pexels（写真）: 各サイトのライセンスで商用無料。人物・ロゴ・商標が主役の写真は避ける。
+- 使った素材は、出典の URL・作者・ライセンスをプロジェクトの credits.md に記録し、クレジットが必要なものは説明文にも入れます。
+
+サムネイル
+- 動画のフレームをそのまま使う必要はありません。文字起こしと話題から、内容が一目で分かるサムネイルを作ります。
+- 画像はサブスクリプションの中で作ります。API キーは使いません。
+  1. Codex（ChatGPT のサブスクに入っている組み込みの画像生成）に頼みます。例:
+     \`codex exec --skip-git-repo-check -s workspace-write -C "<このプロジェクトのフォルダ>" '$imagegen YouTube のサムネイルを 1280x720（16:9）で作り、thumbnails/thumb-1.png に保存して。内容: <話題と見どころ>。文字は大きく短く（日本語で8〜12字）: <文字>'\`
+     （$imagegen は Codex の画像生成スキルの呼び出しなので、シェルで展開されないよう一重引用符で囲みます。）thumbnails/ に画像がなければ、~/.codex/generated_images/ の一番新しい画像をコピーします。
+  2. Codex が使えないとき（未ログイン・上限など）は Gemini CLI（Gemini のサブスク）に頼みます。\`gemini extensions list\` で画像を作れる拡張がログインのまま使えるときだけ使い、API キーを求められたら使いません。
+  3. どちらも使えないときは、自分で作ります（HTML や SVG を書いて画像に書き出す、ffmpeg で背景に文字を重ねるなど）。そのサムネイルは「要確認」にします。
+- 仕上がりは 1280x720 の PNG か JPG で、2MB 以下にして thumbnails/ に置きます。
+
+投稿の情報
+- プロジェクトの直下に publish.json を書きます。形式:
+${PUBLISH_JSON}
+- title は100字以内、description は5000バイト以内（< と > は使わない）、tags は合計500字以内で10個前後。説明文の最初の2行で内容が分かるようにし、チャプター（00:00 から始まる）と素材のクレジットを入れます。privacy は人の指示がなければ private のままにします。
+- 投稿はしないでください。人が完成した動画を見て OK してから行います。
+
+最後に .solocut/handoff.md を更新し、3行で報告してください（1行目: できたもの、2行目: 要確認の点、3行目: 人に見てほしいところ）。`;
+
+const FINISH_EN = `Finish one video ready to publish (YouTube, 16:9) from this project's footage ({{project}}). Nobody is watching: keep going until the end without stopping.
+
+How
+- Run \`solocut next --autopilot --json\`, do what its \`do\` and \`commands\` say, then run \`solocut next --autopilot --json\` again, until state is done or it waits for a human before publish (the steps of template {{template}}).
+- No decision model is needed. If none is configured, do not stop: judge for yourself. Mark the spots you are unsure of with needsReview, write each as one line under "要確認 / to review" in .solocut/questions.md and move on.
+- Fix failed checks and re-run \`solocut check\`. If the same item still fails after 3 fixes, mark it to review and move on.
+- Keep the person (main camera) in the center of the frame: crop and place so the face is centered (with several cameras too).
+
+Illustrations and images
+- Download nothing in advance. Fetch only the assets you decide to use, when you use them, into assets/.
+- Free libraries you may use (follow each site's terms):
+  - Irasutoya (irasutoya.com): free for commercial use, up to 20 images per work.
+  - Sokosuto (soco-st.com): free for commercial use, no credit needed.
+  - ICOOON MONO (icooon-mono.com): free commercial icons, no credit needed.
+  - Loose Drawing (loosedrawing.com): free for commercial use, no credit needed.
+  - unDraw (undraw.co): free for commercial use, no credit needed.
+  - Openverse (openverse.org): CC-licensed images; follow each work's license and add the credit it requires.
+  - Pixabay / Unsplash / Pexels (photos): free for commercial use under each site's license; avoid photos featuring people, logos or trademarks.
+- Record the source URL, author and license of every asset you use in the project's credits.md, and put required credits in the description.
+
+Thumbnail
+- You do not need to use a frame of the video. Make a thumbnail that shows what the video is about at a glance, from the transcript and the topic.
+- Make images inside the subscriptions. Never use API keys.
+  1. Ask Codex (the built-in image generation of the ChatGPT subscription), e.g.:
+     \`codex exec --skip-git-repo-check -s workspace-write -C "<this project's folder>" '$imagegen Make a 1280x720 (16:9) YouTube thumbnail and save it to thumbnails/thumb-1.png. About: <topic and hook>. Large, short text: <text>'\`
+     ($imagegen calls Codex's image generation skill; keep it in single quotes so the shell does not expand it.) If no image appears in thumbnails/, copy the newest one from ~/.codex/generated_images/.
+  2. If Codex cannot be used (not signed in, usage limit…), ask Gemini CLI (Gemini subscription). Use it only if \`gemini extensions list\` shows an image extension that works with the signed-in account; if it asks for an API key, do not use it.
+  3. If neither works, make it yourself (write HTML or SVG and export it, or put text over a background with ffmpeg) and mark the thumbnail to review.
+- The result is a 1280x720 PNG or JPG under 2 MB in thumbnails/.
+
+Publishing info
+- Write publish.json at the top of the project. Format:
+${PUBLISH_JSON}
+- title at most 100 characters, description at most 5000 bytes (no < or >), tags about 10 and at most 500 characters in total. The first 2 lines of the description say what the video delivers; include chapters (starting at 00:00) and the asset credits. Keep privacy private unless a human said otherwise.
+- Do not publish. Publishing happens after a human watched the finished video and approved it.
+
+Finally update .solocut/handoff.md and report in 3 lines (1: what was made, 2: what to review, 3: what a human should look at).`;
+
+const PUBLISH_JA = `人が完成した動画を確認し、投稿を承認しました。このプロジェクト（{{project}}）を投稿してください。
+
+1. publish.json を読み、最終の動画と照らし合わせて確認します。
+   - video のファイルがあり、最新の書き出しであること
+   - title が1〜100字、description が5000バイト以内で < と > を含まないこと、tags が合計500字以内であること
+   - thumbnail を指定しているなら、そのファイルがあり 1280x720・2MB 以下であること
+   - youtube.privacy が private / unlisted / public のどれかであること（人の指示がなければ書いてある値のまま）。publishAt を使うときは private にすること
+   - 説明文のチャプターが動画の長さと合っていること（00:00 から始まり、3つ以上、それぞれ10秒以上）
+   - tiktok.enabled が true なら、caption と privacy があること
+2. 問題があれば publish.json を直します。
+3. \`solocut publish upload --json\` を実行します。アプリが publish.json の内容で YouTube（と、有効なら TikTok）にアップロードし、結果を返します。
+   - メタデータの不備などで失敗したら、直してもう一度だけ実行します。連携が切れているなど人の操作が要るものは、直さずにそのまま報告します。
+4. 投稿先ごとの URL と、直した点を3行以内で報告してください。`;
+
+const PUBLISH_EN = `A human checked the finished video and approved publishing. Publish this project ({{project}}).
+
+1. Read publish.json and check it against the final video:
+   - the video file exists and is the latest render
+   - title is 1–100 characters, description at most 5000 bytes without < or >, tags at most 500 characters in total
+   - if thumbnail is set, the file exists and is 1280x720, under 2 MB
+   - youtube.privacy is private / unlisted / public (keep the written value unless a human said otherwise); with publishAt it must be private
+   - the chapters in the description match the video length (start at 00:00, at least 3, each at least 10 seconds)
+   - if tiktok.enabled is true, caption and privacy are set
+2. Fix publish.json if anything is wrong.
+3. Run \`solocut publish upload --json\`. The app uploads to YouTube (and TikTok if enabled) with publish.json and returns the result.
+   - If it fails because of the metadata, fix it and run it once more. If a human is needed (an account is disconnected…), do not work around it; report it.
+4. Report the URL for each destination and what you fixed, in at most 3 lines.`;
 
 export const DEFAULT_PROMPTS: Prompt[] = [
-  {
-    id: 'finish',
-    label: { ja: '動画を完成させて', en: 'Finish the video' },
-    agent: 'default',
-    autopilot: true,
-    body: {
-      ja: `このプロジェクト（{{project}}）の素材から、テンプレート {{template}} の手順に沿って、投稿できる状態の動画を3本完成させてください: YouTube の本編（16:9）、TikTok（9:16）、YouTube Shorts（9:16）。
-${LOOP_JA} state が done になるまで止まらないでください。
-- まず本編を仕上げ、チェックに合格したら \`solocut derive --target tiktok\` と \`--target youtube-shorts\` で縦型の2本を作り、テンプレートの prompts/vertical.md に沿って直します（各コマンドに \`--variant tiktok\` などを付けると、その版を操作できます）。
-- サムネイルと投稿文（タイトル・説明文・タグ）は3本それぞれに作ります。仕上げは \`solocut render --final --all\`。
-- 判定モデルの答えが中間のものは、一番確率の高い答えで進め、needsReview の印を付けて残してください。
-- チェックの不合格は直して \`solocut check\` をやり直します。同じ項目を3回直しても通らなければ、.solocut/questions.md に書いて先へ進んでください。
-- 同期の信頼度が低いときだけは待ってください（ずれた同期は全体を壊します）。待つ間に進められる手順を先に進めます。
-- 投稿はしないでください。投稿は人が承認してからです。
-最後に .solocut/handoff.md を更新し、やったことと確認してほしい点を3行で報告してください。`,
-      en: `From this project's footage ({{project}}), finish three videos ready to publish, following template {{template}}: the YouTube main video (16:9), TikTok (9:16) and YouTube Shorts (9:16).
-${LOOP_EN} Do not stop until state is done.
-- Finish the main video first; once its checks pass, derive the vertical ones with \`solocut derive --target tiktok\` and \`--target youtube-shorts\` and refine them following the template's prompts/vertical.md (add \`--variant tiktok\` etc. to any command to work on that version).
-- Make a thumbnail and post text (title, description, tags) for each of the three. Final renders: \`solocut render --final --all\`.
-- When the decision model is unsure, take the most likely answer, mark it needsReview and move on.
-- Fix failed checks and re-run \`solocut check\`. If the same item still fails after 3 fixes, note it in .solocut/questions.md and move on.
-- Only wait when sync confidence is low (a wrong sync breaks everything); meanwhile continue with steps that do not depend on it.
-- Do not publish. Publishing needs a human's approval.
-Finally update .solocut/handoff.md and report what you did and what to review in 3 lines.`,
-    },
-  },
-  {
-    id: 'rough-cut',
-    label: { ja: '粗カットだけ', en: 'Rough cut only' },
-    agent: 'default',
-    body: {
-      ja: `テンプレート {{template}} の手順を rough-cut まで進めて、そこで止まってください。${LOOP_JA}
-rough-cut では \`solocut propose cuts\` で候補を作り、テンプレートの prompts/rough-cut.md に沿って \`solocut edit\` で直します。
-終わったら \`solocut render --preview\` を実行し、切った箇所の要約（何を何秒切ったか、迷った箇所）を報告してください。`,
-      en: `Advance template {{template}} up to the rough-cut step and stop there. ${LOOP_EN}
-In rough-cut, run \`solocut propose cuts\` and refine with \`solocut edit\` following the template's prompts/rough-cut.md.
-Then run \`solocut render --preview\` and report what you cut (how much, and the uncertain spots).`,
-    },
-  },
-  {
-    id: 'fix-feedback',
-    label: { ja: 'フィードバックに対応して', en: 'Address the feedback' },
-    agent: 'default',
-    body: {
-      ja: `最新のフィードバック {{latestFeedback}} を読んで、指摘に1つずつ対応してください。
-- 各指摘の対象（区間・字幕などの id）は \`solocut tl show <id>\` で確認し、直しは \`solocut edit\` で行います。編集の decided には feedbackRef を付けてください。
-- 同じ種類の直しが今後も必要そうなら、テンプレートのプロンプトへの追記案を .solocut/handoff.md に書いてください。
-終わったら \`solocut render --preview\` と \`solocut check\` を実行し、対応した指摘と、対応できなかった指摘（理由つき）を報告してください。`,
-      en: `Read the latest feedback {{latestFeedback}} and address each item.
-- Inspect each target (segment, caption ids…) with \`solocut tl show <id>\` and fix it with \`solocut edit\`; set feedbackRef in decided.
-- If the same kind of fix will be needed again, propose an addition to the template prompts in .solocut/handoff.md.
-Then run \`solocut render --preview\` and \`solocut check\`, and report what you fixed and what you could not (with reasons).`,
-    },
-  },
-  {
-    id: 'fix-checks',
-    label: { ja: 'チェックを全部直して', en: 'Fix all checks' },
-    agent: 'default',
-    body: {
-      ja: `最新のチェック結果 {{latestCheck}} の不合格をすべて直してください。
-report.md の項目ごとに原因を確かめ、\`solocut edit\` で直し、\`solocut render --preview\` → \`solocut check\` を合格するまで繰り返します（同じ項目は最大3回まで。それでも通らなければ .solocut/questions.md に書いてください）。
-直した内容を項目ごとに1行で報告してください。`,
-      en: `Fix every failure in the latest check {{latestCheck}}.
-For each item in report.md find the cause, fix it with \`solocut edit\`, then repeat \`solocut render --preview\` → \`solocut check\` until it passes (at most 3 tries per item; otherwise write it to .solocut/questions.md).
-Report one line per fixed item.`,
-    },
-  },
-  {
-    id: 'captions-polish',
-    label: { ja: '字幕を整えて', en: 'Polish the captions' },
-    agent: 'default',
-    body: {
-      ja: `字幕を見直してください。対象: {{selection}}（空なら全体）。
-- 誤字・誤変換（特に固有名詞と専門用語。timeline.json の meta.glossary を参照）を直す
-- 1行の文字数と改行位置をテンプレートの prompts/captions.md に合わせる。文節の途中で改行しない
-- 強調は1行に1語まで
-- 言い換えは最小限にし、spoken（話した言葉）と意味がずれないようにする
-直しは \`solocut edit updateCaption\` で行い、corrections に元の文字と理由を残してください。`,
-      en: `Review the captions. Scope: {{selection}} (whole video if empty).
-- Fix typos and mis-transcriptions (proper nouns and jargon; see meta.glossary in timeline.json)
-- Match line length and breaks to the template's prompts/captions.md; never break inside a phrase
-- At most one emphasized word per line
-- Keep rewording minimal so the text never drifts from what was spoken
-Use \`solocut edit updateCaption\` and record each change in corrections with a reason.`,
-    },
-  },
-  {
-    id: 'shorts',
-    label: { ja: 'ショートを3本作って', en: 'Make 3 shorts' },
-    agent: 'default',
-    body: {
-      ja: `この長尺から、縦型のショートを3本作ってください。
-\`solocut tl summary\` で構成を把握し、単体で意味が通じて最初の2秒で引きのある区間（30〜60秒）を候補として5つ選び、理由を添えて .solocut/questions.md に書きます。
-上位3つについて、出力先 {{targets}} の縦型の出力（range を指定した output）を \`solocut edit setOutput\` で作り、\`solocut render --final --target <target>\` で書き出してください。`,
-      en: `Cut 3 vertical shorts from this long video.
-Read the structure with \`solocut tl summary\`, pick 5 candidate ranges (30–60 s) that stand alone and hook in the first 2 seconds, and list them with reasons in .solocut/questions.md.
-For the top 3, add vertical outputs (with range) for {{targets}} via \`solocut edit setOutput\` and render them with \`solocut render --final --target <target>\`.`,
-    },
-  },
-  {
-    id: 'thumbnail',
-    label: { ja: 'サムネを3案作って', en: 'Make 3 thumbnails' },
-    agent: 'codex',
-    body: {
-      ja: `サムネイルを3案作ってください。テンプレートの prompts/thumbnail.md の方向性に従います。
-表情の良いフレームを \`solocut frame --at <フレーム>\` で取り出して候補にし（目を閉じていない・ブレていない・口の形が自然なもの）、文字は短く大きく（8〜12字）。
-画像生成を使う場合は、元のフレームの人物の顔を変えないでください。できた3案を renders/thumbnails/ に置き、それぞれの狙いを1行で報告してください。`,
-      en: `Make 3 thumbnail options following the template's prompts/thumbnail.md.
-Grab expressive frames with \`solocut frame --at <frame>\` (eyes open, sharp, natural mouth), keep the text short and large (3–5 words).
-If you use image generation, never alter the person's face. Put the 3 options in renders/thumbnails/ and report each one's intent in one line.`,
-    },
-  },
-  {
-    id: 'metadata',
-    label: { ja: '投稿文を作って', en: 'Write the post text' },
-    agent: 'default',
-    body: {
-      ja: `投稿用のテキストを作ってください。出力先: {{targets}}。
-\`solocut tl summary\` の構成と meta.goal・meta.audience をもとに、タイトル候補5つ（32字以内、具体的な数字や結果を入れる）、説明文（最初の2行で内容が分かる）、チャプター（\`00:00 はじめに\` の形式。章の開始フレームから計算）、タグ10個、SNS の告知文（X 用 140字以内）を、出力先ごとに renders/<target>/metadata.md に書いてください。誇張や釣りの表現は使わないでください。`,
-      en: `Write the publishing text for {{targets}}.
-From \`solocut tl summary\`, meta.goal and meta.audience write: 5 title options (under 60 chars, concrete numbers or outcomes), a description whose first 2 lines say what the video delivers, chapters (\`00:00 Intro\` format, from chapter start frames), 10 tags and a social post (under 280 chars), into renders/<target>/metadata.md for each target. No clickbait.`,
-    },
-  },
-  {
-    id: 'publish',
-    label: { ja: '投稿して', en: 'Publish' },
-    agent: 'default',
-    body: {
-      ja: `投稿の準備をしてください。書き出し（renders/）、サムネイル、metadata.md がそろっているかを確認し、足りないものを報告します。
-投稿そのものは、アプリの確認画面で人が承認してから行います。あなたは投稿しないでください。`,
-      en: `Prepare for publishing: check that the render (renders/), thumbnail and metadata.md are all there and report anything missing.
-Publishing itself happens after a human approves it in the app. Do not publish yourself.`,
-    },
-  },
-  {
-    id: 'announce',
-    label: { ja: 'SNSで告知して', en: 'Announce on social' },
-    agent: 'default',
-    body: {
-      ja: `X / Instagram / Threads / Facebook 向けの告知文を、それぞれの文字数と雰囲気に合わせて作り、renders/announce.md に書いてください。動画の要点を1つに絞り、URL を入れる場所を [URL] で示します。投稿は人が承認してから行います。`,
-      en: `Write announcement posts for X / Instagram / Threads / Facebook, each fitted to its length and tone, into renders/announce.md. Focus on one takeaway and mark the link position with [URL]. Posting happens after a human approves it.`,
-    },
-  },
-  {
-    id: 'english',
-    label: { ja: '英語字幕も作って', en: 'Add English subtitles' },
-    agent: 'default',
-    body: {
-      ja: `英語の字幕と、英語のタイトル・説明文を作ってください。
-字幕は日本語の字幕と同じタイミングで、意味を優先して自然な英語にします（直訳しない。専門用語は英語圏で一般的な表記に）。renders/<target>/subtitles.en.srt に書き、タイトルと説明文は renders/<target>/metadata.en.md に書いてください。`,
-      en: `Create English subtitles and an English title and description.
-Keep the same timing as the Japanese captions; translate for meaning, not word by word, using the usual English terms for jargon. Write renders/<target>/subtitles.en.srt and renders/<target>/metadata.en.md.`,
-    },
-  },
-  {
-    id: 'same-as-last',
-    label: { ja: '前回と同じ作りにして', en: 'Same as last time' },
-    agent: 'default',
-    body: {
-      ja: `直前に作った回を参考にして編集してください。\`solocut past list --limit 1 --json\` で直前の回を見つけ、\`solocut past show <id>\` で概要と統計を読みます。
-\`solocut edit setMeta\` で meta.references にその回を登録し（use: pacing, scenes, captions, sfx）、カットのテンポ（平均の区間の長さ・切った割合）、シーンの使い方、字幕、効果音の頻度を合わせながら ${LOOP_JA}`,
-      en: `Edit this video like the previous one. Find it with \`solocut past list --limit 1 --json\` and read \`solocut past show <id>\`.
-Register it in meta.references via \`solocut edit setMeta\` (use: pacing, scenes, captions, sfx) and match its pacing (average segment length, cut ratio), scene usage, captions and sfx frequency while you work. ${LOOP_EN}`,
-    },
-  },
-  {
-    id: 'like-past',
-    label: { ja: '過去の動画を参考に作って', en: 'Edit like a past video' },
-    agent: 'default',
-    body: {
-      ja: `過去の回 {{archive}} を参考にして編集してください（空なら \`solocut past search\` で近い回を探し、候補を3つ挙げてから一番近いものを選びます）。
-\`solocut past show <id>\` で概要と統計を、必要な部分だけ \`solocut past timeline <id>\` で読みます。\`solocut edit setMeta\` で meta.references に登録し、その回のテンポ、シーン、字幕、効果音、サムネイルの作りに合わせて ${LOOP_JA}
-参考の回と違う作りにした箇所は、理由を decided.reason に書いてください。`,
-      en: `Use past video {{archive}} as the reference (if empty, find close ones with \`solocut past search\`, list 3 and pick the closest).
-Read \`solocut past show <id>\` and only the parts you need of \`solocut past timeline <id>\`. Register it in meta.references via \`solocut edit setMeta\` and match its pacing, scenes, captions, sfx and thumbnail style. ${LOOP_EN}
-Where you deliberately differ, say why in decided.reason.`,
-    },
-  },
-  {
-    id: 'compare-past',
-    label: { ja: '過去の回と比べて', en: 'Compare with a past video' },
-    agent: 'default',
-    body: {
-      ja: `今の動画と過去の回 {{archive}} を比べてください（空なら直前の回）。
-\`solocut past show <id> --json\` の統計と、今のプロジェクトの \`solocut tl summary --json\` を比べ、テンポ（平均の区間の長さ・切った割合）、字幕の量と強調、効果音とズームの頻度、構成（章の数と長さ）の違いを表にし、改善点を3つ、優先度の高い順に報告してください。編集はしないでください。`,
-      en: `Compare the current video with past video {{archive}} (the previous one if empty).
-Compare the stats from \`solocut past show <id> --json\` with \`solocut tl summary --json\`: pacing (average segment length, cut ratio), caption volume and emphasis, sfx and zoom frequency, and structure (chapter count and length). Report a table of differences and the top 3 improvements by priority. Do not edit.`,
-    },
-  },
-  {
-    id: 'learn',
-    label: { ja: '今回の直しをテンプレートに反映して', en: 'Learn from this edit' },
-    agent: 'default',
-    body: {
-      ja: `今回のフィードバック（feedback/）と人の判断（.solocut/history.jsonl で by が human のもの）を見て、繰り返し出た直しを探してください。
-次回から最初に反映されるよう、テンプレートの rules.md と prompts/*.md への追記案を、具体的な文で3つまで作り、差分として示してください。人が承認するまでテンプレートのファイルは書き換えないでください。`,
-      en: `Review this project's feedback (feedback/) and human decisions (entries with by=human in .solocut/history.jsonl) and find repeated fixes.
-Propose up to 3 concrete additions to the template's rules.md and prompts/*.md, shown as diffs, so they apply from the start next time. Do not modify the template until a human approves.`,
-    },
-  },
-  {
-    id: 'bench-apply',
-    label: { ja: 'ベンチマークを取り込んで', en: 'Apply a benchmark' },
-    agent: 'default',
-    body: {
-      ja: `選んだスタイルプロファイル {{selection}} をテンプレートに取り込む差分を作ってください。字幕のスタイル、カットのテンポ、効果音の頻度を、template.yaml と prompts/*.md にどう反映するかを示し、人が承認してから書き換えます。`,
-      en: `Draft the changes that bring style profile {{selection}} into the template: caption style, cut pacing and sfx frequency in template.yaml and prompts/*.md. Apply them only after a human approves.`,
-    },
-  },
+  { id: 'finish', label: { ja: '動画を完成させて', en: 'Finish the video' }, agent: 'default', autopilot: true, body: { ja: FINISH_JA, en: FINISH_EN } },
+  { id: 'publish', label: { ja: '投稿して', en: 'Publish' }, agent: 'default', body: { ja: PUBLISH_JA, en: PUBLISH_EN } },
 ];
+
+/** The user's text for a prompt from settings, or undefined when it is absent / blank (= the default). */
+export function promptOverride(settings: Pick<Settings, 'prompts'> | undefined, id: PromptId): string | undefined {
+  const v = settings?.prompts?.[id];
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+/** The two prompts with the settings overrides applied (an override replaces both languages). Pure. */
+export function promptsFromSettings(settings: Pick<Settings, 'prompts'> | undefined): Prompt[] {
+  return DEFAULT_PROMPTS.map((p) => {
+    const text = promptOverride(settings, p.id);
+    return text === undefined ? { ...p, label: { ...p.label }, body: { ...p.body } } : { ...p, label: { ...p.label }, body: { ja: text, en: text }, overridden: true };
+  });
+}
+
+/** The built-in default text of a prompt in `lang` (for the settings page's「既定に戻す」and placeholder). */
+export function defaultPromptText(id: PromptId, lang: 'ja' | 'en'): string {
+  const p = DEFAULT_PROMPTS.find((x) => x.id === id)!;
+  return p.body[lang] ?? p.body.ja ?? '';
+}
 
 export interface PromptsLoadResult { prompts: Prompt[]; errors: { file: string; message: string }[] }
 
-function readPromptsFile(path: string): { patches: PromptPatch[]; error?: string } {
-  if (!existsSync(path)) return { patches: [] };
-  let raw: unknown;
-  try {
-    raw = JSON.parse(stripJsonComments(readFileSync(path, 'utf8')));
-  } catch (e) {
-    return { patches: [], error: `invalid JSON: ${(e as Error).message}` };
-  }
-  const r = PromptsSchema.safeParse(raw);
-  if (!r.success) return { patches: [], error: r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
-  return { patches: r.data.prompts };
+/**
+ * The prompts from ~/.solocut/settings.json. `projectDir` and `includeHidden` are accepted for older callers and
+ * ignored (prompts.json files are gone). A broken settings file falls back to the defaults (see loadSettings).
+ */
+export function loadPromptsWithErrors(_projectDir?: string, _o: { includeHidden?: boolean } = {}): PromptsLoadResult {
+  return { prompts: promptsFromSettings(loadSettings()), errors: [] };
 }
 
-/** Apply prompts.json patches to a list: override fields by id, add new prompts, hide with `hidden: true`. */
-export function mergePrompts(base: Prompt[], patches: PromptPatch[], errors: string[] = []): Prompt[] {
-  const out = base.map((p) => ({ ...p, label: { ...p.label }, body: { ...p.body } }));
-  for (const patch of patches) {
-    const cur = out.find((p) => p.id === patch.id);
-    if (cur) {
-      if (patch.label) cur.label = { ...cur.label, ...stripUndef(patch.label) };
-      if (patch.body) cur.body = { ...cur.body, ...stripUndef(patch.body) };
-      if (patch.agent !== undefined) cur.agent = patch.agent;
-      if (patch.autopilot !== undefined) cur.autopilot = patch.autopilot;
-      if (patch.hidden !== undefined) cur.hidden = patch.hidden;
-      continue;
-    }
-    const added = PromptSchema.safeParse({ ...patch, label: patch.label, body: patch.body ?? {} });
-    if (!added.success || !(patch.body?.ja || patch.body?.en) || !patch.label?.ja || !patch.label?.en) {
-      errors.push(`prompt "${patch.id}" is new and needs label.ja, label.en and a body`);
-      continue;
-    }
-    out.push(added.data);
-  }
-  return out;
-}
-
-function stripUndef<T extends object>(o: T): Partial<T> {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
-}
-
-export function loadPromptsWithErrors(projectDir?: string, o: { includeHidden?: boolean } = {}): PromptsLoadResult {
-  const errors: { file: string; message: string }[] = [];
-  let list = DEFAULT_PROMPTS;
-  const files = [join(solocutHome(), 'prompts.json')];
-  if (projectDir) files.push(join(projectDir, '.solocut', 'prompts.json'));
-  for (const file of files) {
-    const { patches, error } = readPromptsFile(file);
-    if (error) errors.push({ file, message: error });
-    const mergeErrors: string[] = [];
-    list = mergePrompts(list, patches, mergeErrors);
-    for (const m of mergeErrors) errors.push({ file, message: m });
-  }
-  return { prompts: o.includeHidden ? list : list.filter((p) => !p.hidden), errors };
-}
-
-/** default ⊕ ~/.solocut/prompts.json ⊕ <project>/.solocut/prompts.json, hidden ones removed. */
 export function loadPrompts(projectDir?: string, o: { includeHidden?: boolean } = {}): Prompt[] {
   return loadPromptsWithErrors(projectDir, o).prompts;
 }
 
 /** Body in `lang` (falls back to the other language) with {{vars}} filled. Unknown or missing vars become "". */
-export function renderPrompt(p: Prompt, vars: Record<string, string>, lang: 'ja' | 'en'): string {
+export function renderPrompt(p: Pick<Prompt, 'body'>, vars: Record<string, string>, lang: 'ja' | 'en'): string {
   const body = p.body[lang] ?? p.body[lang === 'ja' ? 'en' : 'ja'] ?? '';
   const all: Record<string, string> = { date: new Date().toISOString().slice(0, 10), ...vars };
   return body.replace(/\{\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\}/g, (_m, name: string) => all[name] ?? '');
 }
 
-export function promptsJsonSchema(): object {
-  return { $id: 'https://solocut.app/schema/prompts.v1.json', ...(z.toJSONSchema(PromptsSchema, { io: 'input' }) as object) };
+/** Render prompt `id` with the given settings (pure). Throws for an unknown id. */
+export function renderPromptById(id: string, vars: Record<string, string>, lang: 'ja' | 'en', settings?: Pick<Settings, 'prompts'>): { text: string; prompt: Prompt } {
+  if (!isPromptId(id)) throw new Error(`unknown prompt: ${id}`);
+  const prompt = promptsFromSettings(settings).find((p) => p.id === id)!;
+  return { text: renderPrompt(prompt, vars, lang), prompt };
 }

@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppWindow, Camera, Check, Circle, FileText, Flag, Monitor, MonitorOff, RefreshCw, ShieldAlert, Square, Star, Timer, Video } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, Check, Circle, Crop, Flag, Maximize, Monitor, MonitorOff, RefreshCw, ShieldAlert, Square, Star, Timer, User } from 'lucide-react';
 import { Badge, Button, IconButton, RecordDot, Select, SettingRow, Switch, Tooltip } from '../ui';
+import { setSetting, settingsStore, useStore } from '../shell/stores';
 import { useST } from '../shell/i18n';
 import type { AppInfo, CaptureSource, MediaPermissionState, ProjectInfo } from '@shared/types';
+import { displayIdOf } from '@shared/analysis';
+import { displayPixels, fitRegion, isWholeDisplay, parseRegion, regionPercent, streamCrop, type DisplayInfo, type Region } from '@shared/region';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { recorder, type CameraChoice, type RecStatus } from '../lib/recorder';
+import { keepAvailable, mainCamera, recordingOrder, toggleCamera } from '../lib/cameras';
+import { runAutoFinish, sentTakes } from '../lib/autoFinish';
+import { sendToAgent } from '../terminal/agentSend';
 
 const RESOLUTIONS = [
   { id: '720p', w: 1280, h: 720 },
@@ -17,14 +23,37 @@ function stopStream(s: MediaStream | null | undefined): void {
   s?.getTracks().forEach((t) => t.stop());
 }
 
-function Preview({ stream, label, muted = true }: { stream: MediaStream | null; label: string; muted?: boolean }) {
+function Video({ stream }: { stream: MediaStream }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
   }, [stream]);
+  return <video ref={ref} autoPlay playsInline muted />;
+}
+
+function Preview({ stream, label, aspect }: { stream: MediaStream | null; label: string; aspect?: string }) {
   return (
-    <div className="preview-box">
-      {stream ? <video ref={ref} autoPlay playsInline muted={muted} /> : <span>{label}</span>}
+    <div className="preview-box" style={aspect ? { aspectRatio: aspect } : undefined}>
+      {stream ? <Video stream={stream} /> : <span>{label}</span>}
+      {stream && <span className="tag">{label}</span>}
+    </div>
+  );
+}
+
+/** The screen preview with the recording region drawn as a frame (outside dimmed). */
+function ScreenPreview({ stream, label, display, region }: { stream: MediaStream | null; label: string; display: DisplayInfo | null; region: Region | null }) {
+  const px = display ? displayPixels(display) : null;
+  const pct = region && display ? regionPercent(region, display) : null;
+  return (
+    <div className="preview-box recx__screen" style={px ? { aspectRatio: `${px.width} / ${px.height}` } : undefined}>
+      {stream ? <Video stream={stream} /> : <span>{label}</span>}
+      {stream && pct && (
+        <span
+          className="recx__region"
+          aria-hidden="true"
+          style={{ left: `${pct.left}%`, top: `${pct.top}%`, width: `${pct.width}%`, height: `${pct.height}%` }}
+        />
+      )}
       {stream && <span className="tag">{label}</span>}
     </div>
   );
@@ -80,22 +109,27 @@ export function Record({
 }) {
   const t = useT();
   const st = useST();
-  const [tele, setTele] = useState(false);
+  const settings = useStore(settingsStore);
   const permLabel = (x: string) => (x === 'granted' ? st('rec.perm.granted') : x === 'denied' ? st('rec.perm.denied') : st('rec.perm.unknown'));
   const [status, setStatus] = useState<RecStatus>(recorder.get());
   const [perm, setPerm] = useState<MediaPermissionState | null>(null);
   const [sources, setSources] = useState<CaptureSource[]>([]);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [systemAudio, setSystemAudio] = useState(false);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [camIds, setCamIds] = useState<string[]>([]);
+  const [mainCamId, setMainCamId] = useState<string | null>(null);
+  const camInit = useRef(false);
   const [micId, setMicId] = useState<string | null>(null);
   const [res, setRes] = useState('1080p');
   const [fps, setFps] = useState(30);
   const [countdownSec, setCountdownSec] = useState(3);
   const [count, setCount] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [picking, setPicking] = useState(false);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  // every connected camera is opened while the screen is shown (live thumbnails); only the selected ones are recorded
   const [camStreams, setCamStreams] = useState<{ choice: CameraChoice; stream: MediaStream }[]>([]);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const recording = status.state !== 'idle';
@@ -103,6 +137,9 @@ export function Record({
   const level = useLevel(micStream);
 
   useEffect(() => recorder.subscribe(setStatus), []);
+
+  const cams = useMemo(() => devices.filter((d) => d.kind === 'videoinput' && d.deviceId), [devices]);
+  const camKey = cams.map((d) => d.deviceId).join(',');
 
   const loadDevices = useCallback(async () => {
     const list = await navigator.mediaDevices.enumerateDevices();
@@ -112,9 +149,11 @@ export function Record({
 
   const loadSources = useCallback(async () => {
     try {
-      const s = await api.invoke('record:sources');
-      setSources(s);
-      setSourceId((cur) => cur ?? s.find((x) => x.kind === 'screen')?.id ?? null);
+      const [s, d] = await Promise.all([api.invoke('record:sources'), api.invoke('record:displays')]);
+      const screens = s.filter((x) => x.kind === 'screen');
+      setSources(screens);
+      setDisplays(d);
+      setSourceId((cur) => (cur && screens.some((x) => x.id === cur) ? cur : (screens[0]?.id ?? null)));
     } catch (e) {
       toast(errMsg(e));
     }
@@ -128,6 +167,18 @@ export function Record({
     navigator.mediaDevices.addEventListener('devicechange', loadDevices);
     return () => navigator.mediaDevices.removeEventListener('devicechange', loadDevices);
   }, [visible, loadSources, loadDevices]);
+
+  // first camera on by default; unplugged cameras drop out of the selection
+  useEffect(() => {
+    const ids = cams.map((d) => d.deviceId);
+    if (!camInit.current && ids.length > 0) {
+      camInit.current = true;
+      setCamIds([ids[0]!]);
+      return;
+    }
+    setCamIds((cur) => keepAvailable(cur, ids));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camKey]);
 
   // screen stream
   useEffect(() => {
@@ -159,14 +210,14 @@ export function Record({
     const opened: { choice: CameraChoice; stream: MediaStream }[] = [];
     const r = RESOLUTIONS.find((x) => x.id === res) ?? RESOLUTIONS[1]!;
     void (async () => {
-      for (const id of camIds) {
+      for (const d of cams) {
+        if (cancelled) break;
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { deviceId: { exact: id }, width: { ideal: r.w }, height: { ideal: r.h }, frameRate: { ideal: fps } },
+            video: { deviceId: { exact: d.deviceId }, width: { ideal: r.w }, height: { ideal: r.h }, frameRate: { ideal: fps } },
             audio: false,
           });
-          const label = devices.find((d) => d.deviceId === id)?.label ?? id;
-          opened.push({ choice: { deviceId: id, label, width: r.w, height: r.h, fps }, stream });
+          opened.push({ choice: { deviceId: d.deviceId, label: d.label || d.deviceId.slice(0, 8), width: r.w, height: r.h, fps }, stream });
         } catch (e) {
           toast(`${t('rec.cameras')}: ${errMsg(e)}`);
         }
@@ -180,7 +231,7 @@ export function Record({
       setCamStreams([]);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, camIds.join(','), res, fps]);
+  }, [active, camKey, res, fps]);
 
   // microphone: no echo cancellation / noise suppression / AGC (docs/03)
   useEffect(() => {
@@ -216,6 +267,40 @@ export function Record({
     return () => window.clearInterval(id);
   }, [status.state, status.startedAtMs]);
 
+  // the selected display and the region that applies to it (record.region of another display = whole screen)
+  const source = sources.find((s) => s.id === sourceId) ?? null;
+  const displayId = source ? source.displayId || displayIdOf(source.id) : null;
+  const display = displays.find((d) => d.id === displayId) ?? null;
+  const savedRegion = parseRegion((settings.json?.record as { region?: unknown } | undefined)?.region);
+  const fitted = savedRegion && display ? fitRegion(savedRegion, display) : null;
+  const region = fitted && display && !isWholeDisplay(fitted, display) ? fitted : null;
+  const canPickRegion = Boolean(display) && info?.os !== 'linux';
+
+  const pickRegion = async () => {
+    if (!display) return;
+    setPicking(true);
+    try {
+      const r = await api.invoke('record:pickRegion', display.id);
+      if (r) {
+        const err = await setSetting('record.region', r);
+        if (err) toast(`${t('rec.regionFailed')}: ${err}`);
+      }
+    } catch (e) {
+      toast(`${t('rec.regionFailed')}: ${errMsg(e)}`);
+    } finally {
+      setPicking(false);
+    }
+  };
+  const clearRegion = async () => {
+    const err = await setSetting('record.region', null);
+    if (err) toast(err);
+  };
+
+  const mainId = mainCamera(camIds, mainCamId);
+  const selectedCams = recordingOrder(camIds, mainCamId)
+    .map((id) => camStreams.find((c) => c.choice.deviceId === id))
+    .filter((c): c is { choice: CameraChoice; stream: MediaStream } => Boolean(c));
+
   const start = async () => {
     if (!project || !info) return;
     for (let i = countdownSec; i > 0; i--) {
@@ -225,9 +310,19 @@ export function Record({
     setCount(null);
     try {
       setElapsed(0);
+      const v = screenStream?.getVideoTracks()[0];
+      const vs = v?.getSettings();
+      const crop = region && display && vs?.width && vs.height ? streamCrop(region, display, vs.width, vs.height) : null;
       await recorder.start(
         project.dir,
-        { screen: screenStream, screenSourceId: sourceId, screenFps: fps, cameras: camStreams, mic: micStream && micId ? { deviceId: micId, label: devices.find((d) => d.deviceId === micId)?.label ?? 'mic', stream: micStream } : null },
+        {
+          screen: screenStream,
+          screenSourceId: sourceId,
+          screenFps: fps,
+          screenRegion: region && crop ? { region, crop } : null,
+          cameras: selectedCams.map((c, i) => ({ stream: c.stream, choice: i === 0 ? { ...c.choice, role: 'main' as const } : c.choice })),
+          mic: micStream && micId ? { deviceId: micId, label: devices.find((d) => d.deviceId === micId)?.label ?? 'mic', stream: micStream } : null,
+        },
         systemAudio,
         info.version,
         info.os,
@@ -238,13 +333,16 @@ export function Record({
   };
 
   const [ingesting, setIngesting] = useState(false);
-  // Stop -> `solocut ingest` registers the take as sources (clock offsets, NG/important markers) -> workspace
+  // Stop -> `solocut ingest` registers the take as sources (clock offsets, NG/important markers) -> workspace ->
+  // the agent is asked to finish the video (autopilot.autoStart)
   const stop = async () => {
+    const takeId = recorder.get().takeId ?? null;
     await recorder.stop();
     if (!project) return;
+    const dir = project.dir;
     setIngesting(true);
     toast(t('rec.ingesting'));
-    const r = await api.invoke('project:cli', project.dir, ['ingest']);
+    const r = await api.invoke('project:cli', dir, ['ingest']);
     setIngesting(false);
     if (!r.ok) {
       toast(`${t('rec.ingestFailed')}: ${r.error ?? ''}`);
@@ -252,8 +350,19 @@ export function Record({
     }
     toast(t('rec.saved'));
     // faces / on-screen PII / cursor logs for zoom, reframing and masks (cancellable from the workspace)
-    void api.invoke('analysis:start', project.dir).catch(() => undefined);
+    void api.invoke('analysis:start', dir).catch(() => undefined);
     onIngested();
+    await runAutoFinish(dir, takeId, {
+      settings: () => settingsStore.get().json,
+      render: (d) => api.invoke('prompts:render', 'finish', d, {}),
+      send: (text, agent, d) => sendToAgent({ text, agent, projectDir: d }, { launch: agent }),
+      toast,
+      sent: sentTakes,
+      messages: {
+        started: (agent) => t('rec.autoStarted', { agent }),
+        failed: (error) => t('rec.autoFailed', { error }),
+      },
+    });
   };
 
   // the shell's title-bar Record button (and ⌘⇧R) toggles recording through this event
@@ -286,7 +395,6 @@ export function Record({
     );
   }
 
-  const cams = devices.filter((d) => d.kind === 'videoinput');
   const mics = devices.filter((d) => d.kind === 'audioinput');
   const mmss = (ms: number) => {
     const s = Math.floor(ms / 1000);
@@ -296,12 +404,8 @@ export function Record({
 
   const ngCount = status.markers.filter((m) => m.kind === 'ng').length;
   const impCount = status.markers.filter((m) => m.kind === 'important').length;
-  const canStart = !ingesting && count === null && Boolean(screenStream || camStreams.length > 0 || micStream);
-  const toggleTele = () => {
-    const next = !tele;
-    setTele(next);
-    void api.invoke('record:teleprompter', next ? project.dir : null);
-  };
+  const canStart = !ingesting && !picking && count === null && Boolean(screenStream || selectedCams.length > 0 || micStream);
+  const regionLabel = region ? t('rec.regionSize', { w: String(region.width), h: String(region.height) }) : t('rec.wholeScreen');
 
   return (
     <div className={`ws recx${recording ? ' is-recording' : ''}`}>
@@ -312,16 +416,6 @@ export function Record({
             <span>{mmss(recording ? elapsed : 0)}</span>
           </span>
           <LevelBars level={level.level} clip={level.clip} off={!micStream} />
-          <span className="recx__sep" aria-hidden="true" />
-          {recording ? (
-            <button type="button" className="recx__go is-stop" disabled={status.state === 'stopping'} onClick={() => void stop()}>
-              <Square size={11} fill="currentColor" /> {status.state === 'stopping' ? st('rec.saving') : t('rec.stop')}
-            </button>
-          ) : (
-            <button type="button" className="recx__go" disabled={!canStart} onClick={() => void start()} data-testid="record-start">
-              <Circle size={11} fill="currentColor" /> {ingesting ? t('rec.ingesting') : t('rec.start')}
-            </button>
-          )}
           <span className="recx__sep" aria-hidden="true" />
           <Tooltip label={st('rec.markNg', { key: `${mod}N` })}>
             <button type="button" className="recx__mark" disabled={!recording} onClick={() => recorder.mark('ng')}>
@@ -334,7 +428,7 @@ export function Record({
             </button>
           </Tooltip>
           <span className="recx__sep" aria-hidden="true" />
-          <Tooltip label={t('rec.countdown')}>
+          <Tooltip label={t('rec.countdown')} align="end">
             <span className="recx__count">
               <Timer size={13} aria-hidden="true" />
               <select value={countdownSec} disabled={recording} aria-label={t('rec.countdown')} onChange={(e) => setCountdownSec(Number(e.target.value))}>
@@ -345,9 +439,6 @@ export function Record({
                 ))}
               </select>
             </span>
-          </Tooltip>
-          <Tooltip label={t('rec.teleprompter')} align="end">
-            <IconButton label={t('rec.teleprompter')} icon={<FileText size={14} />} selected={tele} onClick={toggleTele} />
           </Tooltip>
           {recording && <span className="recx__size">{(status.bytes / 1e6).toFixed(1)} MB</span>}
         </div>
@@ -372,88 +463,146 @@ export function Record({
               </Button>
             </div>
           )}
-          <div className={`recx__previews${camStreams.length > 0 ? '' : ' no-cam'}`}>
-            <Preview stream={screenStream} label={t('rec.screen')} />
+          <div className={`recx__previews${selectedCams.length > 0 ? '' : ' no-cam'}`}>
+            <ScreenPreview stream={screenStream} label={region ? `${t('rec.screen')} · ${regionLabel}` : t('rec.screen')} display={display} region={region} />
             <div className="recx__cams">
-              {camStreams.length === 0 ? (
+              {selectedCams.length === 0 ? (
                 <Preview stream={null} label={t('rec.cameras')} />
               ) : (
-                camStreams.map((c, i) => <Preview key={c.choice.deviceId} stream={c.stream} label={`camera-${i + 1} · ${c.choice.label}`} />)
+                selectedCams.map((c) => <Preview key={c.choice.deviceId} stream={c.stream} label={c.choice.deviceId === mainId ? `${t('rec.mainCam')} · ${c.choice.label}` : c.choice.label} />)
               )}
             </div>
           </div>
-          <div className="recx__sources">
-            <div className="recx__sources-head">
-              <span className="recx__h">{t('rec.screen')}</span>
-              <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} disabled={recording} onClick={() => void loadSources()}>
-                {t('rec.refresh')}
-              </Button>
+        </div>
+        <aside className="recx__side">
+          <section className="recx__step">
+            <div className="recx__step-head">
+              <span className="recx__step-n">1</span>
+              <h3 className="recx__h">{t('rec.step.screen')}</h3>
+              <IconButton label={t('rec.refresh')} size="sm" icon={<RefreshCw size={12} />} disabled={recording} onClick={() => void loadSources()} />
             </div>
             <div className="recx__source-grid">
-              <button type="button" className={`recx__source${sourceId === null ? ' is-selected' : ''}`} disabled={recording} onClick={() => setSourceId(null)}>
-                <span className="recx__source-img is-none">
-                  <MonitorOff size={20} />
-                </span>
-                <span className="recx__source-name">{t('rec.noScreen')}</span>
-              </button>
               {sources.map((src) => (
                 <button key={src.id} type="button" className={`recx__source${sourceId === src.id ? ' is-selected' : ''}`} disabled={recording} onClick={() => setSourceId(src.id)}>
                   <span className="recx__source-img">
                     <img src={src.thumbnail} alt="" />
-                    <span className="recx__source-kind">{src.kind === 'screen' ? <Monitor size={11} /> : <AppWindow size={11} />}</span>
+                    <span className="recx__source-kind">
+                      <Monitor size={11} />
+                    </span>
                   </span>
                   <span className="recx__source-name" title={src.name}>
                     {src.name}
                   </span>
                 </button>
               ))}
+              <button type="button" className={`recx__source${sourceId === null ? ' is-selected' : ''}`} disabled={recording} onClick={() => setSourceId(null)}>
+                <span className="recx__source-img is-none">
+                  <MonitorOff size={18} />
+                </span>
+                <span className="recx__source-name">{t('rec.noScreen')}</span>
+              </button>
             </div>
-          </div>
-        </div>
-        <aside className="recx__side">
-          <h3 className="recx__h">{t('rec.cameras')}</h3>
-          {cams.length === 0 && <p className="st-note">{st('rec.noCameras')}</p>}
-          <div className="recx__chips">
-            {cams.map((d) => {
-              const on = camIds.includes(d.deviceId);
-              return (
-                <button
-                  key={d.deviceId}
-                  type="button"
-                  className={`recx__chip${on ? ' is-on' : ''}`}
-                  aria-pressed={on}
-                  disabled={recording}
-                  onClick={() => setCamIds((ids) => (on ? ids.filter((x) => x !== d.deviceId) : [...ids, d.deviceId]))}
-                >
-                  <Video size={13} aria-hidden="true" />
-                  <span>{d.label || d.deviceId.slice(0, 8)}</span>
-                  {on && <Check size={12} aria-hidden="true" />}
-                </button>
-              );
-            })}
-          </div>
-          <SettingRow label={st('rec.resolution')}>
-            <Select ariaLabel={st('rec.resolution')} value={res} disabled={recording} options={RESOLUTIONS.map((r) => ({ value: r.id, label: r.id }))} onChange={setRes} />
-          </SettingRow>
-          <SettingRow label="fps">
-            <Select ariaLabel="fps" value={fps} disabled={recording} options={[24, 30, 60].map((f) => ({ value: f, label: `${f} fps` }))} onChange={setFps} />
-          </SettingRow>
-          <h3 className="recx__h">{t('rec.mic')}</h3>
-          <Select
-            ariaLabel={t('rec.mic')}
-            wide
-            value={micId ?? ''}
-            disabled={recording}
-            options={[{ value: '', label: t('rec.noMic') }, ...mics.map((d) => ({ value: d.deviceId, label: d.label || d.deviceId.slice(0, 8) }))]}
-            onChange={(v) => setMicId(v || null)}
-          />
-          <div className="recx__meter">
-            <LevelBars level={level.level} clip={level.clip} off={!micStream} wide />
-            {level.clip && <Badge tone="danger">{t('rec.clip')}</Badge>}
-          </div>
-          {info?.os !== 'linux' && <Switch label={t('rec.systemAudio')} checked={systemAudio} disabled={recording} onChange={setSystemAudio} />}
-          <h3 className="recx__h">{t('rec.markers')}</h3>
+            {sourceId !== null && canPickRegion && (
+              <div className="recx__region-row">
+                <Button size="sm" icon={<Crop size={13} />} busy={picking} disabled={recording} onClick={() => void pickRegion()} data-testid="record-pick-region">
+                  {region ? t('rec.repickRegion') : t('rec.pickRegion')}
+                </Button>
+                <Button size="sm" variant="ghost" icon={<Maximize size={13} />} selected={!region} disabled={recording || !region} onClick={() => void clearRegion()}>
+                  {t('rec.wholeScreen')}
+                </Button>
+                {region && <span className="recx__region-size">{region.width} × {region.height}</span>}
+              </div>
+            )}
+          </section>
+
+          <section className="recx__step">
+            <div className="recx__step-head">
+              <span className="recx__step-n">2</span>
+              <h3 className="recx__h">{t('rec.step.camera')}</h3>
+            </div>
+            {cams.length === 0 && <p className="st-note">{st('rec.noCameras')}</p>}
+            <div className="recx__camgrid">
+              {cams.map((d) => {
+                const on = camIds.includes(d.deviceId);
+                const isMain = on && d.deviceId === mainId;
+                const live = camStreams.find((c) => c.choice.deviceId === d.deviceId);
+                const label = d.label || d.deviceId.slice(0, 8);
+                return (
+                  <div key={d.deviceId} className={`recx__cam${on ? ' is-on' : ''}${isMain ? ' is-main' : ''}`}>
+                    <button
+                      type="button"
+                      className="recx__cam-toggle"
+                      aria-pressed={on}
+                      disabled={recording}
+                      onClick={() => setCamIds((ids) => toggleCamera(ids, d.deviceId))}
+                    >
+                      <span className="recx__cam-img">
+                        {live ? <Video stream={live.stream} /> : <Camera size={16} aria-hidden="true" />}
+                        {on && (
+                          <span className="recx__cam-check">
+                            <Check size={11} aria-hidden="true" />
+                          </span>
+                        )}
+                      </span>
+                      <span className="recx__cam-name" title={label}>
+                        {label}
+                      </span>
+                    </button>
+                    {isMain ? (
+                      <Badge tone="brand" icon={<User size={11} />} className="recx__cam-main">
+                        {t('rec.mainCam')}
+                      </Badge>
+                    ) : on ? (
+                      <button type="button" className="recx__cam-setmain" disabled={recording} onClick={() => setMainCamId(d.deviceId)}>
+                        {t('rec.setMainCam')}
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="recx__step">
+            <div className="recx__step-head">
+              <span className="recx__step-n">3</span>
+              <h3 className="recx__h">{t('rec.step.mic')}</h3>
+            </div>
+            <Select
+              ariaLabel={t('rec.mic')}
+              wide
+              value={micId ?? ''}
+              disabled={recording}
+              options={[{ value: '', label: t('rec.noMic') }, ...mics.map((d) => ({ value: d.deviceId, label: d.label || d.deviceId.slice(0, 8) }))]}
+              onChange={(v) => setMicId(v || null)}
+            />
+            <div className="recx__meter">
+              <LevelBars level={level.level} clip={level.clip} off={!micStream} wide />
+              {level.clip && <Badge tone="danger">{t('rec.clip')}</Badge>}
+            </div>
+            {info?.os !== 'linux' && <Switch label={t('rec.systemAudio')} checked={systemAudio} disabled={recording} onChange={setSystemAudio} />}
+          </section>
+
+          {recording ? (
+            <button type="button" className="recx__big-go is-stop" disabled={status.state === 'stopping'} onClick={() => void stop()}>
+              <Square size={14} fill="currentColor" /> {status.state === 'stopping' ? st('rec.saving') : t('rec.stop')}
+            </button>
+          ) : (
+            <button type="button" className="recx__big-go" disabled={!canStart} onClick={() => void start()} data-testid="record-start">
+              <Circle size={14} fill="currentColor" /> {ingesting ? t('rec.ingesting') : count !== null ? String(count) : t('rec.start')}
+            </button>
+          )}
           <p className="st-note">{t('rec.hotkeys', { ng: `${mod}N`, imp: `${mod}M` })}</p>
+
+          <details className="recx__details">
+            <summary>{t('rec.details')}</summary>
+            <SettingRow label={st('rec.resolution')}>
+              <Select ariaLabel={st('rec.resolution')} value={res} disabled={recording} options={RESOLUTIONS.map((r) => ({ value: r.id, label: r.id }))} onChange={setRes} />
+            </SettingRow>
+            <SettingRow label="fps">
+              <Select ariaLabel="fps" value={fps} disabled={recording} options={[24, 30, 60].map((f) => ({ value: f, label: `${f} fps` }))} onChange={setFps} />
+            </SettingRow>
+          </details>
           {status.error && <div className="notice err">{status.error}</div>}
         </aside>
       </div>

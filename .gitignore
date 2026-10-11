@@ -9,3 +9,7 @@ coverage/
 apps/desktop/resources/cli/
 brand/*.iconset/
 apps/desktop/resources/templates/
+
+# local secrets
+.env
+.env.*

@@ -33,6 +33,10 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           SOLOCUT_REBUILD_NATIVE: ${{ matrix.target == 'linux' && '1' || '' }}
+          # one-button YouTube / TikTok connect (desktop OAuth client ids; the TikTok secret stays in the token worker)
+          SOLOCUT_YOUTUBE_CLIENT_ID: ${{ secrets.SOLOCUT_YOUTUBE_CLIENT_ID }}
+          SOLOCUT_YOUTUBE_CLIENT_SECRET: ${{ secrets.SOLOCUT_YOUTUBE_CLIENT_SECRET }}
+          SOLOCUT_TIKTOK_CLIENT_KEY: ${{ secrets.SOLOCUT_TIKTOK_CLIENT_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: solocut-${{ matrix.target }}

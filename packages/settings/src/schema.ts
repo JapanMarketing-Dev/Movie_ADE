@@ -42,6 +42,19 @@ const Recording = z.object({
   keystrokeOverlay: z.boolean().default(true),
 });
 
+/**
+ * Recording region (desktop Record screen,「範囲を選ぶ」): a rectangle of one display in that display's physical pixels,
+ * relative to its top-left. null = the whole display. The recorder crops the screen stream to it.
+ */
+export const RecordRegionSchema = z.object({
+  displayId: z.string().min(1),
+  x: z.number().int().min(0),
+  y: z.number().int().min(0),
+  width: z.number().int().min(32),
+  height: z.number().int().min(32),
+});
+const RecordSection = z.object({ region: RecordRegionSchema.nullable().default(null) });
+
 const Transcription = z.object({
   engine: z.enum(['whisper.cpp']).default('whisper.cpp'),
   model: z.enum(['large-v3-turbo-q5', 'small']).default('large-v3-turbo-q5'),
@@ -49,8 +62,11 @@ const Transcription = z.object({
 });
 
 const Decision = z.object({
-  /** 'auto' = the first installed agent CLI (claude-cli → codex-cli → gemini-cli), else off: runs on the user's subscription. */
-  provider: z.enum(['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'off', 'ollama', 'openai', 'typesafe', 'custom']).default('auto'),
+  /**
+   * Optional and off by default: nothing in the pipeline requires it (the agent judges, rules decide the rest).
+   * 'auto' = the first installed agent CLI (claude-cli → codex-cli → gemini-cli). Not shown in the app.
+   */
+  provider: z.enum(['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'off', 'ollama', 'openai', 'typesafe', 'custom']).default('off'),
   model: z.string().default('qwen3-vl'),
   endpoint: z.string().url().optional(),
   apiKeyRef: z.string().optional(),
@@ -70,13 +86,10 @@ const ImageProvider = z.object({
   model: z.string().optional(),
 });
 
+/** Images are made inside the subscriptions (the agent asks Codex / Gemini CLI); API providers only when added by hand. */
 const ImageGen = z.object({
-  order: z.array(z.string()).default(['codex', 'gemini', 'openai']),
-  providers: z.record(z.string(), ImageProvider).default({
-    codex: { via: 'subscription' },
-    gemini: { via: 'api', apiKeyRef: 'gemini' },
-    openai: { via: 'api', apiKeyRef: 'openai', model: 'gpt-image-2' },
-  }),
+  order: z.array(z.string()).default(['codex']),
+  providers: z.record(z.string(), ImageProvider).default({ codex: { via: 'subscription' } }),
 });
 
 const Library = z.object({
@@ -108,10 +121,18 @@ const Updates = z.object({ channel: z.enum(['stable', 'beta']).default('stable')
 const Telemetry = z.object({ crashReports: z.boolean().default(true) });
 
 const Autopilot = z.object({
+  /** After a recording is ingested, the app sends the `finish` prompt to the agent by itself. */
+  autoStart: z.boolean().default(true),
   stopBefore: z.array(z.string()).default(['publish']),
   maxFixLoops: z.number().int().min(0).max(20).default(3),
   notify: z.array(z.enum(['done', 'needs-human', 'error'])).default(['done', 'needs-human']),
   budget: z.object({ decisionUsd: z.number().min(0).default(2) }).prefault({}),
+});
+
+/** The user's own text for the two prompts (absent or blank = the built-in default, see prompts.ts). */
+const Prompts = z.object({
+  finish: z.string().max(50_000).optional(),
+  publish: z.string().max(50_000).optional(),
 });
 
 /** Workspace panes the user toggled / resized (desktop). Widths in px. */
@@ -125,6 +146,11 @@ const Ui = z.object({
   }).prefault({}),
 });
 
+/** Master folder: every new video is a subfolder `<root>/<YYYY-MM-DD>-<slug-or-HHMM>/`. Absolute, or `~/…` (see resolveVideosRoot). */
+const Videos = z.object({
+  root: z.string().regex(/^(~(?=[\\/]|$)|\/|[A-Za-z]:[\\/]|\\\\)/, 'must be an absolute path or start with ~/').default('~/Movies/Solocut'),
+});
+
 /** First-run onboarding: when it was finished (null = not yet). */
 const Onboarding = z.object({ completedAt: z.iso.datetime({ offset: true }).nullable().default(null) });
 
@@ -134,8 +160,10 @@ export const SettingsSchema = z.object({
   appearance: Appearance.prefault({}),
   ui: Ui.prefault({}),
   onboarding: Onboarding.prefault({}),
+  videos: Videos.prefault({}),
   agents: Agents.prefault({}),
   recording: Recording.prefault({}),
+  record: RecordSection.prefault({}),
   transcription: Transcription.prefault({}),
   decision: Decision.prefault({}),
   imageGen: ImageGen.prefault({}),
@@ -146,6 +174,7 @@ export const SettingsSchema = z.object({
   updates: Updates.prefault({}),
   telemetry: Telemetry.prefault({}),
   autopilot: Autopilot.prefault({}),
+  prompts: Prompts.prefault({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

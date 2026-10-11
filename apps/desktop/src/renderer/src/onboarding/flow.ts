@@ -79,3 +79,15 @@ export function markOnboarding(storage: StorageLike | null, how: 'done' | 'skipp
 
 /** Agents worth suggesting when none is installed, in the order of docs/11 `agents.order`. */
 export const SUGGESTED_AGENTS = ['claude', 'codex', 'gemini'] as const;
+
+// ---- master folder ----
+/** Shown until the user picks it: settings `videos.root` (the master folder, docs SPEC request 14). */
+export const DEFAULT_VIDEOS_ROOT = '~/Movies/Solocut';
+
+/** Was the master folder ever chosen? True when the raw settings.json has a non-empty `videos.root`. */
+export function videosRootChosen(json: unknown): boolean {
+  if (!json || typeof json !== 'object') return false;
+  const v = (json as { videos?: unknown }).videos;
+  const root = v && typeof v === 'object' ? (v as { root?: unknown }).root : undefined;
+  return typeof root === 'string' && root.trim().length > 0;
+}

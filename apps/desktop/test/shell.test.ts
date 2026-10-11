@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatShortcut, matchesShortcut, setShortcutPlatform, shortcutFor, shortcutLabel, SHORTCUT_SPECS, type KeyLike } from '../src/renderer/src/shell/shortcut';
-import { modeOf, needsProject, parseScreen, screenForMode, showsVariant, MODES, SCREENS } from '../src/renderer/src/shell/modes';
+import { modeOf, needsProject, parseNavigateDetail, parseScreen, screenForMode, sidebarActive, sidebarPages, MODES, SCREENS } from '../src/renderer/src/shell/modes';
 import { clampSidebarWidth, DEFAULT_LAYOUT, parseLayout, setPanel, SIDEBAR_MAX, SIDEBAR_MIN, togglePanel } from '../src/renderer/src/shell/layout';
 import { analysisProgress, dayBucket, formatBytes, formatElapsed, initialOf, shortPath, summarizePipeline, summarizeTools, updatePill } from '../src/renderer/src/shell/format';
 import { fuzzyScore, matchesAll, normalize, rankItems } from '../src/renderer/src/shell/search';
@@ -66,19 +66,43 @@ describe('modes', () => {
     expect(modeOf('review')).toBe('review');
     expect(modeOf('publish')).toBe('publish');
     expect(modeOf('thumbnails')).toBe('publish');
-    for (const s of ['home', 'archive', 'library', 'settings'] as const) expect(modeOf(s)).toBeNull();
+    for (const s of ['home', 'library', 'settings'] as const) expect(modeOf(s)).toBeNull();
   });
   it('round-trips mode → screen → mode', () => {
     for (const m of MODES) expect(modeOf(screenForMode(m))).toBe(m);
     expect(screenForMode('publish', 'thumbnails')).toBe('thumbnails');
   });
-  it('knows which screens need a project and show the variant switcher', () => {
+  it('knows which screens need a project', () => {
     expect(needsProject('home')).toBe(false);
     expect(needsProject('settings')).toBe(false);
+    expect(needsProject('library')).toBe(false);
     expect(needsProject('workspace')).toBe(true);
-    expect(showsVariant('workspace')).toBe(true);
-    expect(showsVariant('review')).toBe(true);
-    expect(showsVariant('record')).toBe(false);
+    expect(needsProject('thumbnails')).toBe(true);
+  });
+  it('has no archive / variant screens any more (one 16:9 video per project)', () => {
+    expect(SCREENS).not.toContain('archive');
+    expect(parseScreen('archive')).toBeNull();
+    expect(parseScreen('tiktok')).toBeNull();
+  });
+  it('parses solocut:navigate details (string or { screen }), ignoring anything else', () => {
+    expect(parseNavigateDetail('record')).toBe('record');
+    expect(parseNavigateDetail('workspace')).toBe('workspace');
+    expect(parseNavigateDetail('edit')).toBe('workspace');
+    expect(parseNavigateDetail({ screen: 'publish' })).toBe('publish');
+    for (const bad of [undefined, null, 42, '', 'nope', {}, { screen: 3 }, ['record'], { screen: '__proto__' }]) expect(parseNavigateDetail(bad)).toBeNull();
+  });
+  it('sidebar: ホーム, the four modes, ライブラリ, 設定; modes other than 撮影 need a video', () => {
+    const none = sidebarPages(false);
+    expect(none.map((p) => p.screen)).toEqual(['home', 'record', 'workspace', 'review', 'publish', 'library', 'settings']);
+    expect(none.filter((p) => p.disabled).map((p) => p.screen)).toEqual(['workspace', 'review', 'publish']);
+    expect(sidebarPages(true).some((p) => p.disabled)).toBe(false);
+    for (const p of none) expect(SCREENS).toContain(p.screen);
+  });
+  it('sidebar highlights 投稿 on the thumbnails tab too', () => {
+    expect(sidebarActive('publish', 'thumbnails')).toBe(true);
+    expect(sidebarActive('publish', 'publish')).toBe(true);
+    expect(sidebarActive('workspace', 'review')).toBe(false);
+    expect(sidebarActive('home', 'home')).toBe(true);
   });
   it('parses navigation requests, rejecting unknown screens', () => {
     for (const s of SCREENS) expect(parseScreen(s)).toBe(s);
@@ -216,9 +240,24 @@ describe('analysis progress and update pill', () => {
     expect(updatePill(null)).toBeNull();
     expect(updatePill({ status: 'idle', current: '0.1.0' })).toBeNull();
     expect(updatePill({ status: 'error', current: '0.1.0' })).toBeNull();
-    expect(updatePill({ status: 'ready', current: '0.1.0', latest: '0.2.0' })).toEqual({ kind: 'ready', version: '0.2.0' });
+    expect(updatePill({ status: 'ready', current: '0.1.0', latest: '0.2.0' })).toEqual({ kind: 'ready', version: '0.2.0', requested: false });
     expect(updatePill({ status: 'downloading', current: '0.1.0', latest: '0.2.0', progress: 0.426 })).toEqual({ kind: 'downloading', version: '0.2.0', progress: 43 });
     expect(updatePill({ status: 'notify-only', current: '0.1.0', latest: '0.2.0' })?.kind).toBe('available');
+    expect(updatePill({ status: 'checking', current: '0.1.0' })).toBeNull();
+    expect(updatePill({ status: 'up-to-date', current: '0.1.0', latest: '0.1.0' })).toBeNull();
+  });
+  it('update pill: a ready update waiting for the take / the agent, and a scheduled restart', () => {
+    expect(updatePill({ status: 'ready', current: '0.1.0', latest: '0.2.0', blockedBy: 'recording' })).toEqual({ kind: 'waiting', version: '0.2.0', reason: 'recording', requested: false });
+    expect(updatePill({ status: 'ready', current: '0.1.0', latest: '0.2.0', blockedBy: 'agent', restartRequested: true })).toEqual({ kind: 'waiting', version: '0.2.0', reason: 'agent', requested: true });
+    expect(updatePill({ status: 'ready', current: '0.1.0', latest: '0.2.0', restartRequested: true })).toEqual({ kind: 'ready', version: '0.2.0', requested: true });
+    // a stale blockedBy outside "ready" does not matter
+    expect(updatePill({ status: 'downloading', current: '0.1.0', latest: '0.2.0', progress: 0.5, blockedBy: 'recording' })?.kind).toBe('downloading');
+  });
+  it('update pill: download progress is clamped to 0..100', () => {
+    expect(updatePill({ status: 'downloading', current: '0', latest: '1', progress: -1 })).toMatchObject({ progress: 0 });
+    expect(updatePill({ status: 'downloading', current: '0', latest: '1', progress: 7 })).toMatchObject({ progress: 100 });
+    expect(updatePill({ status: 'downloading', current: '0', latest: '1' })).toMatchObject({ progress: 0, version: '1' });
+    expect(updatePill({ status: 'ready', current: '0' })).toMatchObject({ version: '' });
   });
 });
 

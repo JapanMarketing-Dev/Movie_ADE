@@ -1,10 +1,11 @@
 // Pure OAuth helpers for the installed-app flow (RFC 8252): PKCE (S256), the Google authorization URL and the
-// loopback callback parsing.
+// loopback callback parsing (shared with TikTok, see tiktokApi.ts).
 import { createHash, randomBytes } from 'node:crypto';
 
 export const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 export const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
 export const GOOGLE_REVOKE = 'https://oauth2.googleapis.com/revoke';
+// upload + thumbnails.set; force-ssl also covers channels.list mine=true (the connected channel's name)
 export const YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.force-ssl'];
 
 export function base64url(b: Buffer): string {
@@ -38,9 +39,9 @@ export function authUrl(o: { clientId: string; redirectUri: string; challenge: s
 export type CallbackResult = { ok: true; code: string } | { ok: false; error: string } | { ok: 'ignore' };
 
 /** Parses the loopback request URL. Ignores unrelated paths (favicon); rejects a wrong state. */
-export function parseCallback(reqUrl: string, expectedState: string): CallbackResult {
+export function parseCallback(reqUrl: string, expectedState: string, paths: readonly string[] = ['/', '/callback', '/callback/']): CallbackResult {
   const u = new URL(reqUrl, 'http://127.0.0.1');
-  if (u.pathname !== '/' && u.pathname !== '/callback') return { ok: 'ignore' };
+  if (!paths.includes(u.pathname)) return { ok: 'ignore' };
   const err = u.searchParams.get('error');
   if (err) return { ok: false, error: err };
   if (u.searchParams.get('state') !== expectedState) return { ok: false, error: 'state mismatch' };
@@ -66,9 +67,9 @@ export function refreshRequestBody(o: { clientId: string; clientSecret?: string;
   return b;
 }
 
-/** multipart/related body for captions.insert (JSON metadata + caption file). */
-export function multipartRelated(meta: unknown, body: Buffer, bodyType: string, boundary = `solocut${Date.now().toString(36)}`): { body: Buffer; contentType: string } {
-  const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: ${bodyType}\r\n\r\n`;
-  const tail = `\r\n--${boundary}--\r\n`;
-  return { body: Buffer.concat([Buffer.from(head), body, Buffer.from(tail)]), contentType: `multipart/related; boundary=${boundary}` };
+/** `channels.list?part=snippet&mine=true` response → the channel title. */
+export function channelTitle(j: unknown): string | null {
+  const items = (j as { items?: { snippet?: { title?: unknown } }[] } | null)?.items;
+  const t = Array.isArray(items) ? items[0]?.snippet?.title : undefined;
+  return typeof t === 'string' && t ? t : null;
 }

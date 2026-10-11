@@ -46,9 +46,10 @@ function minidump(opts: { code: number; address: bigint; platformId?: number; mo
     const at = modulesAt + 4 + i * 108
     buf.writeBigUInt64LE(m.base, at)
     buf.writeUInt32LE(m.size, at + 8)
-    buf.writeUInt32LE(names[i].at, at + 20)
-    buf.writeUInt32LE(names[i].bytes.length, names[i].at)
-    names[i].bytes.copy(buf, names[i].at + 4)
+    const name = names[i]!
+    buf.writeUInt32LE(name.at, at + 20)
+    buf.writeUInt32LE(name.bytes.length, name.at)
+    name.bytes.copy(buf, name.at + 4)
   })
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
 }
@@ -141,7 +142,7 @@ function richMinidump(opts: { address: bigint; stack: bigint[]; threadName?: str
     modules.writeBigUInt64LE(m.base, at)
     modules.writeUInt32LE(m.size, at + 8)
     modules.writeUInt32LE(m.stamp ?? 0, at + 16)
-    modules.writeUInt32LE(moduleNames[i], at + 20)
+    modules.writeUInt32LE(moduleNames[i]!, at + 20)
     const cv = cvs[i]
     if (cv) { modules.writeUInt32LE(cv.size, at + 76); modules.writeUInt32LE(cv.at, at + 80) }
   })
@@ -150,7 +151,7 @@ function richMinidump(opts: { address: bigint; stack: bigint[]; threadName?: str
   head.write('MDMP', 0, 'latin1')
   head.writeUInt32LE(5, 8)
   head.writeUInt32LE(32, 12)
-  ;[[6, exceptionAt], [7, systemAt], [3, threadsAt], [24, namesAt], [4, modulesAt]].forEach(([type, rva], i) => {
+  ;([[6, exceptionAt], [7, systemAt], [3, threadsAt], [24, namesAt], [4, modulesAt]] as const).forEach(([type, rva], i) => {
     head.writeUInt32LE(type, 32 + i * 12)
     head.writeUInt32LE(rva, 32 + i * 12 + 8)
   })

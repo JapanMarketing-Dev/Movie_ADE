@@ -19,9 +19,16 @@ describe('IPC registry', () => {
   });
 
   it('has the channels the app depends on', () => {
-    for (const c of ['project:snapshot', 'terminal:create', 'agent:send', 'record:append', 'settings:write', 'update:restart']) expect(isInvokeChannel(c)).toBe(true);
+    for (const c of ['project:snapshot', 'terminal:create', 'agent:send', 'record:append', 'settings:set', 'update:restart']) expect(isInvokeChannel(c)).toBe(true);
     expect(isSendChannel('terminal:write')).toBe(true);
     expect(isEventChannel('agent:state')).toBe(true);
+  });
+
+  it('has no JSON-file editing or API key channels (settings are plain controls; no API keys in the app)', () => {
+    for (const c of ['settings:validate', 'settings:write', 'prompts:readFile', 'prompts:validate', 'prompts:writeFile', 'secrets:status', 'secrets:set']) {
+      expect(isInvokeChannel(c), c).toBe(false);
+    }
+    for (const c of ['settings:read', 'settings:set', 'prompts:list', 'prompts:render']) expect(isInvokeChannel(c), c).toBe(true);
   });
 
   it('rejects unknown, prototype and non-string names', () => {

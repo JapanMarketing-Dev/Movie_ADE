@@ -28,13 +28,16 @@ export type CliProvider = (typeof CLI_PROVIDERS)[number];
 export const isCliProvider = (p: string): p is CliProvider => (CLI_PROVIDERS as readonly string[]).includes(p);
 /** The executable each CLI provider runs. */
 export const CLI_COMMANDS: Record<CliProvider, string> = { 'claude-cli': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
+const KNOWN_PROVIDERS: readonly Provider[] = ['ollama', 'openai', 'typesafe', 'custom', 'off', ...CLI_PROVIDERS];
 
 /**
- * `decision.provider: 'auto'` → the first installed agent CLI (claude → codex → gemini), else 'off'.
- * `which` resolves a command on PATH (e.g. @solocut/toolchain whichSync).
+ * The decision model is optional and off by default (settings `decision.provider: 'off'`): callers fall back to the
+ * agent's own judgement and the rules. `'auto'` → the first installed agent CLI (claude → codex → gemini), else 'off';
+ * empty or unknown values → 'off'. `which` resolves a command on PATH (e.g. @solocut/toolchain whichSync).
  */
-export function resolveProvider(setting: string, which: (cmd: string) => string | null): Provider {
-  if (setting !== 'auto') return setting as Provider;
+export function resolveProvider(setting: string | undefined | null, which: (cmd: string) => string | null): Provider {
+  const s = (setting ?? '').trim();
+  if (s !== 'auto') return (KNOWN_PROVIDERS as readonly string[]).includes(s) ? (s as Provider) : 'off';
   for (const p of CLI_PROVIDERS) if (which(CLI_COMMANDS[p])) return p;
   return 'off';
 }

@@ -109,7 +109,7 @@ const tlPath = (w: Where) => (typeof w === 'string' ? join(w, 'timeline.json') :
 export function readTimelineRaw(w: Where): unknown {
   const f = tlPath(w);
   if (typeof w !== 'string' && w.variant && !existsSync(f)) {
-    throw new CliError('no-variant', `variant ${w.variant} does not exist yet; create it with \`solocut derive --target ${w.variant}\``);
+    throw new CliError('no-variant', `variant ${w.variant} does not exist (projects make one 16:9 video; drop --variant)`);
   }
   return readJsonFile(f);
 }
@@ -182,7 +182,8 @@ export function writeStatus(p: Project, list: StepState[]): void {
   writeAtomic(paths(p.dir).status, JSON.stringify(list, null, 2) + '\n');
 }
 
-export function setStep(p: Project, step: PipelineStep, state: StepState['state'], note?: string): StepState[] {
+/** Record a step's state. Steps outside the template pipeline (older per-variant ones) are stored but never shown. */
+export function setStep(p: Project, step: PipelineStep | (string & {}), state: StepState['state'], note?: string): StepState[] {
   let tpl: Template | undefined;
   try {
     tpl = projectTemplate(p);
@@ -190,7 +191,7 @@ export function setStep(p: Project, step: PipelineStep, state: StepState['state'
     tpl = undefined;
   }
   const list = readStatus(p, tpl);
-  const entry: StepState = { step, state, at: new Date().toISOString(), ...(note ? { note } : {}) };
+  const entry: StepState = { step: step as PipelineStep, state, at: new Date().toISOString(), ...(note ? { note } : {}) };
   const i = list.findIndex((s) => s.step === step);
   if (i >= 0) list[i] = entry;
   else list.push(entry);

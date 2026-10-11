@@ -61,7 +61,7 @@ describe('localize (Japanese for English-only CLI messages)', () => {
     ['invalid take id: x (take_…)', 'take id が正しくありません: x (take_…)'],
     ["Unknown option '--x'. To specify …", '不明なオプション: --x（solocut help で確認してください）'],
     ['the project is locked by another solocut process (/p/.solocut/lock)', 'ほかの solocut がこのプロジェクトを使っています（/p/.solocut/lock）。終わるのを待ってから、もう一度実行してください'],
-    ['variant tiktok does not exist yet; create it with `solocut derive --target tiktok`', 'tiktok の版はまだありません。`solocut derive --target tiktok` で作ってください'],
+    ['variant tiktok does not exist (projects make one 16:9 video; drop --variant)', 'tiktok の版はありません（動画は 16:9 の1本だけです。--variant を外してください）'],
     ["argument: Expected property name or '}' in JSON at position 1", "JSON として読めません（argument）: Expected property name or '}' in JSON at position 1"],
   ])('%s', (en, ja) => {
     expect(localize(en, 'ja')).toBe(ja);

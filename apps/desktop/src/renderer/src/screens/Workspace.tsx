@@ -1,8 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Check, FolderOpen, Pause, Play, RefreshCw, Sparkles, Video, X } from 'lucide-react';
-import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, TimelineOverview, Variant } from '@shared/types';
-import { variantArgs } from '@shared/project';
-import { LangContext, useT, type TKey } from '../i18n';
+import { FolderOpen, Pause, Play, RefreshCw, Sparkles, Video } from 'lucide-react';
+import type { ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, Variant } from '@shared/types';
+import { LangContext, useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { TerminalPane } from '../components/TerminalPane';
 import { sendToAgent } from '../terminal/agentSend';
@@ -11,16 +10,18 @@ import { AnalysisBar } from '../components/AnalysisBar';
 import { TimelineView } from './parts/Timeline';
 import { FindingsPanel } from './parts/Findings';
 import { ReviewQueue, StepBar } from './parts/WorkspaceParts';
+import { RawPlayer } from './parts/RawPlayer';
+import { finishPrompt, playerSource } from './parts/workspaceModel';
 
 const RIGHT_W_KEY = 'solocut.ws.rightWidth';
+/** One video per project: the workspace always shows the main timeline. */
+const VARIANT: Variant = 'main';
 
 export function Workspace({
   project,
   visible,
   toast,
   onRecord,
-  variant: controlledVariant,
-  onVariantChange,
   focus = 'edit',
   showTerminal = true,
   showCenter = true,
@@ -30,28 +31,19 @@ export function Workspace({
   visible: boolean;
   toast: (m: string) => void;
   onRecord: () => void;
-  /** controlled by the shell's title bar (YouTube / TikTok / Shorts); uncontrolled when omitted */
+  /** ignored: one video per project (kept so older callers still type-check) */
   variant?: Variant;
   onVariantChange?: (v: Variant) => void;
   /** 編集 (preview + timeline + terminal) or 確認 (preview + review list first, no terminal) */
   focus?: 'edit' | 'review';
   showTerminal?: boolean;
   showCenter?: boolean;
-  /** inside the shell: the title bar already has the variant switcher and the record button */
+  /** inside the shell: the title bar already has the record button */
   embedded?: boolean;
 }) {
   const t = useT();
   const lang = useContext(LangContext);
   const [fbActive, setFbActive] = useState(false);
-  const [ownVariant, setOwnVariant] = useState<Variant>('main');
-  const variant = controlledVariant ?? ownVariant;
-  const setVariant = useCallback(
-    (v: Variant) => {
-      setOwnVariant(v);
-      onVariantChange?.(v);
-    },
-    [onVariantChange],
-  );
   const [snap, setSnap] = useState<ProjectSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -59,32 +51,28 @@ export function Workspace({
   const [rightW, setRightW] = useState<number>(() => Number(localStorage.getItem(RIGHT_W_KEY)) || 0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const dir = project?.dir ?? null;
-  const prevDir = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!dir) return;
     setLoading(true);
     try {
-      setSnap(await api.invoke('project:snapshot', dir, variant));
+      setSnap(await api.invoke('project:snapshot', dir, VARIANT));
     } catch (e) {
       toast(errMsg(e));
     } finally {
       setLoading(false);
     }
-  }, [dir, variant, toast]);
+  }, [dir, toast]);
 
   const loadPrompts = useCallback(async () => {
     setPrompts(await api.invoke('prompts:list', dir ?? undefined));
   }, [dir]);
 
   useEffect(() => {
-    if (prevDir.current !== dir && controlledVariant === undefined) setVariant('main');
-    prevDir.current = dir;
     setSnap(null);
     setSelected(null);
     void refresh();
     void loadPrompts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, refresh, loadPrompts]);
 
   // xterm refits itself when the terminal column is shown again (terminalClient's ResizeObserver)
@@ -121,27 +109,9 @@ export function Workspace({
 
   const decide = async (item: ReviewItem, decision: 'accept' | 'reject') => {
     if (!dir) return;
-    const r = await api.invoke('project:review', dir, item, decision, variant);
+    const r = await api.invoke('project:review', dir, item, decision, VARIANT);
     if (!r.ok) toast(r.error ?? t('common.error'));
     else void refresh();
-  };
-
-  const renderPreview = async () => {
-    if (!dir) return;
-    setLoading(true);
-    const r = await api.invoke('project:cli', dir, ['render', '--preview', ...variantArgs(variant)]);
-    setLoading(false);
-    if (!r.ok) toast(r.error ?? t('common.error'));
-    void refresh();
-  };
-
-  const derive = async () => {
-    if (!dir || variant === 'main') return;
-    setLoading(true);
-    const r = await api.invoke('project:cli', dir, ['derive', '--target', variant]);
-    setLoading(false);
-    if (!r.ok) toast(r.error ?? t('common.error'));
-    void refresh();
   };
 
   const seek = (frame: number) => {
@@ -181,6 +151,8 @@ export function Workspace({
   }
 
   const ov = snap?.overview;
+  const shown = playerSource(snap);
+  const finish = finishPrompt(prompts, t('prompts.finish'));
   const style = rightW ? ({ '--right-w': `${rightW}px` } as React.CSSProperties) : undefined;
   const wsClass = ['ws', `focus-${focus}`, termShown ? '' : 'no-terminal', showCenter || !termShown ? '' : 'no-center', embedded ? 'embedded' : ''].filter(Boolean).join(' ');
 
@@ -188,16 +160,7 @@ export function Workspace({
     <div className={wsClass}>
       <div className="titlebar">
         <span className="title">{project.title}</span>
-        {project.template && <span className="pill mono">{project.template.id}</span>}
         <span className="grow" />
-        {!embedded && <div className="segmented" title={t('ws.variantHint')}>
-          {(['main', 'tiktok', 'youtube-shorts'] as Variant[]).map((v) => (
-            <button key={v} className={variant === v ? 'on' : ''} disabled={fbActive} onClick={() => setVariant(v)}>
-              {t(v === 'main' ? 'var.main' : v === 'tiktok' ? 'var.tiktok' : 'var.shorts')}
-              {snap && v !== 'main' && !snap.variants.includes(v) ? ' ·' : ''}
-            </button>
-          ))}
-        </div>}
         {!embedded && <button className="btn ghost small" onClick={onRecord}>
           <Video size={14} /> {t('nav.record')}
         </button>}
@@ -211,12 +174,12 @@ export function Workspace({
       <div className="ws-body" style={style}>
         <div className="ws-left">
           <div className="player">
-            {snap?.preview ? (
+            {shown === 'edited' && snap?.preview ? (
               <>
                 <video ref={videoRef} key={snap.preview.url} src={snap.preview.url} controls={!fbActive} preload="metadata" />
                 <FeedbackLayer
                   dir={project.dir}
-                  variant={variant}
+                  variant={VARIANT}
                   videoRef={videoRef}
                   previewPath={snap.preview.path}
                   fpsNum={snap.overview?.fpsNum ?? 30}
@@ -228,36 +191,22 @@ export function Workspace({
                 />
                 {fbActive && <MiniTransport videoRef={videoRef} />}
               </>
+            ) : shown === 'raw' && snap?.raw ? (
+              <RawPlayer raw={snap.raw} />
             ) : (
               <div className="placeholder">
-                {variant !== 'main' && snap && !snap.variants.includes(variant) ? (
-                  <>
-                    <span>{t('ws.notDerived')}</span>
-                    <button className="btn" disabled={loading} onClick={() => void derive()}>
-                      <Sparkles size={14} /> {t('ws.derive')}
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span>{t('ws.noPreview')}</span>
-                    <button className="btn" disabled={loading} onClick={() => void renderPreview()}>
-                      <Play size={14} /> {t('ws.renderPreview')}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-          {snap?.stale && (
-            <div className="section">
-              <div className="notice row" style={{ justifyContent: 'space-between' }}>
-                <span>{t('ws.stale')}</span>
-                <button className="btn small" disabled={loading} onClick={() => void derive()}>
-                  {t('ws.derive')}
+                <span>{t('ws.noVideo')}</span>
+                <button className="btn" onClick={onRecord}>
+                  <Video size={14} /> {t('nav.record')}
                 </button>
               </div>
-            </div>
-          )}
+            )}
+            {shown !== 'none' && !fbActive && (
+              <span className={`player-label is-${shown}`} title={shown === 'raw' ? t('ws.rawHint') : undefined} data-testid="player-label">
+                {t(shown === 'raw' ? 'ws.raw' : 'ws.edited')}
+              </span>
+            )}
+          </div>
           {snap && snap.errors.length > 0 && (
             <div className="section">
               {snap.errors.map((e) => (
@@ -268,12 +217,11 @@ export function Workspace({
             </div>
           )}
           <StepBar snap={snap} />
-          {variant === 'main' && <AnalysisBar dir={project.dir} toast={toast} />}
+          <AnalysisBar dir={project.dir} toast={toast} />
           <div className="section section--timeline">
             {ov ? (
               <TimelineView
                 ov={ov}
-                variant={variant}
                 selected={selected}
                 videoRef={videoRef}
                 onSelect={(id, start) => (setSelected(id), seek(start))}
@@ -288,7 +236,7 @@ export function Workspace({
           </div>
           {focus === 'review' && (
             <div className="section findings-sec">
-              <FindingsPanel dir={project.dir} variant={variant} onSeek={seek} />
+              <FindingsPanel dir={project.dir} variant={VARIANT} onSeek={seek} />
             </div>
           )}
         </div>
@@ -296,15 +244,10 @@ export function Workspace({
         <div className="ws-right">
           <TerminalPane projectDir={project.dir} visible={visible && termShown} toast={toast} />
           <div className="prompts">
-            <span className="dim" style={{ fontSize: 11, paddingRight: 4, flexShrink: 0 }}>
-              {t('prompts.title')}
-            </span>
-            {prompts.map((p) => (
-              <button key={p.id} className={`btn small ${p.autopilot ? 'autopilot' : ''}`} onClick={() => void sendPrompt(p)} title={p.agent ? `→ ${p.agent}` : p.id}>
-                {p.autopilot && <Sparkles size={12} color="#ff4a3d" />}
-                {p.label}
-              </button>
-            ))}
+            <button className="btn small autopilot" onClick={() => void sendPrompt(finish)} title={finish.agent ? `→ ${finish.agent}` : finish.id} data-testid="prompt-finish">
+              <Sparkles size={12} color="#ff4a3d" />
+              {finish.label}
+            </button>
           </div>
         </div>
       </div>

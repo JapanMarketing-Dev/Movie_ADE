@@ -1,5 +1,5 @@
 import type { Template } from './load.js';
-import { derivedTargets, expandPipeline, splitStep, stepText } from './next.js';
+import { stepText } from './next.js';
 
 // AGENTS.md generator (docs/04 「エージェントへの指示書」). CLAUDE.md only contains `@AGENTS.md`.
 
@@ -19,7 +19,6 @@ const CLI_JA: [string, string][] = [
   ['solocut sfx apply --json', 'テンプレートの効果音ルールで効果音を入れる'],
   ['solocut tracks apply --json', '顔・カーソルを追うズームとクリック・キー表示を入れる'],
   ['solocut masks from-analysis --json', '画面の個人情報にモザイクを入れる（要確認つき）'],
-  ['solocut derive --target tiktok --json', '本編から縦型の版を作る（--variant で版ごとに操作）'],
   ['solocut propose cuts --json', 'カットの候補を作って区間にする（--dry-run で書き込まない）'],
   ['solocut tl summary --json', '構成・区間の数・未解決の一覧。まず読むもの'],
   ['solocut tl show <id> --json', '1つの要素とその周り'],
@@ -35,6 +34,8 @@ const CLI_JA: [string, string][] = [
   ['solocut render --final --target youtube --json', '本番の書き出し'],
   ['solocut frame --at <フレーム|00:01:02:03> --json', '1フレームの静止画'],
   ['solocut check --json', '機械的チェック（checks/<run>/report.md）'],
+  ['solocut meta set --title … --description … --tags a,b', '投稿の内容を publish.json に書く（meta show / meta check で確認）'],
+  ['solocut thumb pick <画像>', 'サムネイルの画像を publish.json に設定する'],
   ['solocut step <step> done|skipped --note "<メモ>"', '手作業の手順を終えた印を付ける'],
   ['solocut past list|search|show|timeline', '過去の動画（アーカイブ）を参照する'],
   ['solocut config get|set|schema', '設定の読み書き'],
@@ -56,7 +57,6 @@ const CLI_EN: [string, string][] = [
   ['solocut sfx apply --json', 'Add sound effects from the template rules'],
   ['solocut tracks apply --json', 'Face/cursor-following zoom plus click and keystroke overlays'],
   ['solocut masks from-analysis --json', 'Mask private text on screen (marked for review)'],
-  ['solocut derive --target tiktok --json', 'Derive a vertical version from the main video (--variant to work on it)'],
   ['solocut propose cuts --json', 'Build segments from cut candidates (--dry-run writes nothing)'],
   ['solocut tl summary --json', 'Structure, segment count, open items. Read this first'],
   ['solocut tl show <id> --json', 'One element and its surroundings'],
@@ -72,6 +72,8 @@ const CLI_EN: [string, string][] = [
   ['solocut render --final --target youtube --json', 'Final render'],
   ['solocut frame --at <frame|00:01:02:03> --json', 'A still of one frame'],
   ['solocut check --json', 'Machine checks (checks/<run>/report.md)'],
+  ['solocut meta set --title … --description … --tags a,b', 'Write the post to publish.json (meta show / meta check)'],
+  ['solocut thumb pick <image>', 'Set the thumbnail image in publish.json'],
   ['solocut step <step> done|skipped --note "<note>"', 'Mark a manual step finished'],
   ['solocut past list|search|show|timeline', 'Look at past videos (archive)'],
   ['solocut config get|set|schema', 'Read and change settings'],
@@ -104,12 +106,10 @@ function table(rows: [string, string][], head: [string, string]): string {
 export function generateAgentsMd(t: Template, project: AgentsMdProject): string {
   const ja = project.lang === 'ja';
   const name = ja ? t.name.ja : t.name.en;
-  const variants = derivedTargets(t);
-  const steps = expandPipeline(t)
+  const steps = t.pipeline
     .map((s, i) => {
-      const txt = stepText(s, project.lang, variants);
-      const promptKey = splitStep(s).base === 'derive' ? 'vertical' : s;
-      const prompt = t.promptFiles[promptKey] ? (ja ? `（\`${t.promptFiles[promptKey]}\` に従う）` : ` (follow \`${t.promptFiles[promptKey]}\`)`) : '';
+      const txt = stepText(s, project.lang);
+      const prompt = t.promptFiles[s] ? (ja ? `（\`${t.promptFiles[s]}\` に従う）` : ` (follow \`${t.promptFiles[s]}\`)`) : '';
       return `${i + 1}. **${s}** — ${txt.do}${prompt}`;
     })
     .join('\n');
@@ -147,8 +147,8 @@ solocut next --json
 - 編集は \`solocut edit\` で行う。\`timeline.json\` を直接編集したら、必ず \`solocut validate\` を実行する
 - 編集には必ず理由を付ける（\`--reason\`）。理由は「なぜそうしたか」を1文で
 - 手順の合格条件を満たすまで、次の手順に進まない（\`solocut next\` が判断する）
-- 迷ったら、判定モデルの結果と下の編集方針に従う。それでも決まらなければ \`.solocut/questions.md\` に質問を書いて人に聞き、待たずに進められる手順を先に進める
-- 投稿はしない。投稿は人が承認してから
+- 迷ったら、下の編集方針に従って自分で決める（判定モデルは使わなくてよい）。自信がない判断には needsReview を付け、理由を書いて先へ進む。人に聞きたいことは \`.solocut/questions.md\` に書き、待たずに進められる手順を先に進める
+- 動画は 16:9 の1本だけ。投稿の内容は \`publish.json\` に書く。投稿はしない（人がアプリで確認して OK してから）
 - 長い出力は読まない。\`solocut tl summary\` → \`tl show\` / \`tl range\` の順に必要な部分だけ読む
 
 ## 手順（${t.id}）
@@ -219,8 +219,8 @@ Then follow \`do\` and \`commands\` from \`solocut next --json\`, run \`solocut 
 - Edit with \`solocut edit\`. If you edit \`timeline.json\` directly, always run \`solocut validate\`
 - Every edit needs a reason (\`--reason\`): one sentence on why
 - Do not move on until the step's pass condition is met (\`solocut next\` decides)
-- When unsure, follow the decision model and the editing policy below. If still undecided, write the question to \`.solocut/questions.md\` and continue with steps that do not depend on it
-- Never publish. Publishing needs a human's approval
+- When unsure, decide yourself following the editing policy below (no decision model needed). Mark unsure choices needsReview with a reason and move on. Write questions for the human to \`.solocut/questions.md\` and continue with steps that do not depend on them
+- One 16:9 video only. Write the post to \`publish.json\`. Never publish (the human checks it in the app and approves)
 - Do not read huge outputs: \`solocut tl summary\` first, then \`tl show\` / \`tl range\` for the parts you need
 
 ## Steps (${t.id})

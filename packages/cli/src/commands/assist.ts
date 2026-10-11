@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import {
-  applyTracks, benchmarkProfile, cameraMaterial, checkCameraSwitches, fpsValue, frameToTimecode, overlaysFromInputLogs,
+  applyTracks, benchmarkProfile, cameraMaterial, centerPerson, personCamera, suggestCameras, checkCameraSwitches, fpsValue, frameToTimecode, overlaysFromInputLogs,
   profileToTemplatePatch, sfxFromRules, type BenchmarkSample, type LicenseRef, type Mask, type Op, type SfxLibraryItem,
   type StyleProfile, type Timeline,
 } from '@solocut/core';
@@ -225,14 +225,17 @@ async function cmdMulticamMaterial(ctx: Ctx, args: string[]): Promise<void> {
   const segments = cameraMaterial(tl, an.tracks, words);
   const cameras = Object.entries(tl.sources).filter(([, s]) => s.kind === 'camera').map(([id, s]) => ({ id, role: s.kind === 'camera' ? s.role : 'other', take: 'take' in s ? s.take ?? null : null }));
   const check = checkCameraSwitches(tl, { words, ...(tpl.multicam ? { maxShotSec: tpl.multicam.maxShotSec, minShotSec: tpl.multicam.minShotSec } : {}) });
+  // the person camera (take.json role main → front) and a deterministic choice per segment: no decision model needed
+  const person = personCamera(tl, segments);
+  const suggestions = suggestCameras(segments, person);
   const warnings = [...an.warnings];
   if (!an.tracks.faces) warnings.push(t(ctx, '顔の解析（derived/analysis/faces.<素材>.json）がないので、顔の映り具合は分かりません', 'no face tracks (derived/analysis/faces.<source>.json): face visibility is unknown'));
   emit(ctx, {
-    variant: p.variant ?? 'main', cameras, segments, check,
+    variant: p.variant ?? 'main', cameras, person, suggestions, segments, check,
     rules: { maxShotSec: tpl.multicam?.maxShotSec ?? null, minShotSec: tpl.multicam?.minShotSec ?? null, prompt: tpl.promptFiles.multicam ?? null },
     files: an.files, warnings,
   }, () => [
-    t(ctx, `カメラ ${cameras.length} 台、区間 ${segments.length}。切り替えの判断は prompts/multicam.md に沿って`, `${cameras.length} camera(s), ${segments.length} segment(s). Decide the switches following prompts/multicam.md`),
+    t(ctx, `カメラ ${cameras.length} 台、区間 ${segments.length}。人物のカメラ: ${person ?? '-'}。切り替えの判断は prompts/multicam.md に沿って`, `${cameras.length} camera(s), ${segments.length} segment(s). Person camera: ${person ?? '-'}. Decide the switches following prompts/multicam.md`),
     ...segments.map((s) => `  ${s.segment} ${s.durationSec.toFixed(1)}s ${s.current ?? '-'} ${s.speaking ? t(ctx, '発話あり', 'speaking') : ''} ${s.cameras.map((c) => `${c.id}:${c.faceVisible === null ? '?' : Math.round(c.faceVisible * 100) + '%'}`).join(' ')}`),
     `${check.status === 'pass' ? '✓' : check.status === 'fail' ? '✗' : '!'} camera-switch: ${check.note}`,
     ...warnings.map((w) => `! ${w}`),
@@ -250,14 +253,19 @@ export async function cmdMulticam(ctx: Ctx, args: string[]): Promise<void> {
 async function cmdTracksApply(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, {
     'follow-clicks': { type: 'boolean' }, 'no-follow-clicks': { type: 'boolean' }, 'no-overlays': { type: 'boolean' }, 'dry-run': { type: 'boolean' },
+    center: { type: 'boolean' }, 'no-center': { type: 'boolean' },
   }, { max: 0 });
   if (values['follow-clicks'] && values['no-follow-clicks']) throw new CliError('usage', 'choose --follow-clicks or --no-follow-clicks');
+  if (values.center && values['no-center']) throw new CliError('usage', 'choose --center or --no-center');
   const p = openProject(ctx);
   const tl = readTimeline(p);
   const tpl = projectTemplate(p);
   const an = loadAnalysis(p.dir, tl);
   const followClicks = values['no-follow-clicks'] ? false : values['follow-clicks'] ? (tpl.zoom?.followClicks || true) : (tpl.zoom?.followClicks ?? false);
-  const segments = applyTracks(tl, an.tracks, { followClicks });
+  // the person's face stays centred in the camera's frame (template features.faceReframe; --no-center keeps hand-made crops)
+  const center = values['no-center'] ? false : values.center || tpl.features.faceReframe;
+  const centered = center ? centerPerson(tl, an.tracks) : null;
+  const segments = applyTracks(centered ? { ...tl, segments: centered.segments } : tl, an.tracks, { followClicks });
   const ops: Op[] = [];
   if (JSON.stringify(segments) !== JSON.stringify(tl.segments)) ops.push({ op: 'setSegments', segments });
   // click rings and keystroke badges come from the input logs; earlier generated ones (ov_click_* / ov_key_*) are rebuilt
@@ -280,9 +288,11 @@ async function cmdTracksApply(ctx: Ctx, args: string[]): Promise<void> {
   if (!an.files.length) warnings.push(t(ctx, '解析ファイル（顔・カーソル・キー）がありません', 'no analysis files (faces, cursor, keys)'));
   emit(ctx, {
     variant: p.variant ?? 'main', segmentsChanged: ops.some((o) => o.op === 'setSegments'), zoomKeyframesAdded: zooms, followClicks: !!followClicks,
+    center: centered ? centered.report : false,
     overlays, removedOverlays: removed, files: an.files, dryRun, changed: r.changed, warnings,
   }, () => [
     t(ctx, `追従ズームを反映しました（キーフレーム ${zooms >= 0 ? '+' : ''}${zooms}）。クリック・キー表示 ${overlays} 個`, `applied tracked zoom (${zooms >= 0 ? '+' : ''}${zooms} keyframes); ${overlays} click/key overlay(s)`),
+    ...(centered ? [t(ctx, `人物の顔を中央に: ${centered.report.centered.length} 区間（顔が見えない ${centered.report.noFace.length}・顔の解析なし ${centered.report.noTrack.length}）`, `face centred in ${centered.report.centered.length} segment(s) (no face ${centered.report.noFace.length}, no face track ${centered.report.noTrack.length})`)] : []),
     ...warnings.map((w) => `! ${w}`),
   ]);
 }
@@ -290,7 +300,7 @@ async function cmdTracksApply(ctx: Ctx, args: string[]): Promise<void> {
 export async function cmdTracks(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   if (sub === 'apply') return cmdTracksApply(ctx, rest);
-  throw new CliError('usage', 'usage: solocut tracks apply [--follow-clicks|--no-follow-clicks] [--no-overlays] [--dry-run]');
+  throw new CliError('usage', 'usage: solocut tracks apply [--center|--no-center] [--follow-clicks|--no-follow-clicks] [--no-overlays] [--dry-run]');
 }
 
 // ---------- bench profile / apply ----------

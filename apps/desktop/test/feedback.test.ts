@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { applyItemEdits, boxFrom, boxPoints, contentRect, feedbackAgentMessage, feedbackMarkdown, frameAt, normalizePoint, parseFeedbackShow, renumber, simplifyStroke } from '../src/shared/feedback';
-import { resolve } from 'node:path';
-import { parseCandidates, parseImages } from '../src/main/services/thumbs';
 
 describe('feedback geometry and time', () => {
   it('frame at a preview time', () => {
@@ -70,27 +68,5 @@ describe('feedback show results (CLI items.json)', () => {
     expect(renumber([{ n: 3 } as never, { n: 7 } as never]).map((x) => x.n)).toEqual([1, 2]);
     expect(feedbackAgentMessage('feedback/fb_1/', 'en')).toBe('Read feedback/fb_1/feedback.md and fix each item. Then run solocut render --preview and solocut check.');
     expect(feedbackAgentMessage('feedback/fb_1', 'ja')).toContain('feedback/fb_1/feedback.md を読んで');
-  });
-});
-
-describe('thumbnail CLI output', () => {
-  it('parses candidates with project-relative paths', () => {
-    const proj = resolve('/p');
-    const abs = resolve('/abs/c2.png');
-    const c = parseCandidates(proj, { candidates: [{ frame: 10, timecode: '00:00:00:10', image: 'renders/thumbnails/c1.png', score: 0.9 }, { frame: 'x' }, { image: abs, frame: 20 }] });
-    // paths are platform paths (backslashes and a drive letter on Windows)
-    expect(c).toEqual([{ frame: 10, timecode: '00:00:00:10', image: resolve(proj, 'renders/thumbnails/c1.png'), score: 0.9 }, { frame: 20, timecode: '', image: abs }]);
-    expect(parseCandidates('/p', null)).toEqual([]);
-  });
-  it('parses `thumb gen` thumbnails ({ format, file, provider })', () => {
-    const np = resolve('/np');
-    const imgs = parseImages(np, { thumbnails: [{ format: 'youtube', file: 'renders/thumbnails/youtube-1.jpg', base: 'x', provider: 'codex' }], errors: [] });
-    expect(imgs).toEqual([{ path: resolve(np, 'renders/thumbnails/youtube-1.jpg'), favorite: false, provider: 'codex' }]);
-  });
-  it('parses generated images (strings or objects)', () => {
-    const proj = resolve('/nonexistent-project');
-    const b = resolve('/x/b.jpg');
-    const imgs = parseImages(proj, { images: ['renders/thumbnails/a.png', { path: b, provider: 'codex' }, 5] });
-    expect(imgs).toEqual([{ path: resolve(proj, 'renders/thumbnails/a.png'), favorite: false }, { path: b, favorite: false, provider: 'codex' }]);
   });
 });

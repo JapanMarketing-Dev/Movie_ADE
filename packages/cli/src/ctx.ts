@@ -1,6 +1,6 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 
-export const CLI_VERSION = '0.1.2';
+export const CLI_VERSION = '0.2.0';
 
 export interface IO {
   cwd: string;
@@ -28,7 +28,7 @@ export interface Ctx {
   io: IO;
   json: boolean;
   projectFlag?: string;
-  /** --variant (docs/18): main (default) | tiktok | youtube-shorts. */
+  /** --variant: an older project's derived vertical video (tiktok | youtube-shorts); new projects make one video. */
   variant?: string;
   lang: Lang;
   /** Who is acting (history `by`). */

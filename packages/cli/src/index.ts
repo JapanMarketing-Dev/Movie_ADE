@@ -14,7 +14,6 @@ import { cmdPast } from './commands/past.js';
 import { cmdMeta } from './commands/meta.js';
 import { cmdThumb } from './commands/thumb.js';
 import { cmdFeedback } from './commands/feedback.js';
-import { cmdDerive } from './commands/derive.js';
 import { cmdPublish } from './commands/publish.js';
 import { explainError, localize } from './errors.js';
 import { cmdBench, cmdMasks, cmdMulticam, cmdSfx, cmdTracks } from './commands/assist.js';
@@ -66,7 +65,6 @@ const COMMANDS: Record<string, Handler> = {
   meta: cmdMeta,
   thumb: cmdThumb,
   feedback: cmdFeedback,
-  derive: cmdDerive,
   sfx: cmdSfx,
   masks: cmdMasks,
   multicam: cmdMulticam,
@@ -86,7 +84,7 @@ const HELP: Record<Lang, string> = {
   ja: `solocut ${CLI_VERSION} — テンプレートで動画を編集する CLI（エージェント向け。どのコマンドも --json 可）
 
 はじめに
-  init [dir] --template <id>     プロジェクトを作る（AGENTS.md / CLAUDE.md も生成）
+  init [dir] [--template tech]   プロジェクトを作る（AGENTS.md / CLAUDE.md も生成）
   status / next                  進み具合 / 次にやること（まずこれ）
   step <step> done|skipped       手作業の手順を終えた印
 素材
@@ -100,17 +98,16 @@ const HELP: Record<Lang, string> = {
   captions build                 字幕を作る
   multicam material              カメラ切り替えの材料 → edit split-for-switch --segment <id> --at <素材フレーム,…>
   sfx apply                      テンプレートの効果音ルールで効果音を入れる
-  tracks apply                   顔・カーソルを追うズーム、クリック・キー表示
+  tracks apply                   人物の顔を中央に保つ切り抜き、カーソルを追うズーム、クリック・キー表示
   masks from-analysis            画面の個人情報にモザイク（要確認）
   tl summary|show|range|query|why  timeline.json を必要な分だけ読む
 書き出しと確認
   render --preview | --final [--target youtube]
   frame --at <frame|timecode>    1フレームの静止画
   check                          機械的チェック（checks/<run>/report.md）
-  thumb candidates | thumb gen --frame <tc> --title "見出し"   サムネイル
-  derive --target tiktok|youtube-shorts   本編から縦型の版を作る（--variant で各コマンドの対象に）
-  render --all / check --all     3本まとめて
-  meta set --title … --description … --tags a,b | meta show   投稿文（renders/<target>/metadata.md）
+  thumb pick <画像> | thumb candidates | thumb gen --provider codex|frame --title "見出し"   サムネイル（publish.json）
+  meta set --title … --description … --tags a,b | meta show | meta check   投稿の内容（publish.json）
+  publish upload [--target youtube|tiktok]   publish.json の内容でアプリに投稿を頼み、結果を待つ（人が OK してから）
   publish record --target t --status published --url <url>   投稿の結果を記録
   feedback import <dir> | list | show <id> | done <id>        動画フィードバック
 そのほか
@@ -119,11 +116,11 @@ const HELP: Record<Lang, string> = {
   mcp                            MCP サーバー（stdio）
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
-共通: --json（機械向けの出力） --project <dir>（プロジェクトの場所） --variant main|tiktok|youtube-shorts --by human|agent --agent <名前>`,
+共通: --json（機械向けの出力） --project <dir>（プロジェクトの場所） --by human|agent --agent <名前>`,
   en: `solocut ${CLI_VERSION} — edit videos by template (built for agents; every command accepts --json)
 
 Start
-  init [dir] --template <id>     create a project (also AGENTS.md / CLAUDE.md)
+  init [dir] [--template tech]   create a project (also AGENTS.md / CLAUDE.md)
   status / next                  progress / the next thing to do (start here)
   step <step> done|skipped       mark a manual step finished
 Media
@@ -137,18 +134,17 @@ Edit
   captions build
   multicam material              camera-switch material → edit split-for-switch --segment <id> --at <sourceFrame,…>
   sfx apply                      sound effects from the template rules
-  tracks apply                   face/cursor-following zoom, click and keystroke overlays
+  tracks apply                   keep the person's face centred, cursor-following zoom, click and keystroke overlays
   masks from-analysis            mask private text on screen (for review)
   tl summary|show|range|query|why  read only what you need of timeline.json
 Render and check
   render --preview | --final [--target youtube]
   frame --at <frame|timecode>
   check                          machine checks (checks/<run>/report.md)
-  thumb candidates | thumb gen --frame <tc> --title "…"
-  derive --target tiktok|youtube-shorts   derive a vertical version (then --variant on any command)
-  render --all / check --all     all three videos
-  meta set --title … --description … --tags a,b | meta show
-  publish record --target t --status published --url <url>
+  thumb pick <image> | thumb candidates | thumb gen --provider codex|frame --title "…"   thumbnail (publish.json)
+  meta set --title … --description … --tags a,b | meta show | meta check   the post (publish.json)
+  publish upload [--target youtube|tiktok]   ask the app to post what publish.json says and wait (after the human's OK)
+  publish record --target t --status published --url <url>   record a post
   feedback import <dir> | list | show <id> | done <id>
 More
   past list|search|show|timeline|compare|reuse|register
@@ -156,7 +152,7 @@ More
   mcp                            MCP server over stdio
   config get|set|schema   prompts list|show   templates   lib list|install   doctor   version
 
-Global: --json  --project <dir>  --variant main|tiktok|youtube-shorts  --by human|agent  --agent <name>`,
+Global: --json  --project <dir>  --by human|agent  --agent <name>`,
 };
 
 const AGENT_ENV: [string, string][] = [['CLAUDECODE', 'claude'], ['CODEX_SANDBOX', 'codex'], ['GEMINI_CLI', 'gemini']];

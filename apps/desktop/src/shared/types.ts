@@ -34,6 +34,28 @@ export interface RecentProject {
   exists: boolean;
 }
 
+/** Where a video in the master folder stands, from its files: 撮影前 / 編集中 / 完成 / 投稿済み. */
+export type VideoStatus = 'new' | 'editing' | 'done' | 'posted';
+
+export interface VideoEntry {
+  dir: string;
+  /** folder name, e.g. 2026-10-11-ネタ */
+  name: string;
+  title: string;
+  status: VideoStatus;
+  /** newest change of the project (ms) */
+  updatedAt: number;
+}
+
+/** The videos in the master folder (settings `videos.root`), newest first. */
+export interface VideoList {
+  root: string;
+  exists: boolean;
+  videos: VideoEntry[];
+  /** set when the folder could not be read (permissions, not a folder…) */
+  error?: string;
+}
+
 export interface TemplateInfo {
   id: string;
   version: string;
@@ -102,6 +124,21 @@ export interface TimelineOverview {
   lastCheck?: { passed: number; failed: number; needsHuman: number; at: string };
 }
 
+/** One file of a raw take. `start` = where the file's t=0 sits on the take clock, in seconds, relative to `main`. */
+export interface RawTakeFile {
+  path: string;
+  url: string;
+  start: number;
+}
+
+/** A take played as recorded: the screen (or the camera when there is no screen), a camera as picture-in-picture, the mic. */
+export interface RawTake {
+  take: string;
+  main: RawTakeFile & { kind: 'screen' | 'camera' };
+  pip?: RawTakeFile;
+  audio?: RawTakeFile;
+}
+
 export interface ProjectSnapshot {
   project: ProjectInfo;
   variant: Variant;
@@ -112,6 +149,8 @@ export interface ProjectSnapshot {
   next?: NextStep;
   overview?: TimelineOverview;
   preview?: { path: string; url: string; mtimeMs: number };
+  /** the newest recorded take as-is (shown until a preview is rendered) */
+  raw?: RawTake;
   errors: string[];
 }
 
@@ -136,27 +175,17 @@ export interface ToolState {
 }
 
 export interface PromptButton {
+  /** 'finish' (sent by itself after a recording) or 'publish' (after the human's OK) */
   id: string;
   label: string;
   agent?: string;
   autopilot?: boolean;
-}
-
-export interface ArchiveListItem {
-  id: string;
-  title: string;
-  kind?: string;
-  template?: string;
-  createdAt?: string;
-  durationSec?: number;
-  thumbnailUrl?: string;
-  projectDir?: string;
-  raw: unknown;
-}
-export interface ArchiveDetail {
-  entry: ArchiveListItem;
-  stats: Record<string, unknown>;
-  overview?: TimelineOverview;
+  /** the current text before {{vars}} are filled (the user's override or the default), in the UI language */
+  text?: string;
+  /** the built-in text in the UI language (settings page:「既定に戻す」) */
+  defaultText?: string;
+  /** true when settings.json overrides the text (prompts.finish / prompts.publish) */
+  overridden?: boolean;
 }
 
 export interface SettingsDoc {
@@ -199,6 +228,10 @@ export interface TakeTrackMeta {
   firstFrameMs?: number; // performance.now() domain timestamp of the first frame/sample
   firstFrameTimestampUs?: number; // raw VideoFrame.timestamp if available
   bytes?: number;
+  /** camera: 'main' = the camera that shows the person (frame the face from this one) */
+  role?: 'main';
+  /** screen: recorded region of the display (display pixels; settings record.region) and the captured stream size */
+  crop?: { displayId: string; x: number; y: number; width: number; height: number; sourceWidth?: number; sourceHeight?: number };
 }
 export interface TakeCursorInfo {
   file: string;
@@ -207,6 +240,8 @@ export interface TakeCursorInfo {
   bounds: { x: number; y: number; width: number; height: number };
   scaleFactor: number;
   window: boolean;
+  /** recorded region (display pixels); when set, x/y in cursor.jsonl are normalized to it and bounds are its DIP rect */
+  region?: { displayId: string; x: number; y: number; width: number; height: number };
 }
 export interface TakeMarker {
   kind: 'ng' | 'important';
@@ -243,8 +278,10 @@ export interface UpdateState {
   nextCheckAt?: number;
   /** a ready update will be installed when the app quits (background updates on, or restart pressed) */
   installOnQuit?: boolean;
-  /** "restart to update" was refused: a recording / render is running */
-  blockedBy?: 'busy';
+  /** a ready update waits for this before restarting (never mid-take, never while an agent works) */
+  blockedBy?: 'recording' | 'agent';
+  /** the user pressed "restart to update": done as soon as nothing is recording / working */
+  restartRequested?: boolean;
 }
 
 export interface MediaPermissionState {
@@ -287,72 +324,7 @@ export interface FeedbackSession {
   variant?: string;
 }
 
-// ---------- thumbnails / publish ----------
-export interface ThumbCandidate {
-  frame: number;
-  timecode: string;
-  image: string; // absolute path
-  score?: number;
-}
-export interface ThumbImage {
-  path: string; // absolute
-  provider?: string;
-  favorite?: boolean;
-}
-export interface PublishTarget {
-  target: string;
-  title: string;
-  titleCandidates: string[];
-  description: string;
-  tags: string[];
-  render?: string; // absolute
-  thumbnail?: string; // absolute
-  captions?: string; // absolute srt
-}
-export interface PublishDraft {
-  targets: PublishTarget[];
-  videos: string[];
-  images: string[];
-  captions: string[];
-  history: PublishRecord[];
-  metaSource: 'cli' | 'timeline';
-}
-export interface PublishRecord {
-  at: string;
-  project: string;
-  target: string;
-  method: 'api-byo' | 'api' | 'intent' | 'manual';
-  status: 'published' | 'scheduled' | 'uploaded' | 'opened' | 'failed';
-  url?: string;
-  remoteId?: string;
-  privacy?: string;
-  disclosures?: Record<string, boolean>;
-  error?: string;
-}
-export interface YouTubeForm {
-  videoPath: string;
-  title: string;
-  description: string;
-  tags: string[];
-  categoryId: string;
-  privacy: 'public' | 'unlisted' | 'private';
-  publishAt?: string; // ISO; requires private
-  madeForKids: boolean | null; // must be chosen
-  containsSyntheticMedia: boolean;
-  language: string;
-  thumbnailPath?: string;
-  captionsPath?: string;
-}
-export interface YouTubeProgress {
-  phase: 'auth' | 'upload' | 'thumbnail' | 'captions' | 'done' | 'error';
-  sent?: number;
-  total?: number;
-  message?: string;
-}
-export interface SecretInfo {
-  set: boolean;
-  hint?: string;
-}
+// thumbnails / publish: see shared/publish.ts
 
 // ---------- analysis producers ----------
 export type AnalysisKind = 'faces' | 'ocr';

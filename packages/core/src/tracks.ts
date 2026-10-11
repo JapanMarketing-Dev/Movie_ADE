@@ -4,9 +4,26 @@
 //   derived/analysis/keys.<takeId>.jsonl    = KeyEvent per line (take time)
 
 export interface FaceTrack {
+  /** Samples per second of the analysis (the desktop samples at 5 fps). */
   fps: number;
-  /** `gaze` (0..1, looking at the lens) and `sharp` (0..1 focus/exposure quality) are optional detector extras. */
-  frames: { f: number; faces: { x: number; y: number; w: number; h: number; score: number; gaze?: number }[]; sharp?: number }[];
+  /** Frame rate of the source file: `f` counts source frames at this rate. */
+  sourceFps?: number;
+  /**
+   * `f`: source frame; `t`: source seconds (when given, it is the time). `gaze` (0..1, looking at the lens) and `sharp`
+   * (0..1 focus/exposure quality) are optional detector extras.
+   */
+  frames: { f: number; t?: number; faces: FaceBox[]; sharp?: number }[];
+}
+export interface FaceBox { x: number; y: number; w: number; h: number; score: number; gaze?: number }
+
+/**
+ * Source seconds of a face-track frame: its `t`, else `f` over the source frame rate. (`fps` is the sampling rate when
+ * `sourceFps` is present — dividing `f` by it put every face 6× too late — and the frame rate in older files.)
+ */
+export function faceFrameSec(track: Pick<FaceTrack, 'fps' | 'sourceFps'>, fr: { f: number; t?: number }): number {
+  if (typeof fr.t === 'number' && Number.isFinite(fr.t)) return fr.t;
+  const rate = track.sourceFps && track.sourceFps > 0 ? track.sourceFps : track.fps > 0 ? track.fps : 30;
+  return fr.f / rate;
 }
 export interface CursorEvent { t_ms: number; x: number; y: number; click?: boolean }
 export interface KeyEvent { t_ms: number; keys: string[] }
@@ -48,13 +65,12 @@ const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
  * eyes so a vertical crop keeps the head in the upper third). Frames without faces are skipped.
  */
 export function faceSamples(track: FaceTrack, o: { headroom?: number; minScore?: number } = {}): TrackSample[] {
-  const fps = track.fps > 0 ? track.fps : 30;
   const out: TrackSample[] = [];
   for (const fr of track.frames) {
     const faces = fr.faces.filter((f) => f.score >= (o.minScore ?? 0.3) && f.w > 0 && f.h > 0);
     if (!faces.length) continue;
     const best = faces.reduce((a, b) => (b.score * b.w * b.h > a.score * a.w * a.h ? b : a));
-    out.push({ t: fr.f / fps, x: clamp01(best.x + best.w / 2), y: clamp01(best.y + best.h / 2 + best.h * (o.headroom ?? 0.6)) });
+    out.push({ t: faceFrameSec(track, fr), x: clamp01(best.x + best.w / 2), y: clamp01(best.y + best.h / 2 + best.h * (o.headroom ?? 0.6)) });
   }
   return out.sort((a, b) => a.t - b.t);
 }
@@ -196,11 +212,11 @@ export function focusPath(samples: TrackSample[], o: FocusPathOptions): FocusKey
 const round4 = (v: number) => Math.round(v * 10000) / 10000;
 
 /**
- * Cover-crop focus (fraction of the cropped-away margin) that centres a normalized source point in a region.
- * Returns 0.5 on an axis that is not cropped.
+ * Cover-crop focus (fraction of the cropped-away margin) that centres a normalized source point in a region, for a
+ * cover crop magnified by `scale` (≥ 1). Returns 0.5 on an axis that is not cropped.
  */
-export function focusForPoint(p: { x: number; y: number }, source: { width: number; height: number }, region: { width: number; height: number }): { x: number; y: number } {
-  const k = Math.max(region.width / source.width, region.height / source.height);
+export function focusForPoint(p: { x: number; y: number }, source: { width: number; height: number }, region: { width: number; height: number }, scale = 1): { x: number; y: number } {
+  const k = Math.max(region.width / source.width, region.height / source.height) * Math.max(1, scale);
   const vw = region.width / (source.width * k); // visible fraction of the source width
   const vh = region.height / (source.height * k);
   const axis = (c: number, v: number) => (v >= 0.9999 ? 0.5 : clamp01((c - v / 2) / (1 - v)));

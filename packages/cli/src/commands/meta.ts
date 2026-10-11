@@ -1,12 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { frameToSeconds, type LicenseRef, type Output, type Target, type Timeline } from '@solocut/core';
 import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
-import { VARIANTS, applyEdit, openProject, readTimeline, setStep, variantExists, vpaths, writeAtomic, type Project, type Variant } from '../project.js';
-import { allTimelines } from './media.js';
+import { openProject, readTimeline, setStep, writeAtomic, type Project } from '../project.js';
+import {
+  PUBLISH_FILE, cleanTags, composeDescription, defaultPublish, mergePublish, projectFileExists, publishStatus, readPublish, safeRelPath,
+  validatePublish, type PublishJson,
+} from '../publishJson.js';
 
-// Publishing text (docs/06 「同時に出すメタデータ」, docs/16 credits): the agent writes titles/description/tags, the CLI
-// stores them in outputs[].metadata and renders renders/<target>/metadata.md + credits.txt.
+// The post (SPEC 「publish.json」, docs/14): the agent writes title / description / tags (and YouTube / TikTok options) to
+// <project>/publish.json; the CLI adds the chapter list and asset credits to the description and checks the limits.
+// The human approves it in the app's Publish screen, which uploads that one video.
 
 export const TARGETS = ['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels'] as const;
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
@@ -67,89 +71,64 @@ export function emptyOutput(tl: Timeline, target: Target): Output {
   return { target, canvas, preset: target, metadata: { title: tl.meta.title, titleCandidates: [], description: '', tags: [], chapters: !vertical } };
 }
 
-export function metadataMarkdown(tl: Timeline, o: Output, lang: 'ja' | 'en'): string {
-  const ja = lang === 'ja';
-  const m = o.metadata;
-  const ch = o.metadata.chapters && o.target === 'youtube' ? youtubeChapters(tl) : { text: null };
-  const credits = creditLines(tl);
-  const fullDescription = [m.description.trim(), ch.text ?? '', credits.length ? (ja ? 'クレジット:\n' : 'Credits:\n') + credits.join('\n') : '']
-    .filter(Boolean).join('\n\n');
-  return [
-    `# ${m.title}`,
-    '',
-    `- ${ja ? '出力先' : 'target'}: ${o.target}`,
-    ...(m.titleCandidates.length ? ['', `## ${ja ? 'タイトルの候補' : 'Title candidates'}`, '', ...m.titleCandidates.map((x, i) => `${i + 1}. ${x}`)] : []),
-    '',
-    `## ${ja ? '説明文（投稿用。チャプターとクレジットを含む）' : 'Description (as posted, with chapters and credits)'}`,
-    '',
-    fullDescription || (ja ? '（未記入）' : '(empty)'),
-    ...(m.tags.length ? ['', `## ${ja ? 'タグ' : 'Tags'}`, '', m.tags.join(', ')] : []),
-    ...(o.metadata.chapters && o.target === 'youtube' && !ch.text ? ['', `> ${ja ? 'チャプターを付けられません' : 'chapters omitted'}: ${(ch as { reason?: string }).reason}`] : []),
-    '',
-  ].join('\n');
-}
+interface MetaInput { title?: string; description?: string; tags?: string[]; chapters?: boolean }
 
-interface MetaInput { title?: string; titleCandidates?: string[]; description?: string; tags?: string[]; chapters?: boolean }
-
-function readMetaFile(ctx: Ctx, path: string): Record<string, MetaInput> | MetaInput {
+function readJsonArg(ctx: Ctx, path: string): Record<string, unknown> {
   const abs = resolve(ctx.io.cwd, path);
-  if (!existsSync(abs)) throw new CliError('not-found', `file not found: ${path}`);
+  if (!existsSync(abs)) throw new CliError('not-found', t(ctx, `ファイルがありません: ${path}`, `file not found: ${path}`));
+  let v: unknown;
   try {
-    return JSON.parse(readFileSync(abs, 'utf8')) as Record<string, MetaInput>;
+    v = JSON.parse(readFileSync(abs, 'utf8').replace(/^\uFEFF/, ''));
   } catch (e) {
     throw new CliError('invalid-json', `${path}: ${(e as Error).message}`);
   }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new CliError('usage', t(ctx, `${path} は { … } の JSON にしてください`, `${path} must be a JSON object`));
+  return v as Record<string, unknown>;
 }
 
-function checkInput(m: MetaInput, where: string): void {
-  if (m.title !== undefined && (typeof m.title !== 'string' || !m.title.trim())) throw new CliError('usage', `${where}: title must be a non-empty string`);
-  if (m.title && m.title.length > 100) throw new CliError('usage', `${where}: YouTube titles are at most 100 characters`);
-  if (m.description !== undefined && typeof m.description !== 'string') throw new CliError('usage', `${where}: description must be a string`);
-  if (m.description && m.description.length > 5000) throw new CliError('usage', `${where}: descriptions are at most 5000 characters`);
-  for (const k of ['tags', 'titleCandidates'] as const) {
-    const v = m[k];
-    if (v !== undefined && (!Array.isArray(v) || v.some((x) => typeof x !== 'string'))) throw new CliError('usage', `${where}: ${k} must be a list of strings`);
+/**
+ * A --file argument as a publish.json patch. Accepts publish.json itself, or the older per-target shape
+ * ({ "youtube": { "title": … } }), whose youtube entry becomes the post text.
+ */
+export function patchFromFile(raw: Record<string, unknown>): Record<string, unknown> {
+  const yt = raw.youtube as Record<string, unknown> | undefined;
+  if (yt && typeof yt === 'object' && ('title' in yt || 'description' in yt || 'tags' in yt) && !('title' in raw)) {
+    const { title, description, tags, titleCandidates: _c, chapters, ...rest } = yt as MetaInput & Record<string, unknown>;
+    return { ...(title !== undefined ? { title } : {}), ...(description !== undefined ? { description } : {}), ...(tags !== undefined ? { tags } : {}),
+      youtube: { ...rest, ...(chapters !== undefined ? { chapters } : {}) } };
   }
+  const { titleCandidates: _c, chapters, ...rest } = raw as Record<string, unknown> & { chapters?: unknown };
+  return chapters !== undefined ? { ...rest, youtube: { ...((rest.youtube as object | undefined) ?? {}), chapters } } : rest;
 }
 
-function writeFiles(p: Project, tl: Timeline, targets: Target[], lang: 'ja' | 'en'): string[] {
-  const files: string[] = [];
-  for (const target of targets) {
-    const o = tl.outputs.find((x) => x.target === target);
-    if (!o) continue;
-    writeAtomic(join(p.dir, 'renders', target, 'metadata.md'), metadataMarkdown(tl, o, lang));
-    files.push(`renders/${target}/metadata.md`);
-    const credits = creditLines(tl);
-    writeAtomic(join(p.dir, 'renders', target, 'credits.txt'), credits.length ? credits.join('\n') + '\n' : '');
-    files.push(`renders/${target}/credits.txt`);
+/** Done when publish.json is valid (title, description, tags, video…); running with the reason otherwise. */
+export function updateMetadataStep(p: Project): { valid: boolean; problems: string[] } {
+  const st = publishStatus(p.dir, p.file.language);
+  setStep(p, 'metadata', st.valid ? 'done' : 'running', st.valid ? undefined : st.problems.slice(0, 3).join(' / '));
+  return st;
+}
+
+function chaptersOf(tl: Timeline, on: boolean): string | null {
+  return on ? youtubeChapters(tl).text : null;
+}
+
+function writePublish(p: Project, v: PublishJson): void {
+  writeAtomic(join(p.dir, PUBLISH_FILE), JSON.stringify(v, null, 2) + '\n');
+}
+
+/** publish.json as it is now, or a fresh one (title from the timeline). A broken file is an error, not overwritten. */
+function currentPublish(ctx: Ctx, p: Project, tl: Timeline): PublishJson {
+  const r = readPublish(p.dir);
+  if (!r) return defaultPublish(tl.meta.title);
+  if (r.error || !r.raw || typeof r.raw !== 'object' || Array.isArray(r.raw)) {
+    throw new CliError('invalid-publish', t(ctx, `publish.json が壊れています（${r.error ?? '{ … } ではありません'}）。直すか消してください`, `publish.json is broken (${r.error ?? 'not an object'}); fix or delete it`));
   }
-  return files;
+  return r.raw as PublishJson;
 }
 
-/** One post as the publish screen shows it. */
-function outputView(p: Project, tl: Timeline, target: Target) {
-  const o = tl.outputs.find((x) => x.target === target) ?? emptyOutput(tl, target);
-  const fps = tl.canvas.fps;
-  const ch = target === 'youtube' && o.metadata.chapters ? youtubeChapters(tl) : { text: null };
-  const chapters = ch.text
-    ? [...tl.outline].sort((a, b) => a.start - b.start).map((c, i) => ({ at: ch.text!.split('\n')[i]!.split(' ')[0]!, sec: Math.floor(frameToSeconds(c.start, fps)), title: c.title }))
-    : [];
-  const srt = vpaths(p).srt;
-  return {
-    variant: p.variant ?? 'main', target, title: o.metadata.title, titleCandidates: o.metadata.titleCandidates, description: o.metadata.description,
-    tags: o.metadata.tags, chapters, credits: creditLines(tl),
-    ...(o.render ? { render: { path: o.render.path } } : {}), ...(o.thumbnail ? { thumbnail: { path: o.thumbnail.path, frame: o.thumbnail.frame } } : {}),
-    ...(tl.captions.length && existsSync(join(p.dir, srt)) ? { captions: { srt } } : {}), ...(o.publish ? { publish: o.publish } : {}),
-  };
-}
-
-/** Done once every video (main + existing variants) has a title for each of its targets. */
-function updateMetadataStep(p: Project): void {
-  const missing = allTimelines(p).filter((x) => {
-    const tl = readTimeline(x);
-    return (x.variant ? [x.variant] : tl.meta.targets).some((target) => !tl.outputs.find((o) => o.target === target)?.metadata.title.trim());
-  }).map((x) => x.variant ?? 'main');
-  setStep(p, 'metadata', missing.length ? 'running' : 'done', missing.length ? `missing: ${missing.join(', ')}` : undefined);
+function view(ctx: Ctx, p: Project, v: unknown) {
+  const res = validatePublish(v, { exists: (rel) => projectFileExists(p.dir, rel), lang: ctx.lang });
+  return { valid: res.valid, thumbnailReady: res.thumbnail, problems: res.problems };
 }
 
 export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
@@ -157,78 +136,91 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
   const p = openProject(ctx);
   if (sub === 'set') {
     const { values } = opts(rest, {
-      target: { type: 'string', multiple: true }, title: { type: 'string' }, description: { type: 'string' }, 'description-file': { type: 'string' },
-      tags: { type: 'string' }, candidates: { type: 'string', multiple: true }, chapters: { type: 'boolean' }, 'no-chapters': { type: 'boolean' }, file: { type: 'string' },
-    }, { max: 0, usage: 'solocut meta set [--target youtube] --title … [--description …|--description-file f] [--tags a,b] [--candidates …] | --file meta.json' });
-    const tl0 = readTimeline(p);
-    const targets = (values.target ?? (p.variant ? [p.variant] : tl0.meta.targets)) as Target[];
-    for (const x of targets) if (!(TARGETS as readonly string[]).includes(x)) throw new CliError('usage', `unknown target: ${x}`);
-    if (!targets.length) throw new CliError('usage', 'no targets (set meta.targets or pass --target)');
-    if (p.variant && targets.some((x) => x !== p.variant)) throw new CliError('usage', `variant ${p.variant} only has the ${p.variant} output`);
-    const perTarget: Record<string, MetaInput> = {};
-    if (values.file) {
-      const raw = readMetaFile(ctx, values.file);
-      const keyed = Object.keys(raw).some((k) => (TARGETS as readonly string[]).includes(k));
-      for (const x of targets) perTarget[x] = keyed ? ((raw as Record<string, MetaInput>)[x] ?? {}) : (raw as MetaInput);
-    } else {
-      const description = values['description-file'] ? readFileSync(resolve(ctx.io.cwd, values['description-file']), 'utf8') : values.description;
-      const m: MetaInput = {
-        ...(values.title !== undefined ? { title: values.title } : {}),
-        ...(description !== undefined ? { description } : {}),
-        ...(values.tags !== undefined ? { tags: values.tags.split(',').map((x) => x.trim().replace(/^#/, '')).filter(Boolean) } : {}),
-        ...(values.candidates ? { titleCandidates: values.candidates } : {}),
-        ...(values.chapters ? { chapters: true } : values['no-chapters'] ? { chapters: false } : {}),
-      };
-      for (const x of targets) perTarget[x] = m;
+      title: { type: 'string' }, description: { type: 'string' }, 'description-file': { type: 'string' }, tags: { type: 'string' },
+      chapters: { type: 'boolean' }, 'no-chapters': { type: 'boolean' }, file: { type: 'string' }, video: { type: 'string' }, thumbnail: { type: 'string' },
+      privacy: { type: 'string' }, category: { type: 'string' }, 'publish-at': { type: 'string' },
+      tiktok: { type: 'boolean' }, 'no-tiktok': { type: 'boolean' }, 'tiktok-caption': { type: 'string' }, 'tiktok-privacy': { type: 'string' },
+      target: { type: 'string', multiple: true }, candidates: { type: 'string', multiple: true },
+    }, { max: 0, usage: 'solocut meta set --title … [--description …|--description-file f] [--tags a,b] [--privacy private|unlisted|public] [--tiktok] [--thumbnail img] | --file publish.json' });
+    if (values.chapters && values['no-chapters']) throw new CliError('usage', 'choose --chapters or --no-chapters');
+    if (values.tiktok && values['no-tiktok']) throw new CliError('usage', 'choose --tiktok or --no-tiktok');
+    if (values.target?.some((x) => x !== 'youtube' && x !== 'tiktok')) throw new CliError('usage', t(ctx, '動画は1本です。--target は使いません（TikTok には --tiktok で同じ動画を出します）', 'there is one video; --target is not used (post the same video to TikTok with --tiktok)'));
+    const tl = readTimeline({ ...p, variant: null });
+    let patch: Record<string, unknown> = values.file ? patchFromFile(readJsonArg(ctx, values.file)) : {};
+    const description = values['description-file'] ? readFileSync(resolve(ctx.io.cwd, values['description-file']), 'utf8') : values.description;
+    const yt: Record<string, unknown> = {};
+    if (values.privacy !== undefined) yt.privacy = values.privacy;
+    if (values.category !== undefined) yt.categoryId = values.category;
+    if (values['publish-at'] !== undefined) yt.publishAt = values['publish-at'];
+    if (values.chapters) yt.chapters = true;
+    if (values['no-chapters']) yt.chapters = false;
+    const tt: Record<string, unknown> = {};
+    if (values.tiktok) tt.enabled = true;
+    if (values['no-tiktok']) tt.enabled = false;
+    if (values['tiktok-caption'] !== undefined) tt.caption = values['tiktok-caption'];
+    if (values['tiktok-privacy'] !== undefined) tt.privacy = values['tiktok-privacy'];
+    const relIn = (v: string) => {
+      const abs = resolve(ctx.io.cwd, v);
+      const rel = relative(p.dir, abs).split('\\').join('/');
+      return safeRelPath(rel) ?? v;
+    };
+    patch = {
+      ...patch,
+      ...(values.title !== undefined ? { title: values.title } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(values.tags !== undefined ? { tags: cleanTags(values.tags) } : {}),
+      ...(values.video !== undefined ? { video: relIn(values.video) } : {}),
+      ...(values.thumbnail !== undefined ? { thumbnail: relIn(values.thumbnail) } : {}),
+      ...(Object.keys(yt).length ? { youtube: { ...((patch.youtube as object | undefined) ?? {}), ...yt } } : {}),
+      ...(Object.keys(tt).length ? { tiktok: { ...((patch.tiktok as object | undefined) ?? {}), ...tt } } : {}),
+    };
+    if (Array.isArray(patch.tags)) patch.tags = cleanTags(patch.tags);
+    if (typeof patch.title === 'string') patch.title = patch.title.trim();
+    let next = mergePublish(currentPublish(ctx, p, tl), patch);
+    // the description as posted: chapters (YouTube) and credits are added by the CLI, once
+    if (typeof next.description === 'string' && (description !== undefined || 'description' in patch || yt.chapters !== undefined)) {
+      next = { ...next, description: composeDescription(next.description, chaptersOf(tl, next.youtube?.chapters !== false), creditLines(tl), p.file.language) };
     }
-    // a TikTok / Shorts target belongs to its derived variant when it exists (docs/18)
-    const owners = new Map<string, { project: Project; targets: Target[] }>();
-    for (const target of targets) {
-      const owner: Project = !p.variant && (VARIANTS as readonly string[]).includes(target) && variantExists(p.dir, target as Variant) ? { ...p, variant: target as Variant } : p;
-      const key = owner.variant ?? 'main';
-      if (!owners.has(key)) owners.set(key, { project: owner, targets: [] });
-      owners.get(key)!.targets.push(target);
-    }
-    const files: string[] = [];
-    const metadata: Record<string, Output['metadata']> = {};
-    for (const { project, targets: ts } of owners.values()) {
-      const tl = readTimeline(project);
-      const ops = ts.map((target) => {
-        const m = perTarget[target]!;
-        checkInput(m, target);
-        const base = tl.outputs.find((o) => o.target === target) ?? emptyOutput(tl, target);
-        const md = { ...base.metadata, ...Object.fromEntries(Object.entries(m).filter(([, v]) => v !== undefined)) } as Output['metadata'];
-        return { op: 'setOutput' as const, output: { ...base, metadata: md } };
-      });
-      const r = await applyEdit(project, ops, { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}), note: 'meta set' });
-      files.push(...writeFiles(project, r.timeline, ts, p.file.language));
-      for (const o of r.timeline.outputs) if (ts.includes(o.target)) metadata[o.target] = o.metadata;
-    }
+    const check = view(ctx, p, next);
+    const hard = check.problems.filter((x) => x.level === 'error' && x.field !== 'title' && x.field !== 'description' && x.field !== 'tags' && x.field !== 'thumbnail');
+    if (hard.length) throw new CliError('invalid-publish', t(ctx, `publish.json に書けません: ${hard.map((x) => x.message).join(' / ')}`, `cannot write publish.json: ${hard.map((x) => x.message).join(' / ')}`), { problems: hard });
+    writePublish(p, next);
     updateMetadataStep(p);
-    emit(ctx, { targets, files, metadata }, () =>
-      t(ctx, `投稿文を保存しました: ${files.filter((f) => f.endsWith('.md')).join(', ')}`, `saved: ${files.filter((f) => f.endsWith('.md')).join(', ')}`));
+    emit(ctx, { file: PUBLISH_FILE, publish: next, ...check }, () => [
+      t(ctx, `publish.json を保存しました: ${next.title || '（タイトル未設定）'}`, `saved publish.json: ${next.title || '(no title)'}`),
+      ...check.problems.map((x) => `${x.level === 'error' ? '!' : '-'} ${x.field}: ${x.message}`),
+    ]);
     return;
   }
   if (sub === 'show' || sub === undefined) {
-    const { values } = opts(rest, { target: { type: 'string' } }, { max: 0 });
-    // every video unless --variant: the publish screen shows all posts at once (docs/18)
-    const scope = p.variant || ctx.variant ? [p] : allTimelines(p);
-    const outputs = scope.flatMap((x) => {
-      const tl = readTimeline(x);
-      const targets = x.variant ? [x.variant as Target] : tl.meta.targets;
-      return targets.filter((tg) => !values.target || tg === values.target).map((target) => outputView(x, tl, target));
+    opts(rest, { target: { type: 'string' } }, { max: 0 });
+    const tl = readTimeline({ ...p, variant: null });
+    const r = readPublish(p.dir);
+    const pub = r && !r.error ? r.raw : null;
+    const check = r ? (r.error ? { valid: false, thumbnailReady: false, problems: [{ level: 'error' as const, field: '$', message: r.error }] } : view(ctx, p, r.raw)) : null;
+    emit(ctx, { exists: !!r, publish: pub, ...(check ?? { valid: false, thumbnailReady: false, problems: [] }), chapters: youtubeChapters(tl), credits: creditLines(tl), assets: usedAssets(tl) }, () => {
+      if (!r) return t(ctx, 'publish.json はまだありません（solocut meta set --title … で作る）', 'no publish.json yet (create it with solocut meta set --title …)');
+      const x = pub as Partial<PublishJson> | null;
+      return [
+        `${x?.title || t(ctx, '（タイトル未設定）', '(no title)')}`,
+        `video: ${x?.video ?? '-'}  thumbnail: ${x?.thumbnail ?? '-'}  tags: ${(x?.tags ?? []).join(', ')}`,
+        ...check!.problems.map((q) => `${q.level === 'error' ? '!' : '-'} ${q.field}: ${q.message}`),
+      ];
     });
-    const main = readTimeline({ ...p, variant: null });
-    emit(ctx, { outputs, chapters: youtubeChapters(main), credits: creditLines(main), assets: usedAssets(main) }, () =>
-      outputs.length ? outputs.map((o) => `[${o.variant}] ${o.target}: ${o.title || t(ctx, '（タイトル未設定）', '(no title)')}`).join('\n') : t(ctx, '投稿文はまだありません（solocut meta set）', 'no metadata yet (solocut meta set)'));
     return;
   }
-  if (sub === 'write') {
+  if (sub === 'check') {
     opts(rest, {}, { max: 0 });
-    const tl = readTimeline(p);
-    const files = writeFiles(p, tl, tl.outputs.map((o) => o.target), p.file.language);
-    emit(ctx, { files }, () => files.join('\n'));
+    const r = readPublish(p.dir);
+    if (!r) throw new CliError('no-publish', t(ctx, 'publish.json がありません（solocut meta set --title … で作る）', 'no publish.json (create it with solocut meta set --title …)'));
+    if (r.error) throw new CliError('invalid-publish', `publish.json: ${r.error}`);
+    const check = view(ctx, p, r.raw);
+    updateMetadataStep(p);
+    if (!check.valid) {
+      throw new CliError('invalid-publish', t(ctx, `publish.json に直すところがあります（${check.problems.filter((x) => x.level === 'error').length} 件）`, `publish.json needs fixes (${check.problems.filter((x) => x.level === 'error').length})`), { problems: check.problems });
+    }
+    emit(ctx, check, () => [t(ctx, 'publish.json は投稿できる形です', 'publish.json is ready to post'), ...check.problems.map((x) => `- ${x.field}: ${x.message}`)]);
     return;
   }
-  throw new CliError('usage', 'usage: solocut meta show [--target t] | set … | write');
+  throw new CliError('usage', 'usage: solocut meta show | set … | check');
 }

@@ -1,54 +1,65 @@
-// Publish (docs/14, docs/18). One take → three posts (YouTube main, TikTok, YouTube Shorts) on one approval screen;
-// nothing is posted until the person checks "I reviewed these". Announcements follow once URLs exist.
-import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ExternalLink, Link2, Link2Off, ListChecks, Loader2, Upload, XCircle } from 'lucide-react';
-import { Button } from '../ui';
-import { useST, type SKey } from '../shell/i18n';
-import { publishChecklist } from './parts/screenModel';
-import type { ProjectInfo, PublishDraft, PublishTarget, YouTubeForm, YouTubeProgress } from '@shared/types';
+// Publish (docs/14): one video. The finished video, its thumbnail and what the AI wrote in publish.json; the person
+// checks it and presses「OK・投稿する」→ the `publish` prompt goes to the agent, which fixes publish.json if needed and
+// runs `solocut publish upload`; the app uploads with its tokens and the result shows up here.
+import { useCallback, useContext, useEffect, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ExternalLink, Link2, Send, Sparkles, Upload, XCircle } from 'lucide-react';
+import { Badge, Button, EmptyState, Progress } from '../ui';
 import {
-  ANNOUNCE_LIMITS,
   YT_DESCRIPTION_MAX_BYTES,
   YT_TITLE_MAX,
-  announceLength,
   charCount,
-  parseTags,
+  fixRequestText,
+  issueText,
+  okState,
   utf8Bytes,
-  validateYouTube,
-  type AnnouncePlatform,
+  type PublishAccounts,
+  type PublishIssue,
+  type PublishTargetId,
+  type PublishTargetResult,
+  type PublishView,
 } from '@shared/publish';
-import { useT, type TKey } from '../i18n';
+import type { ProjectInfo } from '@shared/types';
+import { LangContext, useT, type TKey } from '../i18n';
 import { api, errMsg } from '../lib/api';
+import { sendToAgent } from '../terminal/agentSend';
 
-type Tab = 'videos' | 'instagram' | 'announce' | 'history';
-type PostId = 'youtube' | 'youtube-shorts' | 'tiktok';
-type PostState = { status: 'idle' | 'running' | 'done' | 'failed' | 'skipped'; url?: string; message?: string; progress?: number };
-
-const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
-const POSTS: PostId[] = ['youtube', 'tiktok', 'youtube-shorts'];
+const TARGET_LABEL: Record<PublishTargetId, string> = { youtube: 'YouTube', tiktok: 'TikTok' };
 
 export function Publish({ project, toast, onOpenSettings }: { project: ProjectInfo | null; toast: (m: string) => void; onOpenSettings: () => void }) {
   const t = useT();
-  const [tab, setTab] = useState<Tab>('videos');
-  const [draft, setDraft] = useState<PublishDraft | null>(null);
-  const [announceUrl, setAnnounceUrl] = useState('');
+  const lang = useContext(LangContext);
   const dir = project?.dir ?? null;
+  const [view, setView] = useState<PublishView | null>(null);
+  const [accounts, setAccounts] = useState<PublishAccounts | null>(null);
+  const [sentAt, setSentAt] = useState<number | null>(null);
+  const [fix, setFix] = useState('');
+  const [busy, setBusy] = useState<'ok' | 'fix' | 'connect' | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!dir) return;
-    const d = await api.invoke('publish:draft', dir);
-    setDraft(d);
-    const lastUrl = d.history.find((h) => h.url && h.target === 'youtube')?.url;
-    if (lastUrl) setAnnounceUrl((u) => u || lastUrl);
-  };
-
-  useEffect(() => {
-    setDraft(null);
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setView(await api.invoke('publish:load', dir));
   }, [dir]);
 
-  if (!project) {
+  useEffect(() => {
+    setView(null);
+    setSentAt(null);
+    void load();
+    void api.invoke('publish:accounts').then(setAccounts);
+  }, [load]);
+  useEffect(() => api.on('publish:changed', (d) => d === dir && void load()), [dir, load]);
+  useEffect(() => api.on('project:changed', (d, what) => d === dir && what === 'renders' && void load()), [dir, load]);
+  // the "sent" hold expires by itself
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, []);
+  // the agent started the upload: the hold is over
+  useEffect(() => {
+    if (view?.result?.state === 'running') setSentAt(null);
+  }, [view?.result?.state, view?.result?.id]);
+
+  if (!project || !dir) {
     return (
       <div className="ws">
         <div className="titlebar">
@@ -59,615 +70,343 @@ export function Publish({ project, toast, onOpenSettings }: { project: ProjectIn
     );
   }
 
-  const tabs: { id: Tab; key: TKey }[] = [
-    { id: 'videos', key: 'pub.videos' },
-    { id: 'instagram', key: 'pub.instagram' },
-    { id: 'announce', key: 'pub.announce' },
-    { id: 'history', key: 'pub.history' },
-  ];
+  const send = async (text: string, kind: 'ok' | 'fix', agent: string | null = null) => {
+    setBusy(kind);
+    try {
+      const res = await sendToAgent({ text, agent, projectDir: dir }, { launch: agent });
+      if (res.ok && kind === 'ok') setSentAt(Date.now());
+      toast(res.ok ? t(kind === 'ok' ? 'pub.sentOk' : 'pub.sentFix') : res.message);
+      if (res.ok && kind === 'fix') setFix('');
+    } catch (e) {
+      toast(errMsg(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const postOk = async () => {
+    try {
+      const r = await api.invoke('prompts:render', 'publish', dir, {});
+      await send(r.text, 'ok', r.agent && r.agent !== 'default' ? r.agent : null);
+    } catch (e) {
+      toast(errMsg(e));
+    }
+  };
+
+  const connect = async (target: PublishTargetId) => {
+    setBusy('connect');
+    try {
+      const r = await api.invoke('publish:connect', target);
+      if (!r.ok) toast(`${t('pub.connectFailed')}: ${r.error ?? ''}`);
+      setAccounts(await api.invoke('publish:accounts'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const state = okState(view, accounts, sentAt, now);
+  const spec = view?.spec ?? null;
+  const errors = view?.issues.filter((i) => i.level === 'error') ?? [];
+  const warnings = view?.issues.filter((i) => i.level === 'warning') ?? [];
 
   return (
     <div className="ws">
       <div className="titlebar">
         <span className="title">{t('nav.publish')}</span>
         <span className="dim">{project.title}</span>
-        <span className="grow" />
-        <div className="segmented">
-          {tabs.map((x) => (
-            <button key={x.id} className={tab === x.id ? 'on' : ''} onClick={() => setTab(x.id)}>
-              {t(x.key)}
-            </button>
-          ))}
-        </div>
       </div>
-      <div style={{ overflow: 'auto', flex: 1 }}>
-        <div className="page" style={{ paddingTop: 24, maxWidth: 1280 }}>
-          <div className="notice" style={{ marginBottom: 16 }}>
-            {t('pub.approveRule')}
-          </div>
-          {!draft ? (
-            <div className="dim">{t('common.loading')}</div>
-          ) : tab === 'videos' ? (
-            <VideosPanel
-              dir={project.dir}
-              draft={draft}
-              toast={toast}
-              onOpenSettings={onOpenSettings}
-              onFinished={(url) => {
-                if (url) setAnnounceUrl(url);
-                void load();
-                setTab('announce');
-              }}
-            />
-          ) : tab === 'instagram' ? (
-            <InstagramPanel dir={project.dir} draft={draft} onDone={() => void load()} />
-          ) : tab === 'announce' ? (
-            <AnnouncePanel dir={project.dir} draft={draft} url={announceUrl} setUrl={setAnnounceUrl} onDone={() => void load()} />
-          ) : (
-            <History draft={draft} />
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function initialForm(meta: PublishTarget | undefined, draft: PublishDraft, vertical: boolean): YouTubeForm {
-  const fallbackVideo = draft.videos.find((v) => (vertical ? /shorts|tiktok/i.test(v) : !/shorts|tiktok|preview/i.test(v))) ?? '';
-  return {
-    videoPath: meta?.render ?? fallbackVideo,
-    title: meta?.title ?? '',
-    description: meta?.description ?? '',
-    tags: meta?.tags ?? [],
-    categoryId: '28',
-    privacy: 'private',
-    madeForKids: null,
-    containsSyntheticMedia: false,
-    language: 'ja',
-    ...(meta?.thumbnail ? { thumbnailPath: meta.thumbnail } : {}),
-    ...(!vertical && meta?.captions ? { captionsPath: meta.captions } : {}),
-  };
-}
-
-const TIKTOK_CHECKS: TKey[] = ['pub.tt.nickname', 'pub.tt.privacy', 'pub.tt.interactions', 'pub.tt.commercial', 'pub.tt.music', 'pub.tt.aigc'];
-
-function VideosPanel({
-  dir,
-  draft,
-  toast,
-  onOpenSettings,
-  onFinished,
-}: {
-  dir: string;
-  draft: PublishDraft;
-  toast: (m: string) => void;
-  onOpenSettings: () => void;
-  onFinished: (mainUrl?: string) => void;
-}) {
-  const t = useT();
-  const st = useST();
-  const meta = (id: PostId) => draft.targets.find((x) => x.target === id);
-  const [acct, setAcct] = useState<{ clientSet: boolean; connected: boolean } | null>(null);
-  const [include, setInclude] = useState<Record<PostId, boolean>>({
-    youtube: Boolean(meta('youtube')?.render ?? draft.videos.length),
-    tiktok: Boolean(meta('tiktok')?.render),
-    'youtube-shorts': Boolean(meta('youtube-shorts')?.render),
-  });
-  const [main, setMain] = useState<YouTubeForm>(() => initialForm(meta('youtube'), draft, false));
-  const [shorts, setShorts] = useState<YouTubeForm>(() => initialForm(meta('youtube-shorts'), draft, true));
-  const [linkMain, setLinkMain] = useState(true);
-  const [tiktok, setTiktok] = useState({ file: meta('tiktok')?.render ?? '', caption: [meta('tiktok')?.title, meta('tiktok')?.description].filter(Boolean).join('\n\n') });
-  const [ttChecks, setTtChecks] = useState<Record<string, boolean>>({});
-  const [approved, setApproved] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [state, setState] = useState<Record<PostId, PostState>>({ youtube: { status: 'idle' }, tiktok: { status: 'idle' }, 'youtube-shorts': { status: 'idle' } });
-  const [current, setCurrent] = useState<PostId | null>(null);
-
-  useEffect(() => {
-    void api.invoke('publish:youtubeStatus').then(setAcct);
-  }, []);
-  useEffect(
-    () =>
-      api.on('publish:progress', (p: YouTubeProgress) => {
-        if (!current) return;
-        if (p.phase === 'upload' && p.total) setState((s) => ({ ...s, [current]: { ...s[current], progress: (p.sent ?? 0) / p.total! } }));
-      }),
-    [current],
-  );
-
-  const unapprove = () => setApproved(false);
-  const mainIssues = useMemo(() => (include.youtube ? validateYouTube(main) : []), [main, include.youtube]);
-  const shortsIssues = useMemo(() => (include['youtube-shorts'] ? validateYouTube(shorts) : []), [shorts, include]);
-  const ttReady = !include.tiktok || (Boolean(tiktok.file) && TIKTOK_CHECKS.every((k) => ttChecks[k]));
-  const needsYouTube = include.youtube || include['youtube-shorts'];
-  const blocked = mainIssues.length > 0 || shortsIssues.length > 0 || !ttReady || (needsYouTube && !acct?.connected) || !POSTS.some((p) => include[p]);
-  const checklist = publishChecklist({
-    include,
-    mainIssues: mainIssues.length,
-    shortsIssues: shortsIssues.length,
-    tiktokFile: Boolean(tiktok.file),
-    tiktokChecks: TIKTOK_CHECKS.every((k) => ttChecks[k]),
-    connected: Boolean(acct?.connected),
-  });
-
-  const connect = async () => {
-    const r = await api.invoke('publish:youtubeConnect');
-    if (!r.ok) toast(`${t('pub.connectFailed')}: ${r.error}`);
-    setAcct(await api.invoke('publish:youtubeStatus'));
-  };
-
-  const set = (id: PostId, p: PostState) => setState((s) => ({ ...s, [id]: p }));
-
-  /** Posts everything that is included, in order: YouTube main → Shorts (links to main) → TikTok (manual). */
-  const postAll = async () => {
-    setRunning(true);
-    let mainUrl: string | undefined;
-    try {
-      if (include.youtube) {
-        setCurrent('youtube');
-        set('youtube', { status: 'running', progress: 0 });
-        await api.invoke('publish:saveMeta', dir, 'youtube', main).catch(() => undefined);
-        const r = await api.invoke('publish:youtubeUpload', dir, main, 'youtube');
-        set('youtube', r.ok ? { status: 'done', url: r.url, message: r.warnings.join(' / ') } : { status: 'failed', message: r.error });
-        mainUrl = r.url;
-      } else set('youtube', { status: 'skipped' });
-      if (include['youtube-shorts']) {
-        setCurrent('youtube-shorts');
-        set('youtube-shorts', { status: 'running', progress: 0 });
-        const form = linkMain && mainUrl ? { ...shorts, description: `${shorts.description.trim()}\n\n${t('pub.fullVideo')}: ${mainUrl}`.trim() } : shorts;
-        await api.invoke('publish:saveMeta', dir, 'youtube-shorts', form).catch(() => undefined);
-        const r = await api.invoke('publish:youtubeUpload', dir, form, 'youtube-shorts');
-        set('youtube-shorts', r.ok ? { status: 'done', url: r.url, message: r.warnings.join(' / ') } : { status: 'failed', message: r.error });
-      } else set('youtube-shorts', { status: 'skipped' });
-      if (include.tiktok) {
-        setCurrent('tiktok');
-        await navigator.clipboard.writeText(tiktok.caption).catch(() => undefined);
-        await api.invoke('publish:manual', dir, 'tiktok', tiktok.file);
-        set('tiktok', { status: 'done', message: t('pub.ttOpened') });
-      } else set('tiktok', { status: 'skipped' });
-    } catch (e) {
-      toast(errMsg(e));
-    } finally {
-      setCurrent(null);
-      setRunning(false);
-      setApproved(false);
-    }
-    onFinished(mainUrl);
-  };
-
-  return (
-    <div className="pub-grid">
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <strong>{t('pub.account')}</strong>
-          {acct?.connected ? (
-            <span className="row">
-              <span className="pill okp">{t('pub.connected')}</span>
-              <button className="btn small ghost" onClick={() => void api.invoke('publish:youtubeDisconnect').then(() => api.invoke('publish:youtubeStatus').then(setAcct))}>
-                <Link2Off size={13} /> {t('pub.disconnect')}
-              </button>
-            </span>
-          ) : acct?.clientSet ? (
-            <button className="btn small" onClick={() => void connect()}>
-              <Link2 size={13} /> {t('pub.connect')}
-            </button>
-          ) : (
-            <button className="btn small" onClick={onOpenSettings}>
-              {t('pub.setClient')}
-            </button>
-          )}
-        </div>
-        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-          {t('pub.byoNote')}
-        </div>
-      </div>
-
-      <div className="posts">
-        <PostCard id="youtube" title={t('pub.post.youtube')} include={include.youtube} onInclude={(v) => (setInclude((x) => ({ ...x, youtube: v })), unapprove())} state={state.youtube}>
-          <YouTubeFields form={main} setForm={(f) => (setMain(f), unapprove())} draft={draft} meta={meta('youtube')} vertical={false} />
-        </PostCard>
-        <PostCard id="tiktok" title={t('pub.post.tiktok')} include={include.tiktok} onInclude={(v) => (setInclude((x) => ({ ...x, tiktok: v })), unapprove())} state={state.tiktok}>
-          <div className="dim" style={{ fontSize: 12 }}>
-            {t('pub.manualNote')}
-          </div>
-          <FileSelect label={t('pub.video')} value={tiktok.file} options={draft.videos} onChange={(file) => (setTiktok((x) => ({ ...x, file })), unapprove())} required />
-          <div className="field">
-            <label>{t('pub.caption')}</label>
-            <textarea className="input" rows={5} value={tiktok.caption} onChange={(e) => (setTiktok((x) => ({ ...x, caption: e.target.value })), unapprove())} />
-          </div>
-          <div className="field">
-            <label>{t('pub.checklist')}</label>
-            {TIKTOK_CHECKS.map((k) => (
-              <label key={k} className="check">
-                <input type="checkbox" checked={Boolean(ttChecks[k])} onChange={(e) => (setTtChecks((d) => ({ ...d, [k]: e.target.checked })), unapprove())} />
-                {t(k)}
-              </label>
-            ))}
-          </div>
-        </PostCard>
-        <PostCard
-          id="youtube-shorts"
-          title={t('pub.post.shorts')}
-          include={include['youtube-shorts']}
-          onInclude={(v) => (setInclude((x) => ({ ...x, 'youtube-shorts': v })), unapprove())}
-          state={state['youtube-shorts']}
-        >
-          <YouTubeFields form={shorts} setForm={(f) => (setShorts(f), unapprove())} draft={draft} meta={meta('youtube-shorts')} vertical />
-          <label className="check">
-            <input type="checkbox" checked={linkMain} onChange={(e) => (setLinkMain(e.target.checked), unapprove())} />
-            {t('pub.linkMain')}
-          </label>
-        </PostCard>
-      </div>
-
-      <section className="approve" data-testid="publish-checklist">
-        <header className="approve__head">
-          <ListChecks size={15} aria-hidden="true" />
-          <h3 className="approve__title">{st('pub.checklist.title')}</h3>
-          <span className="approve__count">
-            {checklist.filter((c) => c.ok).length}/{checklist.length}
-          </span>
-        </header>
-        <ul className="approve__list">
-          {checklist.map((c) => (
-            <li key={c.id} className={`approve__item${c.ok ? ' is-ok' : ''}`}>
-              {c.ok ? <CheckCircle2 size={15} aria-hidden="true" /> : <XCircle size={15} aria-hidden="true" />}
-              <span>{st(`pub.check.${c.id}` as SKey, { n: String(c.issues ?? 0) })}</span>
-              {c.id === 'account' && !c.ok && acct?.clientSet && (
-                <Button size="sm" icon={<Link2 size={13} />} onClick={() => void connect()}>
-                  {t('pub.connect')}
-                </Button>
+      <div className="pub">
+        {!view ? (
+          <div className="dim pub__loading">{t('common.loading')}</div>
+        ) : !view.exists || !spec ? (
+          <EmptyState
+            title={view.exists ? t('pub.brokenTitle') : t('pub.noFileTitle')}
+            description={view.exists ? view.issues.map((i) => issueText(i, lang)).join(' / ') : t('pub.noFileText')}
+            actions={
+              <Button variant="primary" icon={<Sparkles size={14} />} busy={busy === 'fix'} onClick={() => void send(view.exists ? fixRequestText('') : t('pub.makeRequest'), 'fix')}>
+                {view.exists ? t('pub.askFix') : t('pub.askMake')}
+              </Button>
+            }
+          />
+        ) : (
+          <div className="pub__body">
+            <section className="pub__media">
+              {view.videoPath ? (
+                <video className="pub__video" src={api.mediaUrl(view.videoPath)} controls preload="metadata" poster={view.thumbnailPath ? api.mediaUrl(view.thumbnailPath) : undefined} />
+              ) : (
+                <div className="pub__video pub__video--missing">
+                  <AlertTriangle size={18} /> {t('pub.noVideo', { path: spec.video })}
+                </div>
               )}
-              {c.id === 'account' && !c.ok && !acct?.clientSet && (
-                <Button size="sm" onClick={onOpenSettings}>
-                  {t('pub.setClient')}
+              <div className="pub__thumbrow">
+                <div className="pub__thumb">{view.thumbnailPath ? <img src={api.mediaUrl(view.thumbnailPath)} alt="" /> : <span className="dim">{t('pub.noThumb')}</span>}</div>
+                <div className="pub__thumbmeta">
+                  <span className="pub__label">{t('pub.thumbnail')}</span>
+                  <span className="mono dim">{spec.thumbnail ?? '—'}</span>
+                  <span className="dim pub__hint">{t('pub.thumbHint')}</span>
+                </div>
+              </div>
+              <ResultPanel view={view} />
+            </section>
+
+            <section className="pub__side">
+              <div className="pub__fields">
+                <Field label={t('pub.title')} count={`${charCount(spec.title)}/${YT_TITLE_MAX}`} over={charCount(spec.title) > YT_TITLE_MAX}>
+                  <div className="pub__title">{spec.title || <span className="dim">—</span>}</div>
+                </Field>
+                <Field label={t('pub.description')} count={`${utf8Bytes(spec.description)}/${YT_DESCRIPTION_MAX_BYTES} bytes`} over={utf8Bytes(spec.description) > YT_DESCRIPTION_MAX_BYTES}>
+                  <div className="pub__desc">{spec.description || <span className="dim">—</span>}</div>
+                </Field>
+                <Field label={t('pub.tags')}>
+                  <div className="pub__tags">
+                    {spec.tags.length ? spec.tags.map((x) => <span key={x} className="pub__tag">#{x}</span>) : <span className="dim">—</span>}
+                  </div>
+                </Field>
+                <TargetRow
+                  target="youtube"
+                  on={spec.youtube.enabled}
+                  account={accounts?.youtube}
+                  published={view.published.youtube?.url}
+                  detail={[
+                    t(`pub.privacy.${spec.youtube.privacy}` as TKey),
+                    spec.youtube.publishAt ? t('pub.scheduled', { at: new Date(spec.youtube.publishAt).toLocaleString() }) : '',
+                    spec.youtube.madeForKids ? t('pub.forKids') : t('pub.notForKids'),
+                    spec.youtube.containsSyntheticMedia ? t('pub.synthetic') : '',
+                  ]}
+                  onConnect={() => void connect('youtube')}
+                  onOpenSettings={onOpenSettings}
+                  busy={busy === 'connect'}
+                />
+                <TargetRow
+                  target="tiktok"
+                  on={spec.tiktok.enabled}
+                  account={accounts?.tiktok}
+                  published={view.published.tiktok?.url}
+                  detail={[t(`pub.ttPrivacy.${spec.tiktok.privacy}` as TKey), spec.tiktok.isAigc ? t('pub.aigc') : '']}
+                  caption={spec.tiktok.enabled ? spec.tiktok.caption : undefined}
+                  onConnect={() => void connect('tiktok')}
+                  onOpenSettings={onOpenSettings}
+                  onManual={() => void api.invoke('publish:openTikTokUpload', dir)}
+                  busy={busy === 'connect'}
+                />
+              </div>
+
+              {(errors.length > 0 || warnings.length > 0) && <Issues errors={errors} warnings={warnings} lang={lang} />}
+
+              <div className="pub__fix">
+                <input
+                  className="input"
+                  type="text"
+                  value={fix}
+                  placeholder={t('pub.fixPlaceholder')}
+                  onChange={(e) => setFix(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) void send(fixRequestText(fix), 'fix');
+                  }}
+                />
+                <Button size="sm" icon={<Sparkles size={13} />} busy={busy === 'fix'} onClick={() => void send(fixRequestText(fix), 'fix')}>
+                  {t('pub.askFix')}
                 </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <footer className="approve__foot">
-          <label className={`approve__confirm${blocked ? ' is-disabled' : ''}`}>
-            <input type="checkbox" checked={approved} disabled={blocked || running} onChange={(e) => setApproved(e.target.checked)} />
-            <span>
-              <strong>{t('pub.approveAll')}</strong>
-              <span className="approve__note">{st('pub.approveNote')}</span>
-            </span>
-          </label>
-          <Button variant="primary" icon={running ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} disabled={!approved || blocked || running} onClick={() => void postAll()} data-testid="publish-post-all">
-            {t('pub.postAll')}
-          </Button>
-        </footer>
-      </section>
-    </div>
-  );
-}
+              </div>
 
-function PostCard({ id, title, include, onInclude, state, children }: { id: PostId; title: string; include: boolean; onInclude: (v: boolean) => void; state: PostState; children: React.ReactNode }) {
-  const t = useT();
-  return (
-    <div className={`card form post ${include ? '' : 'off'}`} data-post={id}>
-      <div className="post__head">
-        <label className="check post__include">
-          <input type="checkbox" checked={include} onChange={(e) => onInclude(e.target.checked)} />
-          <span className={`post__shape post__shape--${id === 'youtube' ? 'h' : 'v'}`} aria-hidden="true" />
-          <strong>{title}</strong>
-        </label>
-        <PostStatus s={state} />
-      </div>
-      {include ? children : <div className="dim">{t('pub.excluded')}</div>}
-    </div>
-  );
-}
-
-function PostStatus({ s }: { s: PostState }) {
-  const t = useT();
-  if (s.status === 'idle') return null;
-  if (s.status === 'running')
-    return (
-      <span className="row dim" style={{ fontSize: 12 }}>
-        <Loader2 size={13} className="spin" /> {s.progress !== undefined ? `${Math.round(s.progress * 100)}%` : ''}
-      </span>
-    );
-  if (s.status === 'skipped') return <span className="pill">{t('pub.skipped')}</span>;
-  if (s.status === 'failed')
-    return (
-      <span className="pill accent" title={s.message}>
-        <XCircle size={12} /> {t('pub.failed')}
-      </span>
-    );
-  return (
-    <span className="row" style={{ gap: 6 }}>
-      <span className="pill okp">
-        <CheckCircle2 size={12} /> {t('pub.posted')}
-      </span>
-      {s.url && (
-        <a href="#" style={{ fontSize: 12 }} onClick={(e) => (e.preventDefault(), void api.invoke('app:openExternal', s.url!))}>
-          {s.url}
-        </a>
-      )}
-    </span>
-  );
-}
-
-function YouTubeFields({ form, setForm, draft, meta, vertical }: { form: YouTubeForm; setForm: (f: YouTubeForm) => void; draft: PublishDraft; meta?: PublishTarget; vertical: boolean }) {
-  const t = useT();
-  const [tagsText, setTagsText] = useState(form.tags.join(', '));
-  const set = <K extends keyof YouTubeForm>(k: K, v: YouTubeForm[K]) => setForm({ ...form, [k]: v });
-  const issues = validateYouTube(form);
-  const issueFor = (f: keyof YouTubeForm) => issues.find((i) => i.field === f);
-  return (
-    <>
-      <FileSelect label={t('pub.video')} value={form.videoPath} options={draft.videos} onChange={(v) => set('videoPath', v)} required />
-      <div className="field">
-        <label>
-          {t('pub.title')} <Counter n={charCount(form.title)} max={YT_TITLE_MAX} />
-        </label>
-        <input className="input" type="text" value={form.title} onChange={(e) => set('title', e.target.value)} />
-        {meta && meta.titleCandidates.length > 0 && (
-          <div className="row wrap" style={{ gap: 4 }}>
-            {meta.titleCandidates.map((c) => (
-              <button key={c} className="btn small ghost" onClick={() => set('title', c)}>
-                {c}
-              </button>
-            ))}
+              <div className="pub__go">
+                <OkButton state={state} busy={busy === 'ok'} onOk={() => void postOk()} onConnect={(x) => void connect(x)} />
+                {errors.length > 0 && state.kind === 'ready' && <div className="dim pub__hint">{t('pub.okWithIssues')}</div>}
+              </div>
+            </section>
           </div>
         )}
-        <Issue issue={issueFor('title')} />
-      </div>
-      <div className="field">
-        <label>
-          {t('pub.description')} <Counter n={utf8Bytes(form.description)} max={YT_DESCRIPTION_MAX_BYTES} unit="bytes" />
-        </label>
-        <textarea className="input" rows={vertical ? 4 : 7} value={form.description} onChange={(e) => set('description', e.target.value)} />
-        <Issue issue={issueFor('description')} />
-      </div>
-      <div className="field">
-        <label>{t('pub.tags')}</label>
-        <input
-          className="input"
-          type="text"
-          value={tagsText}
-          onChange={(e) => {
-            setTagsText(e.target.value);
-            set('tags', parseTags(e.target.value));
-          }}
-        />
-        <Issue issue={issueFor('tags')} />
-      </div>
-      <div className="grid2">
-        <div className="field">
-          <label>{t('pub.privacy')}</label>
-          <select className="input" value={form.privacy} onChange={(e) => set('privacy', e.target.value as YouTubeForm['privacy'])}>
-            <option value="private">{t('pub.private')}</option>
-            <option value="unlisted">{t('pub.unlisted')}</option>
-            <option value="public">{t('pub.public')}</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>{t('pub.publishAt')}</label>
-          <input
-            className="input"
-            type="datetime-local"
-            value={form.publishAt ? toLocalInput(form.publishAt) : ''}
-            onChange={(e) => set('publishAt', e.target.value ? new Date(e.target.value).toISOString() : undefined)}
-          />
-          <Issue issue={issueFor('publishAt')} />
-        </div>
-        <div className="field">
-          <label>{t('pub.category')}</label>
-          <select className="input" value={form.categoryId} onChange={(e) => set('categoryId', e.target.value)}>
-            <option value="28">Science &amp; Technology</option>
-            <option value="27">Education</option>
-            <option value="22">People &amp; Blogs</option>
-            <option value="24">Entertainment</option>
-            <option value="26">Howto &amp; Style</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>{t('pub.language')}</label>
-          <select className="input" value={form.language} onChange={(e) => set('language', e.target.value)}>
-            <option value="ja">日本語</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-      </div>
-      <div className="field">
-        <label>{t('pub.madeForKids')} *</label>
-        <div className="row">
-          <label className="check">
-            <input type="radio" checked={form.madeForKids === false} onChange={() => set('madeForKids', false)} /> {t('pub.notForKids')}
-          </label>
-          <label className="check">
-            <input type="radio" checked={form.madeForKids === true} onChange={() => set('madeForKids', true)} /> {t('pub.forKids')}
-          </label>
-        </div>
-        <Issue issue={issueFor('madeForKids')} />
-      </div>
-      <label className="check">
-        <input type="checkbox" checked={form.containsSyntheticMedia} onChange={(e) => set('containsSyntheticMedia', e.target.checked)} />
-        {t('pub.synthetic')}
-      </label>
-      <FileSelect label={t('pub.thumbnail')} value={form.thumbnailPath ?? ''} options={draft.images} onChange={(v) => set('thumbnailPath', v || undefined)} />
-      {!vertical && <FileSelect label={t('pub.captions')} value={form.captionsPath ?? ''} options={draft.captions} onChange={(v) => set('captionsPath', v || undefined)} />}
-    </>
-  );
-}
-
-const IG_CHECKS: TKey[] = ['pub.ig.caption', 'pub.ig.cover', 'pub.ig.vertical'];
-
-function InstagramPanel({ dir, draft, onDone }: { dir: string; draft: PublishDraft; onDone: () => void }) {
-  const t = useT();
-  const [file, setFile] = useState(draft.targets.find((x) => x.target === 'tiktok')?.render ?? draft.videos[0] ?? '');
-  const [done, setDone] = useState<Record<string, boolean>>({});
-  const all = IG_CHECKS.every((k) => done[k]);
-  return (
-    <div className="pub-grid">
-      <div className="card form">
-        <strong>{t('pub.instagram')}</strong>
-        <div className="dim">{t('pub.manualNote')}</div>
-        <FileSelect label={t('pub.video')} value={file} options={draft.videos} onChange={setFile} required />
-        <div className="field">
-          <label>{t('pub.checklist')}</label>
-          {IG_CHECKS.map((k) => (
-            <label key={k} className="check">
-              <input type="checkbox" checked={Boolean(done[k])} onChange={(e) => setDone((d) => ({ ...d, [k]: e.target.checked }))} />
-              {t(k)}
-            </label>
-          ))}
-        </div>
-        <div className="row">
-          <button className="btn primary" disabled={!file || !all} onClick={() => void api.invoke('publish:manual', dir, 'instagram', file).then(onDone)}>
-            <ExternalLink size={14} /> {t('pub.openSite')}
-          </button>
-        </div>
       </div>
     </div>
   );
 }
 
-const ANNOUNCE: AnnouncePlatform[] = ['x', 'threads', 'facebook'];
-
-function AnnouncePanel({ dir, draft, url, setUrl, onDone }: { dir: string; draft: PublishDraft; url: string; setUrl: (u: string) => void; onDone: () => void }) {
-  const t = useT();
-  const initial = draft.targets.find((x) => x.target === 'youtube')?.title ?? '';
-  const [texts, setTexts] = useState<Record<AnnouncePlatform, string>>({ x: initial, threads: initial, facebook: initial });
-  const [ok, setOk] = useState<Record<AnnouncePlatform, boolean>>({ x: false, threads: false, facebook: false });
-  const urls = [...new Set(draft.history.filter((h) => h.url).map((h) => h.url!))].slice(0, 6);
+function Field({ label, count, over, children }: { label: string; count?: string; over?: boolean; children: React.ReactNode }) {
   return (
-    <div className="pub-grid">
-      <div className="card form">
-        <div className="field">
-          <label>{t('pub.url')}</label>
-          <input className="input mono" type="text" value={url} placeholder="https://youtu.be/…" onChange={(e) => setUrl(e.target.value)} />
-          {urls.length > 0 && (
-            <div className="row wrap" style={{ gap: 4 }}>
-              {urls.map((u) => (
-                <button key={u} className="btn small ghost mono" onClick={() => setUrl(u)}>
-                  {u}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+    <div className="pub__field">
+      <div className="pub__fieldhead">
+        <span className="pub__label">{label}</span>
+        {count && <span className={`mono pub__count${over ? ' is-over' : ''}`}>{count}</span>}
       </div>
-      {ANNOUNCE.map((p) => {
-        const len = announceLength(p, texts[p], url);
-        const over = len > ANNOUNCE_LIMITS[p];
-        return (
-          <div key={p} className="card form">
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <strong>{p === 'x' ? 'X' : p === 'threads' ? 'Threads' : 'Facebook'}</strong>
-              <Counter n={len} max={ANNOUNCE_LIMITS[p]} />
-            </div>
-            <textarea
-              className="input"
-              rows={p === 'facebook' ? 3 : 4}
-              value={texts[p]}
-              onChange={(e) => {
-                setTexts((x) => ({ ...x, [p]: e.target.value }));
-                setOk((x) => ({ ...x, [p]: false }));
-              }}
-            />
-            {p === 'facebook' && <div className="dim" style={{ fontSize: 12 }}>{t('pub.fbNote')}</div>}
-            <div className="row">
-              <label className="check">
-                <input type="checkbox" checked={ok[p]} disabled={over || (p === 'facebook' && !url)} onChange={(e) => setOk((x) => ({ ...x, [p]: e.target.checked }))} />
-                {t('pub.approve')}
-              </label>
-              <span style={{ flex: 1 }} />
-              <button
-                className="btn primary small"
-                disabled={!ok[p] || over}
-                onClick={() => {
-                  if (p === 'facebook') void navigator.clipboard.writeText(texts[p]).catch(() => undefined);
-                  void api.invoke('publish:openIntent', dir, p, texts[p], url).then(onDone);
-                  setOk((x) => ({ ...x, [p]: false }));
-                }}
-              >
-                <ExternalLink size={13} /> {t('pub.openComposer')}
-              </button>
-            </div>
-          </div>
-        );
-      })}
+      {children}
     </div>
   );
 }
 
-function History({ draft }: { draft: PublishDraft }) {
+function TargetRow({
+  target,
+  on,
+  account,
+  published,
+  detail,
+  caption,
+  onConnect,
+  onOpenSettings,
+  onManual,
+  busy,
+}: {
+  target: PublishTargetId;
+  on: boolean;
+  account?: PublishAccounts[PublishTargetId];
+  published?: string;
+  detail: string[];
+  caption?: string;
+  onConnect: () => void;
+  onOpenSettings: () => void;
+  onManual?: () => void;
+  busy: boolean;
+}) {
   const t = useT();
-  if (draft.history.length === 0) return <div className="card empty">{t('pub.noHistory')}</div>;
   return (
-    <div className="card" style={{ padding: 0 }}>
-      <table className="table">
-        <tbody>
-          {draft.history.map((h, i) => (
-            <tr key={i}>
-              <td className="mono dim" style={{ width: 170 }}>
-                {new Date(h.at).toLocaleString()}
-              </td>
-              <td>{h.target}</td>
-              <td>
-                <span className={`pill ${h.status === 'failed' ? 'accent' : h.status === 'published' || h.status === 'scheduled' ? 'okp' : ''}`}>{h.status}</span>
-              </td>
-              <td className="dim">{h.method}</td>
-              <td className="mono" style={{ fontSize: 11.5 }}>
-                {h.url ? (
-                  <a href="#" onClick={(e) => (e.preventDefault(), void api.invoke('app:openExternal', h.url!))}>
-                    {h.url}
-                  </a>
-                ) : (
-                  (h.error ?? '')
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className={`pub__target${on ? '' : ' is-off'}`} data-target={target}>
+      <div className="pub__targethead">
+        <strong>{TARGET_LABEL[target]}</strong>
+        <Badge tone={on ? 'brand' : 'neutral'}>{on ? t('pub.on') : t('pub.off')}</Badge>
+        <span className="grow" />
+        {!account ? null : account.connected ? (
+          <span className="dim pub__acct" title={t('pub.connected')}>
+            <CheckCircle2 size={12} /> {account.name ?? t('pub.connected')}
+          </span>
+        ) : account.configured ? (
+          <Button size="sm" variant="ghost" icon={<Link2 size={13} />} busy={busy} onClick={onConnect}>
+            {t('pub.connect')}
+          </Button>
+        ) : target === 'tiktok' ? (
+          <span className="dim pub__acct">{t('pub.ttPreparing')}</span>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={onOpenSettings}>
+            {t('pub.accountsSettings')}
+          </Button>
+        )}
+      </div>
+      {on && <div className="dim pub__detail">{detail.filter(Boolean).join(' · ')}</div>}
+      {caption !== undefined && <div className="pub__caption">{caption}</div>}
+      {published && (
+        <a className="pub__link" href="#" onClick={(e) => (e.preventDefault(), void api.invoke('app:openExternal', published))}>
+          <ExternalLink size={12} /> {published}
+        </a>
+      )}
+      {target === 'tiktok' && account && !account.configured && onManual && (
+        <Button size="sm" icon={<ExternalLink size={13} />} onClick={onManual}>
+          {t('pub.ttManual')}
+        </Button>
+      )}
     </div>
   );
 }
 
-function FileSelect({ label, value, options, onChange, required }: { label: string; value: string; options: string[]; onChange: (v: string) => void; required?: boolean }) {
+function Issues({ errors, warnings, lang }: { errors: PublishIssue[]; warnings: PublishIssue[]; lang: 'ja' | 'en' }) {
   const t = useT();
-  const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
-    <div className="field">
-      <label>
-        {label}
-        {required ? ' *' : ''}
-      </label>
-      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-        {!required && <option value="">{t('pub.none')}</option>}
-        {required && !value && <option value="">—</option>}
-        {opts.map((o) => (
-          <option key={o} value={o} title={o}>
-            {base(o)}
-          </option>
+    <div className="pub__issues">
+      {errors.length > 0 && (
+        <>
+          <div className="pub__label">{t('pub.errors', { n: String(errors.length) })}</div>
+          <ul>
+            {errors.map((i, k) => (
+              <li key={`e${k}`} className="is-error">
+                <XCircle size={12} /> {issueText(i, lang)}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {warnings.length > 0 && (
+        <details>
+          <summary className="pub__label">{t('pub.warnings', { n: String(warnings.length) })}</summary>
+          <ul>
+            {warnings.map((i, k) => (
+              <li key={`w${k}`}>
+                <AlertTriangle size={12} /> {issueText(i, lang)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function OkButton({ state, busy, onOk, onConnect }: { state: ReturnType<typeof okState>; busy: boolean; onOk: () => void; onConnect: (t: PublishTargetId) => void }) {
+  const t = useT();
+  if (state.kind === 'connect')
+    return (
+      <Button variant="primary" className="pub__ok" icon={<Link2 size={16} />} onClick={() => onConnect(state.target)}>
+        {t('pub.connectFirst', { target: TARGET_LABEL[state.target] })}
+      </Button>
+    );
+  const label: Record<typeof state.kind, TKey> = {
+    ready: 'pub.ok',
+    'no-file': 'pub.ok',
+    'no-video': 'pub.okNoVideo',
+    'no-target': 'pub.okNoTarget',
+    sent: 'pub.okSent',
+    running: 'pub.okRunning',
+    published: 'pub.okPublished',
+  };
+  return (
+    <Button
+      variant="primary"
+      className="pub__ok"
+      data-testid="publish-ok"
+      icon={state.kind === 'sent' || state.kind === 'running' ? <Send size={16} /> : <Upload size={16} />}
+      busy={busy || state.kind === 'running'}
+      disabled={state.kind !== 'ready'}
+      onClick={onOk}
+    >
+      {t(label[state.kind])}
+    </Button>
+  );
+}
+
+function ResultPanel({ view }: { view: PublishView }) {
+  const t = useT();
+  const r = view.result;
+  if (!r) return null;
+  if (r.state === 'running') {
+    const p = r.progress;
+    return (
+      <div className="pub__result">
+        <div className="pub__label">{t('pub.uploading', { target: p ? TARGET_LABEL[p.target] : '' })}</div>
+        <Progress {...(p?.fraction !== undefined ? { value: p.fraction } : {})} label={t('pub.uploading', { target: '' })} />
+        {p?.phase && <div className="dim pub__hint">{p.phase}</div>}
+        {r.results.map((x) => (
+          <ResultLine key={x.target} r={x} />
         ))}
-      </select>
+      </div>
+    );
+  }
+  return (
+    <div className="pub__result">
+      <div className="pub__label">
+        {t('pub.lastResult')} <span className="dim">{r.at ? new Date(r.at).toLocaleString() : ''}</span>
+      </div>
+      {r.error && <div className="pub__err">{r.error}</div>}
+      {r.results.map((x) => (
+        <ResultLine key={x.target} r={x} />
+      ))}
     </div>
   );
 }
 
-function Counter({ n, max, unit }: { n: number; max: number; unit?: string }) {
-  return (
-    <span className={`mono ${n > max ? 'error' : 'dim'}`} style={{ fontSize: 11, marginLeft: 6 }}>
-      {n}/{max}
-      {unit ? ` ${unit}` : ''}
-    </span>
-  );
-}
-
-function Issue({ issue }: { issue?: { code: string } }) {
+function ResultLine({ r }: { r: PublishTargetResult }) {
   const t = useT();
-  if (!issue) return null;
-  return <span className="error" style={{ fontSize: 12 }}>{t(`pub.issue.${issue.code}` as TKey)}</span>;
-}
-
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return (
+    <div className={`pub__resline${r.ok ? ' is-ok' : ' is-fail'}`}>
+      {r.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+      <strong>{TARGET_LABEL[r.target]}</strong>
+      <span>{r.ok ? (r.alreadyPublished ? t('pub.already') : r.status === 'inbox' ? t('pub.inbox') : r.status === 'scheduled' ? t('pub.scheduledDone') : t('pub.posted')) : t('pub.failed')}</span>
+      {r.url && (
+        <a href="#" onClick={(e) => (e.preventDefault(), void api.invoke('app:openExternal', r.url!))}>
+          {r.url}
+        </a>
+      )}
+      {r.error && <span className="pub__err">{r.error}</span>}
+      {r.warnings?.map((w) => (
+        <span key={w} className="dim pub__hint">
+          {w}
+        </span>
+      ))}
+    </div>
+  );
 }

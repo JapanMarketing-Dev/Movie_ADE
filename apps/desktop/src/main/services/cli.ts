@@ -7,7 +7,6 @@ import { parseCliJson } from '../../shared/project';
 import { cliBinDir, cliScript, templatesDir } from '../paths';
 import { prependPath } from '../../shared/terminal';
 import { delimiter } from 'node:path';
-import { secretEnv } from './secrets';
 import { appPath } from '../shellPath';
 
 export function cliAvailable(): boolean {
@@ -25,7 +24,6 @@ export function solocutEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proces
     SOLOCUT_ELECTRON: process.execPath,
     SOLOCUT_TEMPLATES_DIR: base.SOLOCUT_TEMPLATES_DIR ?? templatesDir(),
     SOLOCUT_APP: '1',
-    ...secretEnv(),
   };
 }
 

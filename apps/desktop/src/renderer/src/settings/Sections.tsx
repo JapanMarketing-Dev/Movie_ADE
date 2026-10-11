@@ -1,16 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, Copy, Download, ExternalLink, LogIn, LogOut, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { ArrowDown, ArrowUp, Copy, Download, ExternalLink, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react';
 import type { AgentStatus, AppInfo, PromptButton } from '@shared/types';
-import { ApiKeys } from '../components/ApiKeys';
+import { AgentAccountsPanel } from '../components/AgentAccounts';
 import { api, errMsg } from '../lib/api';
-import { resetIn, useAgentUsage } from '../shell/agentUsage';
 import { useST, type SKey } from '../shell/i18n';
 import { layoutStore, useLayout, PANELS, type Panel } from '../shell/layout';
 import { SHORTCUT_SPECS, shortcutLabel, type ShortcutId } from '../shell/shortcut';
 import { agentsStore, setSetting, toolsStore, updateStore, useStore } from '../shell/stores';
 import { Badge, Button, Note, Progress, Segmented, Select, SettingRow, Switch, useToast, type SelectOption } from '../ui';
-import { SettingsFileCard } from './SettingsFileCard';
-import { getPath, moveItem, preferFirst } from './settingsSections';
+import { getPath, moveItem, promptSettingValue } from './settingsSections';
 
 type Json = Record<string, unknown>;
 
@@ -48,40 +46,32 @@ function Sub({ children }: { children: ReactNode }) {
 export function GeneralSection({ json }: { json: Json }) {
   const t = useST();
   const set = useSet();
-  const stopBefore = list(json, 'autopilot.stopBefore', ['publish']);
+  const [root, setRoot] = useState<string | null>(null);
+  useEffect(() => {
+    const load = () => void api.invoke('videos:list').then((v) => setRoot(v.root)).catch(() => setRoot(null));
+    load();
+    return api.on('settings:changed', load);
+  }, []);
+  const shown = root ?? str(json, 'videos.root', '~/Movies/Solocut');
+  const change = async () => {
+    const dir = await api.invoke('app:chooseFolder', t('settings.general.chooseRoot'));
+    if (dir) set('videos.root', dir);
+  };
   return (
     <>
-      <Sub>{t('settings.general.autopilot')}</Sub>
-      <Note>{t('settings.general.autopilotNote')}</Note>
-      <Switch
-        label={t('settings.general.stopBeforePublish')}
-        checked={stopBefore.includes('publish')}
-        onChange={(on) => set('autopilot.stopBefore', on ? [...new Set([...stopBefore, 'publish'])] : stopBefore.filter((x) => x !== 'publish'))}
-      />
-      <SettingRow label={t('settings.general.maxFixLoops')}>
-        <Select
-          ariaLabel={t('settings.general.maxFixLoops')}
-          value={num(json, 'autopilot.maxFixLoops', 3)}
-          options={[0, 1, 2, 3, 5, 8, 10].map((n) => ({ value: n, label: t('settings.general.times', { n: String(n) }) }))}
-          onChange={(v) => set('autopilot.maxFixLoops', v)}
-        />
+      <SettingRow label={t('settings.general.root')}>
+        <span className="st-inline">
+          <code className="st-value st-value--mono st-value--clip" title={shown}>
+            {shown}
+          </code>
+          <Button size="sm" icon={<FolderOpen size={13} />} onClick={() => void change()} data-testid="settings-videos-root">
+            {t('settings.general.change')}
+          </Button>
+        </span>
       </SettingRow>
-      <SettingRow label={t('settings.general.budget')}>
-        <Select
-          ariaLabel={t('settings.general.budget')}
-          value={num(json, 'autopilot.budget.decisionUsd', 2)}
-          options={[0, 0.5, 1, 2, 5, 10].map((n) => ({ value: n, label: `$${n}` }))}
-          onChange={(v) => set('autopilot.budget.decisionUsd', v)}
-        />
-      </SettingRow>
-      <Note>{t('settings.general.budgetNote')}</Note>
-      <Sub>{t('settings.general.archive')}</Sub>
-      <Switch label={t('settings.general.keepPreview')} checked={bool(json, 'archive.keepPreview', true)} onChange={(v) => set('archive.keepPreview', v)} />
-      <Switch
-        label={t('settings.general.autoRegister')}
-        checked={list(json, 'archive.autoRegister', ['export', 'publish']).length > 0}
-        onChange={(v) => set('archive.autoRegister', v ? ['export', 'publish'] : [])}
-      />
+      <Note>{t('settings.general.rootNote')}</Note>
+      <Switch label={t('settings.general.autoStart')} checked={bool(json, 'autopilot.autoStart', true)} onChange={(v) => set('autopilot.autoStart', v)} />
+      <Note>{t('settings.general.autoStartNote')}</Note>
     </>
   );
 }
@@ -330,116 +320,6 @@ function ToolInstallNote({ name }: { name: string }) {
   );
 }
 
-// ---------- decision model ----------
-const DECISION_PROVIDERS = ['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'ollama', 'openai', 'typesafe', 'off'] as const;
-const CLI_AGENT: Record<string, string> = { 'claude-cli': 'claude', 'codex-cli': 'codex', 'gemini-cli': 'gemini' };
-
-export function DecisionSection({ json }: { json: Json }) {
-  const t = useST();
-  const set = useSet();
-  const agents = useStore(agentsStore);
-  const provider = str(json, 'decision.provider', 'auto');
-  const order = list(json, 'agents.order', ['claude', 'codex', 'gemini']);
-  const installed = (agents ?? []).filter((a) => a.installed && ['claude', 'codex', 'gemini'].includes(a.id));
-  const auto = order.map((id) => installed.find((a) => a.id === id)).find(Boolean) ?? installed[0];
-  const api_ = provider === 'openai' || provider === 'typesafe' || provider === 'ollama';
-  const label = (p: string) => {
-    if (p === 'auto') return t('settings.decision.auto');
-    if (CLI_AGENT[p]) return t('settings.decision.cli', { agent: agents?.find((a) => a.id === CLI_AGENT[p])?.label ?? CLI_AGENT[p]! });
-    if (p === 'off') return t('settings.decision.off');
-    if (p === 'ollama') return t('settings.decision.ollama');
-    return t('settings.decision.api', { name: p });
-  };
-  return (
-    <>
-      <Note>{t('settings.decision.intro')}</Note>
-      <SettingRow label={t('settings.decision.provider')}>
-        <Select ariaLabel={t('settings.decision.provider')} value={provider} options={DECISION_PROVIDERS.map((p) => ({ value: p, label: label(p) }))} onChange={(v) => set('decision.provider', v)} wide />
-      </SettingRow>
-      {agents === null ? null : provider === 'auto' ? (
-        auto ? (
-          <Note tone="ok">{t('settings.decision.autoUses', { agent: `${auto.label}${auto.version ? ` ${auto.version}` : ''}` })}</Note>
-        ) : (
-          <Note tone="warn">{t('settings.decision.noAgent')}</Note>
-        )
-      ) : CLI_AGENT[provider] && !installed.some((a) => a.id === CLI_AGENT[provider]) ? (
-        <Note tone="warn">{t('settings.decision.notInstalled')}</Note>
-      ) : null}
-      {api_ && (
-        <>
-          <SettingRow label={t('settings.decision.model')}>
-            <ModelInput value={str(json, 'decision.model', 'qwen3-vl')} onCommit={(v) => set('decision.model', v)} />
-          </SettingRow>
-          <Switch label={t('settings.decision.cloudConsent')} checked={bool(json, 'decision.cloudConsent', false)} onChange={(v) => set('decision.cloudConsent', v)} />
-          <Note>{t('settings.decision.cloudNote')}</Note>
-        </>
-      )}
-      <Sub>{t('settings.decision.limits')}</Sub>
-      <SettingRow label={t('settings.decision.perProjectCalls')}>
-        <Select
-          ariaLabel={t('settings.decision.perProjectCalls')}
-          value={num(json, 'decision.limits.perProjectCalls', 200)}
-          options={[50, 100, 200, 500, 1000].map((n) => ({ value: n, label: String(n) }))}
-          onChange={(v) => set('decision.limits.perProjectCalls', v)}
-        />
-      </SettingRow>
-      <SettingRow label={t('settings.decision.perProjectUsd')}>
-        <Select ariaLabel={t('settings.decision.perProjectUsd')} value={num(json, 'decision.limits.perProjectUsd', 2)} options={[0, 1, 2, 5, 10, 20].map((n) => ({ value: n, label: `$${n}` }))} onChange={(v) => set('decision.limits.perProjectUsd', v)} />
-      </SettingRow>
-      <SettingRow label={t('settings.decision.perDayUsd')}>
-        <Select ariaLabel={t('settings.decision.perDayUsd')} value={num(json, 'decision.limits.perDayUsd', 5)} options={[0, 1, 5, 10, 20, 50].map((n) => ({ value: n, label: `$${n}` }))} onChange={(v) => set('decision.limits.perDayUsd', v)} />
-      </SettingRow>
-      <Note>{t('settings.decision.limitsNote')}</Note>
-    </>
-  );
-}
-
-function ModelInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-  return (
-    <input
-      className="st-input"
-      value={draft}
-      spellCheck={false}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => draft.trim() && draft !== value && onCommit(draft.trim())}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-      }}
-    />
-  );
-}
-
-// ---------- image generation ----------
-export function ImageGenSection({ json }: { json: Json }) {
-  const t = useST();
-  const set = useSet();
-  const order = list(json, 'imageGen.order', ['codex', 'gemini', 'openai']);
-  const first = order[0] ?? 'codex';
-  return (
-    <>
-      <SettingRow label={t('settings.imageGen.provider')}>
-        <Select
-          ariaLabel={t('settings.imageGen.provider')}
-          value={first}
-          options={[
-            { value: 'codex', label: t('settings.imageGen.codex') },
-            { value: 'gemini', label: t('settings.imageGen.gemini') },
-            { value: 'openai', label: t('settings.imageGen.openai') },
-          ]}
-          onChange={(v) => set('imageGen.order', preferFirst(order.length ? order : ['codex', 'gemini', 'openai'], v))}
-          wide
-        />
-      </SettingRow>
-      <Note>{t('settings.imageGen.note')}</Note>
-      <SettingRow label={t('settings.imageGen.order')}>
-        <span className="st-value st-value--mono">{order.join(' → ')}</span>
-      </SettingRow>
-    </>
-  );
-}
-
 // ---------- agents ----------
 export function AgentsSection({ json }: { json: Json }) {
   const t = useST();
@@ -524,46 +404,29 @@ export function AgentsSection({ json }: { json: Json }) {
 export function AccountsSection() {
   const t = useST();
   const toast = useToast();
-  const usage = useAgentUsage();
-  const agents = useStore(agentsStore);
   return (
     <>
-      <Sub>{t('settings.accounts.agents')}</Sub>
-      {usage.available ? (
-        usage.usage.map((u) => (
-          <div key={u.agent} className="usage-card">
-            <div className="usage-card__head">
-              <span className="agent-glyph" aria-hidden="true">
-                {(u.agent[0] ?? '?').toUpperCase()}
-              </span>
-              <span className="usage-card__name">{agents?.find((a) => a.id === u.agent)?.label ?? u.agent}</span>
-              {u.plan && <Badge>{u.plan}</Badge>}
-              <span className="usage-card__account">{u.account ?? t('settings.accounts.notSignedIn')}</span>
-            </div>
-            {u.windows.map((w) => (
-              <div key={w.label} className="usage-card__row">
-                <span className="usage-card__label">{w.label}</span>
-                <span className="usage-bar usage-bar--wide" aria-hidden="true">
-                  <span className="usage-bar__fill" style={{ width: `${w.usedPercent}%` }} />
-                </span>
-                <span className="usage-card__pct">{Math.round(w.usedPercent)}%</span>
-                <span className="usage-card__reset">{resetIn(w.resetsAt) && t('status.usage.resetsIn', { time: resetIn(w.resetsAt) })}</span>
-              </div>
-            ))}
-          </div>
-        ))
-      ) : (
-        <Note>{t('settings.accounts.pending')}</Note>
+      <AgentAccountsPanel />
+      {PublishAccounts && (
+        <>
+          <Sub>{t('settings.accounts.publish')}</Sub>
+          <PublishAccounts toast={(m) => toast({ message: m })} />
+        </>
       )}
-      <Sub>{t('settings.accounts.keys')}</Sub>
-      <div className="st-legacy">
-        <ApiKeys toast={(m) => toast({ message: m })} />
-      </div>
     </>
   );
 }
 
+// YouTube / TikTok connect rows (components/PublishAccounts.tsx, from the publishing side). Picked up when the file exists.
+const publishModules = import.meta.glob<{ PublishAccounts?: ComponentType<{ toast?: (m: string) => void }> }>('../components/PublishAccounts.tsx', { eager: true });
+const PublishAccounts = Object.values(publishModules)[0]?.PublishAccounts ?? null;
+
 // ---------- prompts ----------
+const PROMPT_FIELDS = [
+  { id: 'finish', title: 'settings.prompts.finish', note: 'settings.prompts.finishNote' },
+  { id: 'publish', title: 'settings.prompts.publish', note: 'settings.prompts.publishNote' },
+] as const satisfies readonly { id: string; title: SKey; note: SKey }[];
+
 export function PromptsSection() {
   const t = useST();
   const [prompts, setPrompts] = useState<PromptButton[] | null>(null);
@@ -575,105 +438,59 @@ export function PromptsSection() {
   return (
     <>
       <Note>{t('settings.prompts.intro')}</Note>
-      <ul className="agent-requests__list">
-        {(prompts ?? []).map((p) => (
-          <li key={p.id} className="agent-requests__item">
-            <div className="agent-requests__row">
-              <span className="agent-requests__title">
-                {p.autopilot && <Badge tone="brand">{t('settings.prompts.autopilot')}</Badge>}
-                {p.label}
-              </span>
-              <code className="agent-requests__edited">{p.id}</code>
-              {p.agent && <span className="agent-requests__edited">→ {p.agent}</span>}
-            </div>
-          </li>
-        ))}
-      </ul>
-      <SettingsFileCard kind="prompts" />
+      {prompts === null && <Progress label={t('common.loading')} />}
+      {PROMPT_FIELDS.map((f) => {
+        const p = prompts?.find((x) => x.id === f.id);
+        return p ? <PromptField key={f.id} prompt={p} title={t(f.title)} note={t(f.note)} /> : null;
+      })}
+      <Note>{t('settings.prompts.vars')}</Note>
     </>
   );
 }
 
-// ---------- library ----------
-export function LibrarySection({ json }: { json: Json }) {
+/** One prompt as a plain textarea (Ferret's agent prompt field): saved when it loses focus;「既定に戻す」removes the override. */
+function PromptField({ prompt, title, note }: { prompt: PromptButton; title: string; note: string }) {
   const t = useST();
   const set = useSet();
-  const tools = useStore(toolsStore);
-  return (
-    <>
-      <Sub>{t('settings.library.tools')}</Sub>
-      {tools === null && <Progress label={t('common.loading')} />}
-      {tools?.map((tool) => (
-        <div key={tool.name}>
-          <SettingRow label={<span className="st-value--mono">{tool.name}</span>}>
-            {tool.installed ? <Badge tone="success">{tool.version ?? t('status.usage.installed')}</Badge> : <Badge tone="warning">{t('status.usage.notInstalled')}</Badge>}
-          </SettingRow>
-          {!tool.installed && <ToolInstallNote name={tool.name} />}
-        </div>
-      ))}
-      <div className="st-file__actions">
-        <Button variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void toolsStore.reload()}>
-          {t('common.refresh')}
-        </Button>
-      </div>
-      <Sub>{t('settings.library.assets')}</Sub>
-      <SettingRow label={t('settings.library.cache')}>
-        <Select ariaLabel={t('settings.library.cache')} value={num(json, 'library.cacheLimitGB', 2)} options={[1, 2, 5, 10, 20, 50].map((n) => ({ value: n, label: `${n} GB` }))} onChange={(v) => set('library.cacheLimitGB', v)} />
-      </SettingRow>
-      <Switch label={t('settings.library.credits')} checked={bool(json, 'library.autoCredits', true)} onChange={(v) => set('library.autoCredits', v)} />
-      <Note>{t('settings.library.note')}</Note>
-    </>
-  );
-}
-
-// ---------- publishing ----------
-const TARGETS = ['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels'] as const;
-export function PublishingSection({ json }: { json: Json }) {
-  const t = useST();
-  const set = useSet();
-  const toast = useToast();
-  const [yt, setYt] = useState<{ clientSet: boolean; connected: boolean } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const load = () => void api.invoke('publish:youtubeStatus').then(setYt).catch(() => setYt(null));
-  useEffect(load, []);
-  const targets = list(json, 'export.defaultTargets', ['youtube']);
-  const connect = async () => {
-    setBusy(true);
-    const r = await api.invoke('publish:youtubeConnect').catch((e: unknown) => ({ ok: false, error: errMsg(e) }));
-    setBusy(false);
-    if (!r.ok) toast({ tone: 'danger', message: r.error ?? t('common.error') });
-    load();
+  const server = prompt.text ?? '';
+  const def = prompt.defaultText ?? '';
+  // null = not editing: show what is saved (settings may change from outside)
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? server;
+  const commit = () => {
+    if (draft === null) return;
+    const next = promptSettingValue(draft, def);
+    if (next !== (prompt.overridden ? server : undefined)) set(`prompts.${prompt.id}`, next);
+    setDraft(null);
   };
   return (
-    <>
-      <Sub>YouTube</Sub>
-      <SettingRow label={t('settings.publishing.youtube')}>
-        {yt?.connected ? (
-          <span className="st-inline">
-            <Badge tone="success">{t('settings.publishing.connected')}</Badge>
-            <Button size="sm" variant="ghost" icon={<LogOut size={13} />} onClick={() => void api.invoke('publish:youtubeDisconnect').then(load)}>
-              {t('settings.publishing.disconnect')}
-            </Button>
-          </span>
-        ) : (
-          <Button size="sm" icon={<LogIn size={13} />} busy={busy} disabled={!yt?.clientSet} onClick={() => void connect()}>
-            {t('settings.publishing.connect')}
-          </Button>
-        )}
-      </SettingRow>
-      {yt && !yt.clientSet && <Note tone="warn">{t('settings.publishing.clientMissing')}</Note>}
-      <Note>{t('settings.publishing.note')}</Note>
-      <Sub>{t('settings.publishing.targets')}</Sub>
-      {TARGETS.map((x) => (
-        <Switch
-          key={x}
-          label={t(`target.${x}`)}
-          checked={targets.includes(x)}
-          onChange={(on) => set('export.defaultTargets', on ? [...targets.filter((y) => y !== x), x] : targets.filter((y) => y !== x))}
-        />
-      ))}
-      <Switch label={t('settings.publishing.hwEncode')} checked={bool(json, 'export.hwEncodePreview', true)} onChange={(v) => set('export.hwEncodePreview', v)} />
-    </>
+    <div className="st-prompt" data-testid={`settings-prompt-${prompt.id}`}>
+      <Sub>{title}</Sub>
+      <Note>{note}</Note>
+      <textarea
+        className="st-textarea st-textarea--prompt"
+        aria-label={title}
+        spellCheck={false}
+        value={value}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+      />
+      <div className="st-file__actions">
+        {prompt.overridden ? <Badge>{t('settings.prompts.custom')}</Badge> : <Badge tone="success">{t('settings.prompts.default')}</Badge>}
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<RotateCcw size={13} />}
+          disabled={!prompt.overridden && draft === null}
+          onClick={() => {
+            setDraft(null);
+            set(`prompts.${prompt.id}`, undefined);
+          }}
+        >
+          {t('settings.prompts.reset')}
+        </Button>
+      </div>
+    </div>
   );
 }
 

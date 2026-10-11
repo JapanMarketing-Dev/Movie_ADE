@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Privacy — Solocut</title>
-  <meta name="description" content="Solocut runs on your computer. Your recordings, audio, transcripts and projects stay on your machine.">
+  <meta name="description" content="Solocut is a desktop app that runs on your computer. Your recordings, audio, transcripts and projects stay on your machine. JapanMarketing LLC (“we”) does not run a server that receives your videos.">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#07070a">
   <link rel="canonical" href="https://solocut.app/privacy">
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Solocut">
   <meta property="og:title" content="Privacy — Solocut">
-  <meta property="og:description" content="Solocut runs on your computer. Your recordings, audio, transcripts and projects stay on your machine.">
+  <meta property="og:description" content="Solocut is a desktop app that runs on your computer. Your recordings, audio, transcripts and projects stay on your machine. JapanMarketing LLC (“we”) does not run a server that receives your videos.">
   <meta property="og:url" content="https://solocut.app/privacy">
   <meta property="og:image" content="https://solocut.app/assets/og.png">
   <meta property="og:image:width" content="1200">
@@ -26,7 +26,7 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/js/app.js"></script>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut runs on your computer. Your recordings, audio, transcripts and projects stay on your machine."}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Solocut","applicationCategory":"MultimediaApplication","operatingSystem":"macOS, Windows, Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://opensource.org/licenses/MIT","url":"https://solocut.app","description":"Solocut is a desktop app that runs on your computer. Your recordings, audio, transcripts and projects stay on your machine. JapanMarketing LLC (“we”) does not run a server that receives your videos."}</script>
 </head>
 <body data-page="privacy" data-lang="en">
 <svg class="sprite" aria-hidden="true">
@@ -61,8 +61,8 @@
     <a class="brand" href="/"><svg class="brand-mark" viewBox="0 0 1024 1024" aria-hidden="true"><defs><linearGradient id="bm-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22222d"/><stop offset="1" stop-color="#0b0b10"/></linearGradient><linearGradient id="bm-g" x1=".1" y1="0" x2=".9" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset=".55" stop-color="#ff4a3d"/><stop offset="1" stop-color="#e8264f"/></linearGradient><clipPath id="bm-t"><polygon points="0,0 1024,0 1024,202.5 0,872.0"/></clipPath><clipPath id="bm-b"><polygon points="0,900.0 1024,230.5 1024,1024 0,1024"/></clipPath></defs><rect width="1024" height="1024" rx="228" fill="url(#bm-bg)"/><g clip-path="url(#bm-t)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round" transform="translate(16 -16)"/></g><g clip-path="url(#bm-b)"><polygon points="372,286 372,738 776,512" fill="url(#bm-g)" stroke="url(#bm-g)" stroke-width="56" stroke-linejoin="round"/></g></svg><span>Solocut</span></a>
     <nav class="site-nav" aria-label="Main">
       <a href="/#how">How it works</a>
-      <a href="/#templates">Templates</a>
-      <a href="/#checks">Frame checks</a>
+      <a href="/#templates">Template</a>
+      <a href="/#checks">Checks</a>
       <a href="/#faq">FAQ</a>
     </nav>
     <div class="header-actions">
@@ -76,10 +76,21 @@
 <main id="main">
   <section class="dl-hero"><div class="wrap" style="max-width:820px">
     <h1>Privacy</h1>
-    <p class="lede" style="font-size:17px">Solocut runs on your computer. Your recordings, audio, transcripts and projects stay on your machine.</p>
-    <p class="lede" style="font-size:17px">Transcription runs locally with whisper.cpp by default. If you choose a cloud transcription service or a cloud decision model, only the data needed for that task (audio for transcription; frame images and transcript text for checks) is sent to the provider you chose, with your own API key, after you agree.</p>
+    <p class="sums">Last updated: October 11, 2026</p>
+    <p class="lede" style="font-size:17px">Solocut is a desktop app that runs on your computer. Your recordings, audio, transcripts and projects stay on your machine. JapanMarketing LLC (“we”) does not run a server that receives your videos.</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">Editing and transcription</h2>
+    <p class="lede" style="font-size:17px">Transcription runs locally with whisper.cpp. Editing is done by the AI agent you choose (for example Claude Code, Codex or Gemini CLI) under your own subscription and that provider’s terms; Solocut does not send your data to an AI service by itself. A decision model is optional and off by default; if you turn on a cloud one, only frame images and transcript text needed for the check are sent to the provider you chose, after you agree.</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">YouTube (YouTube API Services)</h2>
+    <p class="lede" style="font-size:17px">Solocut uses YouTube API Services to upload your videos to your own YouTube channel when you connect your Google account and press OK to post. By connecting, you agree to the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service</a>, and Google’s handling of data is described in the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a>.</p>
+    <p class="lede" style="font-size:17px">Solocut only uses this access to upload the video, thumbnail and metadata (title, description, tags, privacy and similar settings) that you approved, and to read back the upload status. It does not read, collect or share other data from your Google account, and nothing is sent to us.</p>
+    <p class="lede" style="font-size:17px">The OAuth tokens are stored only on your device, encrypted with the operating system’s keychain (macOS Keychain, Windows DPAPI or the Linux secret service). You can disconnect in Solocut’s settings at any time, which deletes the tokens, and you can revoke Solocut’s access at <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">Google security settings</a>.</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">TikTok</h2>
+    <p class="lede" style="font-size:17px">If you connect TikTok, Solocut uses TikTok’s Content Posting API only to post the video and caption you approved to your account. Tokens are stored on your device in the same way and can be removed by disconnecting. Use of TikTok is subject to <a href="https://www.tiktok.com/legal/terms-of-service" target="_blank" rel="noopener noreferrer">TikTok’s Terms of Service</a>.</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">Updates, crash reports and this website</h2>
     <p class="lede" style="font-size:17px">The app checks solocut.app for updates. Crash reports (stack traces and environment information, never media, transcripts or file paths) are sent to Sentry; you can turn this off in Settings.</p>
     <p class="lede" style="font-size:17px">This website uses Cloudflare Web Analytics, which does not use cookies.</p>
+    <h2 style="font-size:20px;margin:32px 0 8px">Contact</h2>
+    <p class="lede" style="font-size:17px">Questions about privacy: <a href="mailto:takumi.endoh@japan-marketing.co.jp">takumi.endoh@japan-marketing.co.jp</a>.</p>
   </div></section>
 </main>
 <footer class="site-footer">
@@ -90,6 +101,7 @@
       <a href="/download">Download</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/tree/main/docs" target="_blank" rel="noopener noreferrer">Design docs</a>
       <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
       <a href="https://github.com/JapanMarketing-Dev/solocut" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://x.com/ai_agent_dev" target="_blank" rel="noopener noreferrer">X</a>

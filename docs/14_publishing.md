@@ -1,92 +1,125 @@
-# 14. 投稿（YouTube・TikTok と、SNS での告知）
+# 14. 投稿（YouTube・TikTok）
 
-最終更新: 2026-10-11（各社の API・規約は 2026-10 時点の調査）
+最終更新: 2026-10-11（TikTok の API は 2026-10 時点の公式ドキュメントで確認）
 
 ## 目指すこと
 
-完成した動画を、エディタから YouTube と TikTok に投稿し、続けて X / Instagram / Threads / Facebook に「動画を投稿しました」を告知する。**投稿は必ず人が内容を確認・承認してから行う。**
+「動画ができて、人がチェックして OK すれば投稿される。細かいところは Claude Code がやる。」
 
 ```
-「投稿して」（用意済みのプロンプト、またはボタン）
-  → 投稿の確認画面（出力先ごとのタイトル・説明文・タグ・サムネイル・公開範囲・予約日時・開示の項目）
-  → 承認 → 投稿のキュー → YouTube / TikTok にアップロード
-  → 公開の URL が決まったら、告知の確認画面（SNS ごとの文面・画像・縦型動画）
-  → 承認 → X / Instagram / Threads / Facebook へ
-  → 投稿の履歴に記録（URL、公開範囲、開示の項目、日時）
+動画が完成（renders/youtube/final.mp4）
+  → エージェントが publish.json（タイトル・説明・タグ・投稿先・サムネイル）を書く
+  → 人が「投稿」画面で動画・サムネイル・publish.json の中身を見る
+      直したいところは「AI に直してもらう」に一言書いて送る
+  → 「OK・投稿する」→ アプリが `publish` プロンプトをエージェントに送る
+  → エージェントが publish.json を見直し、`solocut publish upload` を実行
+  → アプリが自分のトークンで YouTube / TikTok にアップロードし、結果を返す
+  → 結果は画面に出て、timeline.json の outputs[].publish に記録される
 ```
 
-## 方式は「審査の状態」で自動で切り替える
+投稿は1本ずつ。1本の 16:9 の動画を YouTube と TikTok（任意）に上げる。Instagram・X・Threads・Facebook・告知・投稿履歴の画面・縦型の別版（Shorts / TikTok 用の派生）はない。
 
-機能はすべて最初から作る。ただし各社の API は、運営（Solocut）のアプリが審査を通っているかで使える範囲が変わる。そこで、プラットフォームごとに使える一番良い方式を自動で選ぶ。審査が通れば、アプリを更新しなくても、配信する設定（`publish-capabilities.json`、署名付き）を切り替えるだけで方式が上がる。
+## publish.json
 
-| 出力先 | API（審査済み） | 審査前・API なしの方式 | 利用者が自分の開発者アプリを持ち込む（BYO） |
-|---|---|---|---|
-| **YouTube** | YouTube Data API v3（`videos.insert`、`thumbnails.set`、`captions.insert`）。公式のクライアント ID | ― | **可**: 自分の Google Cloud プロジェクトのクライアント ID を設定に入れる（テスト状態では7日ごとに再ログインが必要） |
-| **TikTok** | Content Posting API の Direct Post | 下書きとして送る（`video.upload`。審査前は人数の制限あり）、または「書き出し → TikTok を開く」の案内 | 不可（個人用ツールは監査が通らないと明記されている） |
-| **X** | X API v2（投稿とメディアのアップロード）。**従量課金**（URL 付きの投稿は1件 $0.20） | **Web Intent（既定）**: 文面を入れた投稿画面を開き、本人が「投稿」を押す。無料・審査不要 | 可: 自分の X の開発者アプリ（PKCE）。課金は本人 |
-| **Instagram** | Graph API で Reels を投稿（プロアカウントが必要） | 「書き出し → Instagram を開く」の案内（Web Intent がない） | 可だが難しい（Meta のアプリ作成など）。上級者向け |
-| **Threads** | Threads API（テキスト＋リンク、動画） | **Web Intent**（`threads.com/intent/post`） | 可（同上） |
-| **Facebook** | Pages API（ページへの投稿、Reels） | Share Dialog（リンクとハッシュタグ） | 可（同上） |
+プロジェクト直下。AI（エージェント）が書き、アプリは読むだけ（サムネイルを選んだときだけ `thumbnail` を書き換える。ほかの項目はそのまま残す）。
 
-- 個人のプロフィール（Facebook）には API で投稿できない（2018年に廃止）。ページに投稿するか、Share Dialog を使う
-- Intent は OS の標準のブラウザで開く（ログインの状態を共有でき、Google のようにアプリ内のブラウザでのログインがブロックされる問題もない）
+```json
+{
+  "video": "renders/youtube/final.mp4",
+  "thumbnail": "thumbnails/thumb-1.png",
+  "title": "…", "description": "…", "tags": ["…"],
+  "youtube": { "categoryId": "28", "privacy": "private|unlisted|public", "publishAt": "ISO（任意）",
+               "madeForKids": false, "containsSyntheticMedia": false, "chapters": true },
+  "tiktok": { "enabled": false, "caption": "…", "privacy": "SELF_ONLY|MUTUAL_FOLLOW_FRIENDS|FOLLOWER_OF_CREATOR|PUBLIC_TO_EVERYONE",
+              "allowComment": false, "allowDuet": false, "allowStitch": false, "isAigc": false }
+}
+```
 
-## 認証
+- パスはプロジェクトからの相対パス。プロジェクトの外を指すものは使わない。
+- `youtube.enabled`（省略時 true）で YouTube をオフにできる。`tiktok.enabled` の省略時は false。
+- 読み込みは `apps/desktop/src/shared/publish.ts` の `parsePublishJson`。例外を投げず、問題は「直すところ（error）」と「お知らせ（warning）」で返す。
 
-| 出力先 | 方法 | シークレット |
+| 項目 | 決まり | 違反したとき |
 |---|---|---|
-| YouTube | OS の標準のブラウザ＋PKCE＋ループバック（`http://127.0.0.1:<任意のポート>`） | 不要（インストール型アプリ） |
-| X | OAuth 2.0 PKCE、Native App（ループバックは固定ポート） | 不要 |
-| TikTok | Login Kit for Desktop、PKCE（S256、hex）＋ループバック | **必要** → 運営の交換サーバーで |
-| Instagram / Threads / Facebook | 各社の OAuth | **必要** → 運営の交換サーバーで |
+| title | 必須、100 文字（コードポイント）まで、`<` `>` 不可 | YouTube だけ止まる |
+| description | 5000 バイト（UTF-8）まで、`<` `>` 不可 | YouTube だけ止まる |
+| tags | 合計 500 文字まで（YouTube の数え方: 区切りと、空白を含むタグの引用符も数える）。`#` は外し、重複は除く | YouTube だけ止まる |
+| youtube.privacy | 不明な値・省略は private | お知らせ |
+| youtube.publishAt | 未来の日時。指定すると private で上げて指定日時に公開 | 過去・不正は YouTube が止まる |
+| tiktok.caption | 2200 文字（UTF-16）まで。空ならタイトル＋ハッシュタグ | TikTok だけ止まる |
+| tiktok.privacy | 不明な値は SELF_ONLY。アカウントが選べない値なら SELF_ONLY に下げる | お知らせ |
+| video | ファイルがないと全部止まる | |
+| thumbnail | PNG / JPEG。ないときはサムネイルなしで上げる | お知らせ |
 
-**トークン交換サーバー**（Cloudflare Worker）: `/oauth/{tiktok,meta,threads}/exchange` と `/refresh` だけを持つ。シークレットはサーバーだけが持ち、**トークンは保存しない**（通過させるだけ）。動画はサーバーを通さない。
+画面の「OK・投稿する」は、直すところがあっても押せる（投稿プロンプトでエージェントが先に直す）。押せないのは、動画がない・投稿先がない・YouTube に未接続・アップロード中・この動画を投稿済みのとき。
 
-**一時置き場**（R2）: Instagram と Threads は、動画を「公開 URL から取り込ませる」方式のため、期限付きの URL で一時的に置く。投稿が終わったらすぐに消す。
+## アップロードの受け渡し（CLI ⇄ アプリ）
 
-トークンは OS の安全な保管庫（Keychain / DPAPI / libsecret）に入れる。保管庫がない Linux では保存せず、毎回ログインしてもらう。連携を解除するときは、各社の取り消しの API を呼んでから手元を消す。
+OAuth のトークンはアプリ（safeStorage）にしかないので、エージェントはアプリにアップロードを頼む。
 
-## 投稿の確認画面（各社の必須の表示を含む）
+```
+solocut publish upload [--target youtube|tiktok] [--force] [--timeout <秒>] [--json]
+```
 
-| 出力先 | 画面で必ず扱う項目 |
+1. CLI が `.solocut/publish-request.json` を書く: `{ "id": "<uuid>", "targets": [], "at": "ISO", "force"?: true }`（`targets` が空なら publish.json でオンの投稿先すべて）。
+2. アプリは開いているプロジェクトを監視していて（fs.watch ＋ 2 秒ごとの確認）、受け取るとすぐ `.solocut/publish-result.json` に `{ id, state: "running", progress? }` を書き、終わると `{ id, state: "done", results: [{ target, ok, url?, status?, error?, alreadyPublished?, warnings? }], error? }` を書く。
+3. CLI は同じ id の結果を待って表示する。失敗が1つでもあれば終了コード 1（`publish-failed`、結果は details に入る）。
+4. 30 秒たってもアプリが受け取らなければ「Solocut アプリが応答しません。起動してこのプロジェクトを開いてください」（`app-not-running`）。頼みは取り下げる（後でアプリを開いたときに勝手に投稿されないように）。
+5. `--timeout`（既定 3600 秒）を過ぎても終わらなければ `timeout`。
+
+二重投稿を防ぐ仕組み:
+
+- 同じ id の頼みは二度と実行しない（アプリを再起動しても、結果ファイルに同じ id があれば実行しない）。
+- アップロードは `.solocut/publish-log.json` に記録する（投稿先・動画のパス・サイズ・URL）。同じファイル（パスとサイズが同じ）を同じ投稿先へは上げ直さず、前の URL を `alreadyPublished: true` で返す。上げ直すときは `--force`。
+- 同じプロジェクトで同時に2つは走らない。途中で来た頼みは、今のアップロードが終わってから処理する。
+- 10 分以上前の頼み（受け取られないまま）は無視する。
+- アプリが途中で終了して `running` のまま残った結果は、次に見たときに「中断されました」で閉じる（自動では上げ直さない）。
+
+結果は `solocut publish record`（timeline.json の outputs[].publish と publish の手順）にも記録する。TikTok の受信トレイ送り（下書き）は `draft` として記録する。
+
+## アカウントの接続（ボタン1つ）
+
+設定 → アカウントに YouTube と TikTok の行がある（`components/PublishAccounts.tsx`）。「接続」を押すとブラウザで同意画面が開き、戻れば終わり。接続したチャンネル名・表示名を出す。
+
+### YouTube
+
+- Solocut 自身の Google OAuth クライアント（デスクトップアプリ型）を同梱する。利用者が Google Cloud でクライアントを作る必要はない。
+- ビルド時に main へ埋め込む（`electron.vite.config.ts` の `define` → `import.meta.env.MAIN_VITE_SOLOCUT_*`、`main/publish/buildEnv.ts`）。値の取り方は、環境変数 `SOLOCUT_YOUTUBE_CLIENT_ID` / `SOLOCUT_YOUTUBE_CLIENT_SECRET` → `MAIN_VITE_SOLOCUT_*` → なければ Google のクライアント JSON（`~/.solocut-release/google-oauth-client.json`、場所は `SOLOCUT_GOOGLE_OAUTH_JSON` で変えられる）。値はリポジトリに入れない。開発中は実行時の環境変数 `SOLOCUT_YOUTUBE_CLIENT_ID` / `_SECRET`、または以前の設定で保存したクライアント ID でも動く。どれもないときは、ボタンの代わりに「この版には YouTube 接続の設定が入っていません」と表示する。
+- システムのブラウザ ＋ PKCE（S256）＋ ループバック（`http://127.0.0.1:<空きポート>`）。スコープは `youtube.upload` と `youtube.force-ssl`（チャンネル名の取得 `channels.list mine=true` にも使う）。
+- アップロードは再開可能アップロード（`videos.insert`、8 MiB ごと、429 / 5xx は指数バックオフで再開）。その後 `thumbnails.set`（2 MB まで）。サムネイルの失敗は警告で、動画は上げ直さない。
+- リフレッシュトークンは safeStorage（`youtube.refreshToken`）。解除で取り消す。
+- Google の審査（機密スコープ）が通るまではテストユーザーだけが使え、7 日ごとに再接続が要る。
+
+### TikTok
+
+- Login Kit for Desktop: `https://www.tiktok.com/v2/auth/authorize/`、PKCE（TikTok のデスクトップ版はチャレンジを SHA-256 の **16 進**で渡す）。リダイレクトは固定で `http://127.0.0.1:47823/tiktok/callback`（開発者ポータルには `http://localhost:47823/tiktok/callback` と2つ登録済み）。ポート 47823 が使われていると「ポート 47823 が他のアプリに使われています」と出す。スコープは `user.info.basic,video.upload`（Direct Post を使うときは `video.publish` も）。
+- トークンの交換にはクライアントシークレットが要るので、アプリには入れない。交換は Solocut の Cloudflare Worker（`tools/oauth-worker`、名前 `solocut-oauth`、ルート `solocut.app/oauth/*`）が行う:
+  - `POST /oauth/tiktok/token`（form: `client_key`・`code`・`code_verifier`・`redirect_uri`。登録した2つのリダイレクト以外は 400）
+  - `POST /oauth/tiktok/refresh`（form: `client_key`・`refresh_token`）
+  - `POST /oauth/tiktok/revoke`（form: `client_key`・`token`。解除のとき）
+  - アプリが送る `client_key` で本番（`TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET`）かサンドボックス（`TIKTOK_SANDBOX_CLIENT_KEY` / `TIKTOK_SANDBOX_CLIENT_SECRET`）かを選ぶ。どちらでもないキーは 400。
+  - Worker が `client_key` / `client_secret` を足して `https://open.tiktokapis.com/v2/oauth/token/`（取り消しは `/v2/oauth/revoke/`）へ送り、TikTok の JSON を状態コードごとそのまま返す。ログも保存もしない（`Cache-Control: no-store`、observability オフ）。シークレットは wrangler の secret。
+- アクセストークン 24 時間、リフレッシュトークン 365 日（更新時に変わることがある）。safeStorage の `tiktok.tokens` に保存。
+- ビルド時の設定: `SOLOCUT_TIKTOK_CLIENT_KEY`。なければ `~/.solocut-release/tiktok-<SOLOCUT_TIKTOK_ENV>.env` の `TIKTOK_CLIENT_KEY` だけを読む（`SOLOCUT_TIKTOK_ENV=sandbox|production`、既定 sandbox。TikTok の審査が通ったらリリースのビルドで production。ファイルの場所は `SOLOCUT_TIKTOK_ENV_FILE` でも指定できる。シークレットは読まない）。交換先は `SOLOCUT_TIKTOK_TOKEN_URL`（既定 `https://solocut.app/oauth/tiktok`。開発中は `wrangler dev` の `http://127.0.0.1:8787/oauth/tiktok` も可）。審査後は `SOLOCUT_TIKTOK_DIRECT_POST=1`。
+- Worker のデプロイ（`tools/oauth-worker` で）: `npx wrangler login`（takumi.endoh@japan-marketing.co.jp）→ `npx wrangler secret put` を `TIKTOK_CLIENT_KEY`・`TIKTOK_CLIENT_SECRET`・`TIKTOK_SANDBOX_CLIENT_KEY`・`TIKTOK_SANDBOX_CLIENT_SECRET` の4つ → `npx wrangler deploy`。手元の確認は `npx wrangler dev`（`.dev.vars` に値。コミットしない）。
+- 投稿の既定は受信トレイ送り（`/v2/post/publish/inbox/video/init/`、`video.upload`）。動画は TikTok アプリの受信トレイに届き、本人がアプリで仕上げて投稿する。審査後は Direct Post（`/v2/post/publish/video/init/`、先に `creator_info/query` で選べる公開範囲を確かめる）。未審査のアプリは非公開（SELF_ONLY）でしか投稿できない。
+- アップロードは分割: 1 つ 5 MB 以上 64 MB 以下、個数は `floor(サイズ / チャンクサイズ)`、余りは最後に足す（最後は 128 MB まで）、5 MB 未満は1回、最大 1000 個。その後 `status/fetch` で `SEND_TO_USER_INBOX` / `PUBLISH_COMPLETE` / `FAILED` を待つ。
+- 設定が入っていない間は「TikTok との接続は準備中です」と出し、「TikTok を開いてアップロード」（動画を Finder で表示して TikTok Studio のアップロード画面を開く）で、ボタン1つで手で上げられるようにする。
+
+## サムネイル
+
+- 動画のフレームをそのまま使う必要はない。動画の内容から、エージェントが Codex（ChatGPT のサブスクの画像生成）か Gemini CLI（Gemini のサブスク）で作り、`thumbnails/` に保存する。アプリに API キーでの画像生成はない。
+- 「サムネイル」画面は `thumbnails/` の PNG / JPEG（1 階層下まで）を新しい順に並べる。クリックで選ぶと publish.json の `thumbnail` になる（もう一度クリックで外す）。
+- 「サムネを作ってもらう」はエージェントに短い依頼を送る（3 枚、1280x720、thumbnails/thumb-1.png〜、一番良いものを publish.json に入れる）。
+
+## 実装の場所
+
+| 何 | どこ |
 |---|---|
-| YouTube | タイトル（100字）、説明文（5000 **バイト**、日本語なら約1666字）、タグ、カテゴリ、公開範囲（公開・限定公開・非公開）、予約日時（`publishAt`）、**子ども向けかどうか（必須）**、**改変・合成されたコンテンツの開示**（`containsSyntheticMedia`）、サムネイル、字幕（SRT）、チャプター |
-| TikTok | 投稿先のニックネームの表示、**公開範囲はプルダウンで既定値なし**、コメント・Duet・Stitch は**未チェックから**、商用コンテンツの開示（既定はオフ。オンにしたら「自分のブランド」か「ブランドコンテンツ」の選択が必須）、音楽の利用確認への同意文、プレビュー、AI 生成のラベル（`is_aigc`）、投稿後の処理状況の表示 |
-| X | 本文（日本語は1字を2と数え、280まで。URL は23字扱い）、画像または動画、API を使う場合は費用の事前表示 |
-| Instagram | キャプション、カバー、縦型動画（Reels） |
-| Threads | 本文（500字）、リンク、トピックタグ（1つ・50字まで）、動画（最長300秒） |
-| Facebook | ページの選択、本文、リンク、Reels（3〜90秒・9:16） |
-
-文面はエージェントが下書きする（用意済みのプロンプト `metadata` と `announce`。SNS ごとの文字数と雰囲気はテンプレートのプロンプトで決める）。人は確認画面で直してから承認する。
-
-## 投稿のキュー
-
-- SQLite に `jobs(id, platform, account, payload, state, attempt, nextAt, remoteId, error)` を持つ。state は `queued → uploading → processing → published` か `failed` / `needs-user`
-- アップロードは再開できる方式を使う（YouTube の resumable、TikTok のチャンク、X の append）
-- 429 と 5xx は指数バックオフで最大5回まで再試行する。ポリシー・スパム・クォータの系統のエラーは**再試行せず**、人に知らせる
-- `remoteId` が付いたら二度と送らない（二重投稿の防止）
-- 告知は、YouTube / TikTok の公開 URL が決まってから動く（依存関係）
-- 予約投稿: YouTube と Facebook のページは API の予約機能を使う。それ以外はアプリのキューで予約する（その時刻にアプリが起動している必要があることを表示する）
-
-## クォータと費用
-
-| 出力先 | 内容 |
-|---|---|
-| YouTube | `videos.insert` は1日100回（2026-06 から別枠）。そのほかは1日 10,000 ユニット（サムネイル約50、字幕400） |
-| X | API は従量課金。既定の Intent なら費用なし |
-| TikTok / Instagram / Threads / Facebook | 無料（1日あたりの投稿数に上限あり） |
-
-## 投稿の履歴
-
-`~/.solocut/publish-history.jsonl` とプロジェクトの `timeline.json` の `outputs[].publish` に、出力先・URL・公開範囲・開示の項目（AI 生成、合成コンテンツ、子ども向け、ブランドコンテンツ）・日時・使った方式（公式 API / BYO / Intent）を記録する。
-
-## 運営側で用意するもの
-
-アカウントはすべて `takumi.endoh@japan-marketing.co.jp` で作る。
-
-- **共通**: solocut.app のプライバシーポリシーと利用規約（YouTube の利用規約・Google のプライバシーポリシー・取り消し方法・データの削除手順を含む）、1024px のアイコン、サポートの連絡先
-- **Google Cloud**: 本番用のプロジェクト、YouTube Data API v3、OAuth の同意画面（外部・本番）、デスクトップのクライアント ID、Search Console でのドメインの確認、デモ動画、OAuth の検証の申請、YouTube API の監査とクォータの増枠の申請。**未監査のプロジェクトからの投稿が非公開に限定されるか**は、ドキュメントの記述が食い違っているため実機で確認する
-- **TikTok for Developers**: 組織とアプリ（デスクトップ）、Login Kit、Content Posting API、サンドボックス、必須の表示を満たした画面とデモ動画、審査と Direct Post の監査
-- **Meta for Developers**: ビジネスポートフォリオとビジネス認証、アプリ（Instagram・Threads・Facebook Login for Business）、権限ごとの画面録画、App Review
-- **X Developer**: Native App（PKCE）。Intent を既定にするので、運営としての課金は不要
-- **インフラ**: トークン交換の Worker、一時置き場の R2（自動で消す）
+| publish.json の解析・制限・受け渡しファイルの形・OK ボタンの状態 | `apps/desktop/src/shared/publish.ts` |
+| 受け渡し（監視・二重投稿の防止・結果の書き込み） | `apps/desktop/src/main/publish/handoff.ts` |
+| 画面のデータ・サムネイルの書き込み | `apps/desktop/src/main/publish/publish.ts`、`main/services/thumbs.ts` |
+| YouTube / TikTok | `main/publish/youtube.ts`、`tiktok.ts`（純粋な部分は `oauth.ts`、`tiktokApi.ts`）、ループバック `loopback.ts`、設定 `config.ts`・ビルド時 `buildEnv.ts` |
+| TikTok のトークン交換 | `tools/oauth-worker`（Cloudflare Worker） |
+| 画面 | `renderer/src/screens/Publish.tsx`、`Thumbnails.tsx`、`components/PublishAccounts.tsx` |
+| CLI | `packages/cli/src/commands/publish.ts`（`upload` / `record`） |

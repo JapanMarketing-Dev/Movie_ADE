@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { LaneItem, LaneName, TimelineOverview, Variant } from '@shared/types';
+import type { LaneItem, LaneName, TimelineOverview } from '@shared/types';
 import { formatFrames } from '@shared/project';
 import { useST, type SKey } from '../../shell/i18n';
 import { Badge } from '../../ui';
@@ -58,18 +58,16 @@ function usePlayhead(videoRef: RefObject<HTMLVideoElement | null>, fpsNum: numbe
 /**
  * Timeline overview (display only; docs/02). Lanes for segments / captions / scenes / sfx / markers with hover
  * details, a playhead that follows the preview, click anywhere on a track to seek, and items flagged for review in
- * the accent color. The overview is the selected variant's timeline (YouTube 16:9, TikTok / Shorts 9:16).
+ * the accent color.
  */
 export function TimelineView({
   ov,
-  variant,
   selected,
   videoRef,
   onSelect,
   onSeek,
 }: {
   ov: TimelineOverview;
-  variant: Variant;
   selected: string | null;
   videoRef: RefObject<HTMLVideoElement | null>;
   onSelect: (id: string, start: number) => void;
@@ -93,7 +91,6 @@ export function TimelineView({
     <div className="tl" data-testid="timeline">
       <div className="tl__head">
         <span className="tl__title">{t('tl.title')}</span>
-        <Badge>{t(`variant.${variant}`)}</Badge>
         <span className="tl__dur">{tc(total)}</span>
         {ov.lastCheck && (
           <span className="tl__check" title={ov.lastCheck.at}>

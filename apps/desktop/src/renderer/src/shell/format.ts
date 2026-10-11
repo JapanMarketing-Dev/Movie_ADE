@@ -95,12 +95,24 @@ export function analysisProgress(s: AnalysisStatus | null): number | null {
   return 0.1 + (sum / s.jobs.length) * 0.9;
 }
 
-/** The status-bar update pill: what to show for an UpdateState (null = nothing). */
-export function updatePill(s: UpdateState | null): { kind: 'ready' | 'downloading' | 'available'; version: string; progress?: number } | null {
+/** The status-bar update pill. */
+export type UpdatePillView =
+  | { kind: 'ready'; version: string; requested: boolean }
+  /** a ready update waits for the take / the agent's work to end before restarting */
+  | { kind: 'waiting'; version: string; reason: 'recording' | 'agent'; requested: boolean }
+  | { kind: 'downloading'; version: string; progress: number }
+  | { kind: 'available'; version: string };
+
+/** What the update pill shows for an UpdateState (null = nothing). */
+export function updatePill(s: UpdateState | null): UpdatePillView | null {
   if (!s) return null;
-  if (s.status === 'ready') return { kind: 'ready', version: s.latest ?? '' };
-  if (s.status === 'downloading') return { kind: 'downloading', version: s.latest ?? '', progress: Math.round((s.progress ?? 0) * 100) };
-  if (s.status === 'available' || s.status === 'notify-only') return { kind: 'available', version: s.latest ?? '' };
+  const version = s.latest ?? '';
+  if (s.status === 'ready') {
+    const requested = s.restartRequested === true;
+    return s.blockedBy ? { kind: 'waiting', version, reason: s.blockedBy, requested } : { kind: 'ready', version, requested };
+  }
+  if (s.status === 'downloading') return { kind: 'downloading', version, progress: Math.round(Math.min(1, Math.max(0, s.progress ?? 0)) * 100) };
+  if (s.status === 'available' || s.status === 'notify-only') return { kind: 'available', version };
   return null;
 }
 

@@ -1,6 +1,7 @@
 // Raw PCM capture via AudioWorklet (no compression, no browser processing). Used by the take recorder and by
 // video feedback. Delivers interleaved Int16 chunks about once per second.
 import { toInt16Interleaved } from '@shared/pcm';
+import { contextTimeToPerfMs } from '@shared/audioClock';
 import workletSource from './pcm-worklet.js?raw';
 
 export const SAMPLE_RATE = 48000;
@@ -59,8 +60,7 @@ export async function startPcmCapture(
   node.port.onmessage = (ev: MessageEvent<{ first?: boolean; t?: number; data?: Float32Array[] }>) => {
     const m = ev.data;
     if (m.first && m.t !== undefined) {
-      const ts = ctx.getOutputTimestamp();
-      if (ts.contextTime !== undefined && ts.performanceTime !== undefined) first = ts.performanceTime + (m.t - ts.contextTime) * 1000;
+      first = contextTimeToPerfMs(m.t, ctx.getOutputTimestamp(), performance.now(), ctx.currentTime);
       return;
     }
     if (m.data && m.data.length > 0) {

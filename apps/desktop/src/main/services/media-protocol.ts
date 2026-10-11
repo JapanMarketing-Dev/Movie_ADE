@@ -1,5 +1,5 @@
 // solocut-media://file/<encoded absolute path> — serves local media to the renderer with Range support so
-// <video> can seek. Only files under allowed roots (opened projects, the archive) are served.
+// <video> can seek. Only files under allowed roots (opened projects) are served.
 import { protocol, session } from 'electron';
 import { createReadStream, promises as fsp, realpathSync } from 'node:fs';
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path';

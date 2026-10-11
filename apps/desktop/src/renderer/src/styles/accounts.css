@@ -1,0 +1,429 @@
+/* Claude Code / Codex accounts: footer usage popover (roster → per-account breakdown), Settings → アカウント and the
+   login dialog. Ported from Ferret src/renderer/styles/accounts.css (MIT). */
+
+/* tones of shared/usage.ts usageTone (60% / 80%) next to the shell's warn / danger */
+.usage-bar[data-tone='warning'] .usage-bar__fill {
+  background: var(--color-warning);
+}
+.usage-bar[data-tone='urgent'] .usage-bar__fill {
+  background: var(--color-danger);
+}
+.usage-metric__value[data-tone='warning'] {
+  color: var(--color-warning);
+}
+.usage-metric__value[data-tone='urgent'] {
+  color: var(--color-danger);
+}
+
+/* ── popover ─────────────────────────────────────────────── */
+.sb-pop.usage-panel {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: min(75vh, 560px);
+  padding: 0;
+  overflow-y: auto;
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+}
+.usage-panel__head {
+  display: flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  gap: var(--space-3);
+}
+.usage-panel__title {
+  flex: 1;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+.usage-panel__sub {
+  color: var(--color-text-faint);
+}
+.usage-panel__icon,
+.usage-panel__back {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  place-items: center;
+}
+.usage-panel__icon:hover,
+.usage-panel__back:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+.usage-panel__rule {
+  height: 1px;
+  background: var(--color-border);
+}
+.usage-panel__empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-5);
+  color: var(--color-text-faint);
+}
+.usage-panel__link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+  cursor: pointer;
+}
+.usage-panel__link:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+.usage-panel__link:hover:not(:disabled),
+.usage-panel__link:focus-visible,
+.usage-row:hover:not(:disabled),
+.usage-row:focus-visible {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+.usage-panel__link > svg:last-child {
+  color: var(--color-text-faint);
+}
+.usage-panel__link > svg:first-child {
+  color: var(--color-text-muted);
+}
+.usage-panel__link > span {
+  flex: 1;
+  text-align: left;
+}
+.usage-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  gap: var(--space-3);
+  text-align: left;
+  cursor: pointer;
+}
+.usage-row:disabled {
+  cursor: default;
+}
+.usage-row__body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.usage-row__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+.usage-row__name {
+  overflow: hidden;
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-row__plan,
+.usage-row__account {
+  color: var(--color-text-muted);
+  font-weight: var(--font-weight-regular);
+}
+.usage-row__status,
+.usage-row__reset {
+  overflow: hidden;
+  color: var(--color-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.usage-row__reset {
+  margin-left: auto;
+}
+.usage-row__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  padding-left: calc(14px + var(--space-3));
+  gap: var(--space-2) var(--space-5);
+}
+.usage-row__metrics--flush {
+  padding-left: 0;
+}
+.usage-row__error {
+  padding-left: calc(14px + var(--space-3));
+  color: var(--color-warning);
+}
+.usage-row__chevron {
+  flex: none;
+  color: var(--color-text-faint);
+}
+.usage-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.usage-metric__label {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-2xs);
+}
+.usage-metric__value {
+  font-variant-numeric: tabular-nums;
+}
+.usage-account__check {
+  display: inline-flex;
+  width: 14px;
+  flex: none;
+  align-self: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+  color: var(--color-accent);
+}
+.usage-account__active {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-2xs);
+}
+.usage-account__state {
+  color: var(--color-warning);
+  font-size: var(--font-size-2xs);
+}
+.usage-account:disabled:not([aria-checked='true']) .usage-row__name {
+  color: var(--color-text-muted);
+}
+.account-switcher__note {
+  display: flex;
+  align-items: flex-start;
+  margin: var(--space-3) var(--space-5);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  line-height: var(--line-height-normal, 1.5);
+}
+.account-switcher__note > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.account-switcher__note.is-emphasis {
+  color: var(--color-success);
+}
+.account-switcher__error {
+  margin: var(--space-3) var(--space-5);
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+}
+
+/* ── settings ────────────────────────────────────────────── */
+.acct-panel {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+.acct-group {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: var(--space-3);
+  gap: var(--space-2);
+}
+.acct-group__head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.acct-group__title {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  gap: var(--space-3);
+}
+.acct-group__empty {
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+.acct-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  gap: var(--space-3);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+.acct-row.is-active {
+  border-color: var(--color-accent-line);
+  background: var(--color-accent-wash);
+}
+.acct-row__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  padding: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+.acct-row__main:disabled {
+  cursor: default;
+}
+.acct-row__radio {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 1px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-accent);
+  place-items: center;
+}
+.acct-row__text {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  text-align: left;
+}
+.acct-row__name {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  gap: var(--space-3);
+}
+.acct-row__name > .badge {
+  flex: none;
+}
+.acct-row__label,
+.acct-row__detail {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-row__detail {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+.acct-row__detail.is-warn {
+  color: var(--color-warning);
+}
+.acct-row__actions,
+.acct-row__edit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.acct-row__actions {
+  flex: none;
+}
+.acct-row__edit {
+  flex: 1;
+  padding: var(--space-2);
+}
+.acct-row__edit > :first-child {
+  flex: 1;
+}
+.acct-row__confirm {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+.acct-row__confirm > span {
+  flex: 1 1 240px;
+}
+
+/* ── login dialog ────────────────────────────────────────── */
+.acct-login-modal {
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-panel);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text);
+}
+.acct-login-modal::backdrop {
+  background: rgb(0 0 0 / 60%);
+}
+.acct-login {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+.acct-login__head {
+  display: flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-3);
+}
+.acct-login__title {
+  flex: 1;
+  font-weight: var(--font-weight-bold);
+}
+.acct-login__lead {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.acct-login__lead.is-ok {
+  color: var(--color-success);
+}
+.acct-login__term {
+  position: relative;
+  height: min(420px, calc(100vh - 220px));
+  margin: 0 var(--space-5);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-terminal);
+}
+.acct-login__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-4) var(--space-5);
+}
+
+/* ── footer update pill ──────────────────────────────────── */
+.statusbar__update-wait {
+  color: var(--color-text-faint);
+}

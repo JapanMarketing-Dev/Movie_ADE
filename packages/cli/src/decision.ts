@@ -7,9 +7,9 @@ import type { Ctx } from './ctx.js';
 import { apiKeyFor } from './keys.js';
 import { paths, type Project } from './project.js';
 
-// The decision model for every CLI judgement (cuts, highlights, thumbnail frames). Default `auto`: the user's own agent
-// CLI (claude → codex → gemini), so nothing needs an API key. Env SOLOCUT_DECISION_PROVIDER overrides the setting
-// (tests and CI use `off`).
+// The optional decision model for CLI judgements (cut candidates, thumbnail frames). Default `off`: every step works
+// without it (rules + the agent's own judgement, unsure results marked needsReview). `auto` uses the user's own agent
+// CLI (claude → codex → gemini), so it never needs an API key. Env SOLOCUT_DECISION_PROVIDER overrides the setting.
 
 export interface DecisionSetup {
   provider: Provider;

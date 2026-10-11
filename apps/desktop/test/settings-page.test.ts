@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activeSectionAt, filterSettingsSections, getPath, moveItem, parseSettingsText, preferFirst, SETTINGS_SECTIONS, type SettingsSectionId } from '../src/renderer/src/settings/settingsSections';
+import { activeSectionAt, filterSettingsSections, getPath, moveItem, parseSettingsText, promptSettingValue, SETTINGS_SECTIONS, type SettingsSectionId } from '../src/renderer/src/settings/settingsSections';
 import { goToStep, initialOnboarding, isLastStep, markOnboarding, nextStep, ONBOARDING_KEY, ONBOARDING_STEPS, prevStep, shouldShowOnboarding, type StorageLike } from '../src/renderer/src/onboarding/flow';
 import { SHELL_DICT } from '../src/renderer/src/shell/i18n';
 
@@ -13,9 +13,24 @@ describe('settings sections', () => {
   it('finds sections by item words in English and Japanese', () => {
     expect(filterSettingsSections('fps', title)).toEqual(['recording']);
     expect(filterSettingsSections('マイク', title)).toContain('recording');
-    expect(filterSettingsSections('whisper', title)).toEqual(expect.arrayContaining(['transcription', 'library']));
-    expect(filterSettingsSections('サブスク', title)).toContain('decision');
-    expect(filterSettingsSections('prompts.json', title)).toEqual(['prompts']);
+    expect(filterSettingsSections('whisper', title)).toEqual(['transcription']);
+    expect(filterSettingsSections('マスタフォルダ', title)).toEqual(['general']);
+    expect(filterSettingsSections('保存先', title)).toEqual(['general']);
+    expect(filterSettingsSections('撮影後', title)).toEqual(['general']);
+    expect(filterSettingsSections('起動', title)).toEqual(['prompts']);
+    expect(filterSettingsSections('投稿 プロンプト', title)).toEqual(['prompts']);
+    expect(filterSettingsSections('既定', title)).toEqual(['prompts']);
+    expect(filterSettingsSections('youtube', title)).toEqual(['accounts']);
+    expect(filterSettingsSections('tiktok', title)).toEqual(['accounts']);
+    expect(filterSettingsSections('アカウント 切り替え', title)).toEqual(['accounts']);
+    expect(filterSettingsSections('自動 更新', title)).toEqual(['updates']);
+    expect(filterSettingsSections('クラッシュ', title)).toEqual(['crashReports']);
+  });
+  it('has the Ferret-like plain sections only: no JSON file, decision model, image generation, API keys or library', () => {
+    expect([...SETTINGS_SECTIONS]).toEqual(['general', 'prompts', 'agents', 'accounts', 'recording', 'transcription', 'appearance', 'language', 'layout', 'updates', 'crashReports', 'about']);
+    for (const q of ['settings.json', 'prompts.json', 'json', '判定モデル', 'decision', '画像生成', 'gpt-image', 'api key', 'APIキー', 'ollama', 'typesafe', 'ライブラリ', 'instagram', 'shorts']) {
+      expect(filterSettingsSections(q, title), q).toEqual([]);
+    }
   });
   it('ANDs words, folds width and case', () => {
     expect(filterSettingsSections('ＦＰＳ', title)).toEqual(['recording']);
@@ -63,11 +78,17 @@ describe('settings helpers', () => {
     expect(parseSettingsText('null')).toBeUndefined();
     expect(parseSettingsText('// c\n{}')).toBeUndefined();
   });
-  it('moves an id to the front without duplicates', () => {
-    expect(preferFirst(['codex', 'gemini', 'openai'], 'openai')).toEqual(['openai', 'codex', 'gemini']);
-    expect(preferFirst(['codex'], 'codex')).toEqual(['codex']);
-    expect(preferFirst([], 'x')).toEqual(['x']);
-    expect(preferFirst(['a', 'x', 'x'], 'x')).toEqual(['x', 'a']);
+  it('prompt textarea: blank or unchanged-from-default text removes the override; anything else is saved as typed', () => {
+    const def = '既定の文\n2行目';
+    expect(promptSettingValue('', def)).toBeUndefined();
+    expect(promptSettingValue('  \n\t', def)).toBeUndefined();
+    expect(promptSettingValue(def, def)).toBeUndefined();
+    expect(promptSettingValue(`\n${def}  \n`, def)).toBeUndefined();
+    expect(promptSettingValue('自分の文', def)).toBe('自分の文');
+    expect(promptSettingValue('  自分の文\n', def)).toBe('  自分の文\n');
+    expect(promptSettingValue('既定の文', def)).toBe('既定の文');
+    expect(promptSettingValue('x', '')).toBe('x');
+    expect(promptSettingValue('', '')).toBeUndefined();
   });
   it('moves list items within bounds only', () => {
     expect(moveItem(['a', 'b', 'c'], 1, -1)).toEqual(['b', 'a', 'c']);

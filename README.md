@@ -1,7 +1,3 @@
-<!--
-  docs/images/hero.gif and docs/images/scenes/*.png are rendered from the landing page animation (site/js/app.js, solocut.app).
--->
-
 <div align="center">
 
 <picture>
@@ -10,8 +6,8 @@
 </picture>
 
 **The ADE for video editing.**<br>
-Shoot once; get a YouTube video, a TikTok and a YouTube Short. Claude Code, Codex or any terminal agent edits by template,<br>
-a decision model checks every frame, and you fix things by talking over the preview. (ADE = Agentic Development Environment.)
+Have an idea, hit record, and the video edits itself. Watch it, say OK, and it is posted to YouTube or TikTok.<br>
+Claude Code, Codex or any terminal agent does the editing on the AI subscription you already have. (ADE = Agentic Development Environment.)
 
 [![GitHub stars](https://img.shields.io/github/stars/JapanMarketing-Dev/solocut?style=flat&color=ff4a3d&label=stars)](https://github.com/JapanMarketing-Dev/solocut/stargazers)
 [![Download](https://img.shields.io/badge/download-macOS%20%7C%20Windows%20%7C%20Linux-4ade80?style=flat)](https://solocut.app/download)
@@ -22,52 +18,45 @@ a decision model checks every frame, and you fix things by talking over the prev
 
 **English** · [日本語](README.ja.md)
 
-<br>
-
-<img src="docs/images/hero.gif" width="100%" alt="Solocut in five scenes: recording screen and two cameras on separate tracks; one prompt, “Finish the video”, runs every step of the template; a decision model checks the frames around each cut; a pen circles a caption while you say what to change; the video is published to YouTube and TikTok and announced on X, Instagram, Threads and Facebook.">
-
 </div>
 
 <br>
 
+## Idea → record → it edits itself → watch → OK, posted
+
+1. **Have an idea.** Create a video from Home: pick where it is saved (one folder per video inside your master folder) and you are ready.
+2. **Record.** Pick a display and drag the area to record, so the menu bar and Dock stay out of the shot. Add one or more cameras (mark one as “main (you)”) and your mic. Each source is its own track.
+3. **It edits itself.** When you stop, Solocut registers the take and sends one prompt, **“Finish the video”**, to Claude Code (or Codex, Gemini CLI…) in a terminal it opens for you. The agent follows the template step by step (`solocut next` tells it what to do now): sync, transcribe, cut, keep your face centered, captions, sound effects, mosaic, checks, export, thumbnail and the post text.
+4. **Watch it.** The finished video plays in the app, with the title, description and tags the agent wrote. Not happy? Talk over the preview and circle what bothers you; it becomes a timecoded fix for the agent.
+5. **OK, posted.** Press “OK · Post”. The agent checks `publish.json` and posts the video to YouTube and/or TikTok through the app. Nothing goes out until you press OK.
+
 ## Shoot alone. Screen and cameras at once.
 
-Record your screen, one or more cameras and your mic together, each on its own track, so the template can switch between picture-in-picture, split screen, camera only or screen only at any point. Shot something on a mirrorless camera or an iPhone too? Import it and Solocut syncs it to the frame by audio, with drift correction for long takes. Teleprompter, countdown and hotkeys to mark “bad take” or “important” while you talk.
-
-<img src="docs/images/scenes/record.png" width="100%" alt="Recording the screen, camera A, camera B and the mic, each as its own track, with the timer running.">
+Record only the part of the screen you want, one or more cameras and your mic together, each on its own track. Shot something on a mirrorless camera or an iPhone too? Import it and Solocut syncs it to the frame by audio, with drift correction for long takes. A countdown and hotkeys mark “bad take” or “important” while you talk. Files are written every second, so a crash never loses the take.
 
 ## One prompt to a finished video
 
-Shoot 10 to 20 minutes and say **“Finish the video”**. Your agent follows the template step by step (`solocut next` tells it what to do now): sync, transcribe, rough cut, camera angles, captions, sound effects, mosaic, checks, export, thumbnail and the post text. Ready-made prompts cover the rest (rough cut only, fix my feedback, make three Shorts, write the post), and every prompt is yours to edit in JSON.
+There is one startup prompt, “Finish the video”, sent automatically when you stop recording, and one posting prompt. Both are yours to rewrite in Settings. Thumbnails are made by your agent through your ChatGPT (Codex) or Gemini subscription; no API key is needed anywhere.
 
-<img src="docs/images/scenes/prompt.png" width="100%" alt="A terminal running Claude with the prompt “Finish the video”; twelve pipeline steps light up one by one.">
+## Checks on the frames that matter
 
-## A decision model checks every frame that matters
-
-Machine checks run first: black frames, freezes, loudness and the export spec. Then a **decision model** looks at the frames around every cut, caption and mosaic and answers typed questions with a probability: is this cut mid-word, does this caption cover a face, is an email visible on screen? Confident answers are applied; only the uncertain ones come to you. Run it locally with Ollama or with your own API key.
-
-<img src="docs/images/scenes/check.png" width="100%" alt="Eight frames checked: most pass, one cut is sent to you for review, and one frame with a visible email gets a mosaic.">
+Machine checks look at black frames, freezes, loudness, the export spec, cut boundaries, caption safe areas and personal info on screen. A decision model can double-check the frames around cuts and captions, but it is optional and off by default; everything works without it.
 
 ## Don’t type the fix. Point at it.
 
 Play the preview, talk, pause and circle. Solocut transcribes on your machine and turns each remark into a timecode, a frame with your pen, your words and the exact caption or clip you meant. One click sends it to your agent.
 
-<img src="docs/images/scenes/feedback.png" width="100%" alt="A pen circles a caption on the preview while you say it covers your face; a feedback card with the timecode goes to Claude.">
+## One video, posted where you want
 
-## One take, three videos, three posts
-
-From one recording Solocut makes the YouTube video (16:9), a vertical TikTok cut and a YouTube Short (9:16): highlights picked, re-framed around your face or your cursor, captions rebuilt for vertical. Approve once and all three are posted, then announced on X, Instagram, Threads and Facebook. Nothing goes out until you check and approve it.
-
-<img src="docs/images/scenes/publish.png" width="100%" alt="The finished video with its thumbnail, approved by you, published to YouTube and TikTok and announced on X, Instagram, Threads and Facebook.">
+Each project makes one 16:9 video. The agent writes the title, description, tags, thumbnail and per-platform options into `publish.json`; after you press OK it posts the same file to YouTube and/or TikTok. Connecting YouTube and TikTok is one button each.
 
 ## More
 
 | | |
 |---|---|
-| **Templates that hold the line.** Format, layout, cut policy, caption style, checks and the pipeline, with the editing rules written as prompts. Built in: tech tutorial, tech short, talk for YouTube, talk for TikTok, Shorts from a long video. [Design](docs/04_templates_and_agents.md) | **A typed, information-rich `timeline.json`.** Every edit records what, why, who decided and how sure, plus licenses and check results, so any agent can pick up the project cold. Scene patterns (illustration + speech bubbles + round wipe…) are typed too. [Design](docs/15_timeline_schema.md) |
-| **Benchmark a reference video.** Open a video you are allowed to study and Solocut measures how captions appear, where sound effects land, how loud the music sits and how fast the cuts come, then turns it into a template. [Design](docs/09_benchmark.md) | **Thumbnails with image generation.** Through your Codex subscription or an OpenAI / Google API key. Japanese titles are typeset separately so they never break. [Design](docs/10_thumbnails.md) |
-| **Sound effects, music and illustrations on tap.** Free-to-use assets download the moment you or your agent picks them, with credits written for you and license limits counted. [Design](docs/16_asset_library.md) | **Your past videos, at hand.** Every finished video and its timeline stay searchable, so you can say “make it like last month’s”. [Design](docs/17_archive.md) |
-| **Mosaic, automatically.** Emails, notifications, API keys, bystanders’ faces and plates are detected, tracked and hidden. [Design](docs/05_decision_model.md) | **Every setting is JSON.** `~/.solocut/settings.json` with a public schema, so your agent can configure Solocut for you. [Design](docs/11_settings.md) |
+| **One template that holds the line.** Format, layout, cut policy, caption style, checks and the pipeline, with the editing rules written as prompts. [Design](docs/04_templates_and_agents.md) | **A typed, information-rich `timeline.json`.** Every edit records what, why, who decided and how sure, plus licenses and check results, so any agent can pick up the project cold. [Design](docs/15_timeline_schema.md) |
+| **Your face stays centered.** With several cameras, the one marked “main (you)” is cropped so your face sits in the middle of the frame. | **Thumbnails from the video’s content.** Your agent asks Codex (ChatGPT subscription) or Gemini to draw them. Japanese titles are typeset separately so they never break. [Design](docs/10_thumbnails.md) |
+| **Mosaic, automatically.** Emails, notifications, API keys, bystanders’ faces and plates are detected, tracked and hidden. [Design](docs/05_decision_model.md) | **Updates itself.** Signed updates are downloaded and installed automatically. |
 | **Private by default.** Video and audio stay on your machine. Transcription runs on-device with whisper.cpp. | **Free and open source.** MIT. No account, no watermark, no subscription. macOS, Windows and Linux. |
 
 ## Supported agents

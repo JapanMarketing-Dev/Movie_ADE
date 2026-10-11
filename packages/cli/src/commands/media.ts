@@ -19,6 +19,7 @@ import { cameraCount, loadAnalysis } from '../analysis.js';
 import { decisionSetup, isSkip } from '../decision.js';
 import { ensureFonts } from '../fonts.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
+import { cameraRoles, editFps, takeOffsets } from '../ingest.js';
 import {
   VARIANTS, applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, variantExists, vpaths, writeAtomic, type Project,
 } from '../project.js';
@@ -48,15 +49,9 @@ function by(ctx: Ctx) {
   return { by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}) };
 }
 
-function toRational(fps: number): Rational {
-  if (Number.isInteger(fps)) return { num: fps, den: 1 };
-  for (const [num, den] of [[24000, 1001], [30000, 1001], [60000, 1001]] as const) if (Math.abs(fps - num / den) < 0.01) return { num, den };
-  return { num: Math.round(fps), den: 1 };
-}
-
 // ---------- takes / ingest / import ----------
 
-interface TakeTrack { file: string; kind: 'screen' | 'camera' | 'mic' | 'system'; fps?: number; width?: number; height?: number; sampleRate?: number; firstFrameMs?: number; recorderStartMs?: number }
+interface TakeTrack { file: string; kind: 'screen' | 'camera' | 'mic' | 'system'; fps?: number; width?: number; height?: number; sampleRate?: number; firstFrameMs?: number; recorderStartMs?: number; role?: string }
 interface TakeMeta { id: string; startedAtMs: number; tracks: TakeTrack[]; markers: { kind: 'ng' | 'important'; atMs: number; sinceStartMs: number }[]; complete?: boolean }
 
 function readTake(dir: string): TakeMeta | null {
@@ -87,7 +82,7 @@ export async function cmdTakes(ctx: Ctx, args: string[]): Promise<void> {
 }
 
 /** Probe a file and build a Source for it. */
-async function sourceFor(p: Project, m: Media, file: string, o: { kind?: 'camera' | 'screen' | 'mic'; take?: string; role?: Extract<Source, { kind: 'camera' }>['role']; offsetSec?: number; fpsHint?: number; proxy?: boolean }): Promise<{ source: Source; proxied: boolean }> {
+async function sourceFor(p: Project, m: Media, file: string, o: { kind?: 'camera' | 'screen' | 'mic'; take?: string; role?: Extract<Source, { kind: 'camera' }>['role']; offsetSec?: number; fpsHint?: number; proxy?: boolean; /** remake an existing proxy (ingest --force) */ reproxy?: boolean }): Promise<{ source: Source; proxied: boolean }> {
   const pr = await m.probe(file);
   const v = pr.streams.find((s) => s.type === 'video');
   const a = pr.streams.find((s) => s.type === 'audio');
@@ -99,14 +94,14 @@ async function sourceFor(p: Project, m: Media, file: string, o: { kind?: 'camera
     const sr = a!.sampleRate ?? 48000;
     return { source: { kind: 'mic', path: rel(p, file), ...(o.take ? { take: o.take } : {}), sampleRate: sr, offset: -Math.round(offsetSec * sr) }, proxied: false };
   }
-  let fps = v!.fps ?? (o.fpsHint ? toRational(o.fpsHint) : { num: 30, den: 1 });
-  if (fps.num / fps.den > 120 || fps.num / fps.den < 1) fps = o.fpsHint ? toRational(o.fpsHint) : { num: 30, den: 1 };
+  // the recorder's requested rate wins over a VFR file's average (a still screen averages ~6 fps)
+  const fps = editFps(v!.fps, o.fpsHint, v!.vfr);
   let path = rel(p, file);
   let proxied = false;
   if (o.proxy !== false && (v!.vfr || /\.webm$/i.test(file))) {
     // MediaRecorder output is VFR: edit from a CFR copy (docs/03 「収録後の正規化」)
     const out = join(p.dir, 'derived', 'proxies', basename(dirname(file)), `${basename(file, extname(file))}.mp4`);
-    if (!existsSync(out)) {
+    if (!existsSync(out) || o.reproxy) {
       mkdirSync(dirname(out), { recursive: true });
       await m.makeCfrProxy(file, out, { fps });
     }
@@ -139,17 +134,17 @@ export async function cmdIngest(ctx: Ctx, args: string[]): Promise<void> {
     const meta = readTake(dir);
     if (!meta) continue;
     const tracks = meta.tracks.filter((tr) => tr.kind !== 'system' && existsSync(join(dir, tr.file)));
-    const startOf = (tr: TakeTrack) => tr.firstFrameMs ?? tr.recorderStartMs ?? meta.startedAtMs;
-    const t0 = Math.min(...tracks.map(startOf));
-    let cams = 0;
+    // each track's start on the shared clock (a first-sample time on another clock falls back to the recorder start)
+    const { t0, offsets } = takeOffsets(tracks, meta.startedAtMs);
+    const roles = cameraRoles(tracks);
     let takeRate: Rational | null = null;
     for (const tr of tracks) {
       const id = `${takeId}.${basename(tr.file, extname(tr.file))}`;
       if (tl.sources[id] && !values.force) continue;
       const kind = tr.kind === 'camera' ? 'camera' : tr.kind === 'screen' ? 'screen' : 'mic';
       const { source } = await sourceFor(p, m, join(dir, tr.file), {
-        kind, take: takeId, offsetSec: (startOf(tr) - t0) / 1000, ...(tr.fps ? { fpsHint: tr.fps } : {}), proxy: !values['no-proxy'],
-        ...(kind === 'camera' ? { role: cams++ === 0 ? 'front' : 'other' } : {}),
+        kind, take: takeId, offsetSec: offsets[tr.file] ?? 0, ...(tr.fps ? { fpsHint: tr.fps } : {}), proxy: !values['no-proxy'], reproxy: !!values.force,
+        ...(kind === 'camera' ? { role: roles[tr.file] ?? 'other' } : {}),
       });
       if (source.kind === 'camera') source.sync = { method: 'clock', confidence: 1 };
       if ((source.kind === 'screen' || source.kind === 'camera') && (!takeRate || source.kind === 'screen')) takeRate = source.fps;
@@ -498,6 +493,15 @@ function takeDurationSec(tl: Timeline, take: string): number {
 }
 
 /**
+ * Without a decision model the rules decide: every candidate is cut, and retakes (the rule cannot tell which take is
+ * better) are marked needsReview on the removed span, so the agent re-reads them (prompts/rough-cut.md). Nothing
+ * waits for a human.
+ */
+export function ruleJudge(cands: Removal[]): { cut: Removal[]; review: Removal[] } {
+  return { cut: cands.map((c) => (c.kind === 'retake' ? { ...c, needsReview: true } : c)), review: [] };
+}
+
+/**
  * Ask the decision model about filler/retake candidates, many per call (agent CLIs are slow and counted in calls).
  * Failures fall back to the rule for the rest.
  */
@@ -508,7 +512,7 @@ async function judge(ctx: Ctx, p: Project, tpl: Template, cands: Removal[], word
   const setup = decisionSetup(ctx, p, 'cut');
   if (isSkip(setup)) {
     if (setup.skip === 'consent') warnings.push(t(ctx, 'クラウドの判定モデルへの送信に同意していないため、規則で決めました（設定 decision.cloudConsent）', 'cloud decision model not consented (decision.cloudConsent); used the rules'));
-    return { cut: cands, review: [] };
+    return ruleJudge(cands);
   }
   const cut: Removal[] = [...rest];
   const review: Removal[] = [];
@@ -692,9 +696,8 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
   if (!tr) throw new CliError('no-transcript', t(ctx, '文字起こしがありません。先に solocut transcribe', 'no transcript; run solocut transcribe first'));
   if (!tl.segments.length) throw new CliError('no-segments', t(ctx, '区間がありません。先に solocut propose cuts', 'no segments; run solocut propose cuts first'));
   const cap = await captionsLib();
-  // variants use the vertical style of the template's outputs map (docs/18), sized by the style itself
-  const variantCfg = p.variant ? tpl.outputs?.[p.variant] : undefined;
-  const style = o.style ?? (p.variant ? variantCfg?.captions ?? 'tiktok-bold' : tpl.captions.style);
+  // an older project's vertical variant keeps the vertical style, sized by the style itself
+  const style = o.style ?? (p.variant ? 'tiktok-bold' : tpl.captions.style);
   if (o.style && !cap.CAPTION_STYLES[o.style]) throw new CliError('usage', t(ctx, `字幕のスタイルがありません: ${o.style}（${Object.keys(cap.CAPTION_STYLES).join(', ')}）`, `unknown caption style: ${o.style} (${Object.keys(cap.CAPTION_STYLES).join(', ')})`));
   const styleDef = cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!;
   const maxCharsPerLine = p.variant ? styleDef.maxCharsPerLine[p.file.language] : tpl.captions.maxCharsPerLine;
@@ -739,7 +742,7 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
 
 export async function cmdCaptions(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
-  if (sub !== 'build') throw new CliError('usage', 'usage: solocut captions build [--style <style>] [--variant v]');
+  if (sub !== 'build') throw new CliError('usage', 'usage: solocut captions build [--style <style>]');
   const { values } = opts(rest, { style: { type: 'string' } }, { max: 0 });
   const p = openProject(ctx);
   const r = await buildCaptionsFor(ctx, p, values.style ? { style: values.style } : {});

@@ -7,7 +7,7 @@ import { ESSENTIAL_TOOLS, summarizeTools } from '../shell/format';
 import { useST, type SKey } from '../shell/i18n';
 import { agentsStore, setSetting, settingsStore, toolsStore, useStore } from '../shell/stores';
 import { Button, Modal, Progress, Segmented, Spinner, useToast } from '../ui';
-import { ONBOARDING_STEPS, goToStep, initialOnboarding, isLastStep, nextStep, prevStep, stepIndex, type OnboardingStep } from './flow';
+import { ONBOARDING_STEPS, goToStep, initialOnboarding, isLastStep, nextStep, prevStep, stepIndex, videosRootChosen, type OnboardingStep } from './flow';
 
 /**
  * First-run flow (ported in spirit from Ferret src/renderer/onboarding/OnboardingFlow.tsx / OnboardingSteps.tsx and
@@ -15,10 +15,18 @@ import { ONBOARDING_STEPS, goToStep, initialOnboarding, isLastStep, nextStep, pr
  * `solocut lib install`) → camera / mic / screen permissions → the first project.
  * Every step can be skipped; nothing here is required to use the app.
  */
-export function OnboardingFlow({ onClose, onNewProject, onOpenFolder }: { onClose: (how: 'done' | 'skipped') => void; onNewProject: () => void; onOpenFolder: () => void }) {
+export function OnboardingFlow({ onClose: close, onNewProject, onOpenFolder }: { onClose: (how: 'done' | 'skipped') => void; onNewProject: () => void; onOpenFolder: () => void }) {
   const t = useST();
   const [state, setState] = useState(initialOnboarding);
   const step = state.step;
+  const settings = useStore(settingsStore);
+  // finishing the flow accepts the master folder shown on the last step (the default unless changed there)
+  const onClose = (how: 'done' | 'skipped') => {
+    if (how === 'done' && settings.loaded && settings.json !== null && !videosRootChosen(settings.json)) {
+      void api.invoke('videos:list').then((l) => setSetting('videos.root', l.root)).catch(() => undefined);
+    }
+    close(how);
+  };
   return (
     <Modal className="onb-modal" label={t('onb.title')} onClose={() => onClose('skipped')}>
       <div className="onb" data-testid="onboarding">
@@ -321,9 +329,31 @@ function PermissionsStep() {
 
 function ProjectStep({ onNew, onOpen }: { onNew: () => void; onOpen: () => void }) {
   const t = useST();
+  const toast = useToast();
+  const [root, setRoot] = useState('');
+  useEffect(() => void api.invoke('videos:list').then((l) => setRoot(l.root)).catch(() => undefined), []);
+  const change = async () => {
+    const d = await api.invoke('app:chooseFolder', t('onb.project.root'));
+    if (!d) return;
+    const err = await setSetting('videos.root', d);
+    if (err) toast({ tone: 'danger', message: err });
+    else setRoot(d);
+  };
   return (
     <>
       <StepHead step="project" />
+      <div className="onb__list onb__root">
+        <div className="onb__row">
+          <FolderOpen size={14} />
+          <span className="onb__row-name">{t('onb.project.root')}</span>
+          <code className="onb__row-cmd" title={root}>
+            {root || '…'}
+          </code>
+          <Button size="sm" onClick={() => void change()}>
+            {t('onb.project.rootChange')}
+          </Button>
+        </div>
+      </div>
       <div className="onb__cards">
         <button type="button" className="onb__card" onClick={onNew}>
           <Plus size={18} />
@@ -340,6 +370,8 @@ function ProjectStep({ onNew, onOpen }: { onNew: () => void; onOpen: () => void 
         <li>{t('onb.project.f1')}</li>
         <li>{t('onb.project.f2')}</li>
         <li>{t('onb.project.f3')}</li>
+        <li>{t('onb.project.f4')}</li>
+        <li>{t('onb.project.f5')}</li>
       </ol>
     </>
   );

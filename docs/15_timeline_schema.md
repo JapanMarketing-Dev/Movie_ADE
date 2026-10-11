@@ -128,10 +128,15 @@ interface Segment {
   checks?: CheckResult[];
 }
 
+// focus: cover の切り抜きの位置（切り落とした余白の割合 0〜1。0.5 が中央）。固定値か、区間の先頭からのフレームのキーフレーム
+// scale: cover の切り抜きの拡大（1〜2）。16:9 のカメラを 16:9 に入れるときも位置を動かせる（人物の顔を中央に。core centerPerson）
+type Focus = { x: number; y: number } | { at: number; x: number; y: number }[];
+
 type VideoChoice =
-  | { layout: 'camera-full'; camera: SourceId }
+  | { layout: 'camera-full'; camera: SourceId; focus?: Focus; scale?: number }
   | { layout: 'screen-full'; screen: SourceId }
-  | { layout: 'screen-with-wipe'; screen: SourceId; camera: SourceId; wipe: { shape: 'circle' | 'rounded'; corner: 'bl' | 'br' | 'tl' | 'tr'; style: string } }
+  | { layout: 'screen-with-wipe'; screen: SourceId; camera: SourceId; wipe: { shape: 'circle' | 'rounded'; corner: 'bl' | 'br' | 'tl' | 'tr'; style: string; size?: number };
+      cameraFocus?: Focus; cameraScale?: number }   // ワイプの中のカメラの切り抜き（顔を中央に）
   | { layout: 'split-v'; top: SourceId; bottom: SourceId }
   | { layout: 'scene'; scene: Id<'scn'> };            // シーンのパターンを全画面で使う
 ```
@@ -246,6 +251,8 @@ type Marker =
 ```
 
 ### outputs と review — 出力と検査の状態
+
+動画は1本（`youtube`、renders/youtube/final.mp4）。投稿の内容（タイトル・説明文・タグ・公開範囲・サムネイル）の正本は timeline ではなく、プロジェクト直下の `publish.json`（`solocut meta set` / `thumb pick` が書き、アプリの投稿画面が読む。[14](./14_publishing.md)）。`outputs[].metadata` は古いプロジェクトとの互換のために残っている。
 
 ```ts
 interface Output {

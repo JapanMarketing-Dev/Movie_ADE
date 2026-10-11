@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PROMPTS, SettingsError, SettingsSchema, applySetting, defaultSettings, diffSettings, getSetting, loadPrompts,
-  loadPromptsWithErrors, loadSettings, loadSettingsWithErrors, mergePrompts, parseCliValue, parseSettings, promptsJsonSchema,
-  renderPrompt, saveSettings, setSetting, settingsHistoryPath, settingsJsonSchema, settingsPath, stripJsonComments,
+  DEFAULT_PROMPTS, PROMPT_IDS, SettingsError, SettingsSchema, applySetting, defaultPromptText, defaultSettings, diffSettings, getSetting,
+  isPromptId, loadPrompts, loadPromptsWithErrors, loadSettings, loadSettingsWithErrors, parseCliValue, parseSettings, promptOverride,
+  promptsFromSettings, renderPrompt, renderPromptById, saveSettings, setSetting, settingsHistoryPath, settingsJsonSchema, settingsPath,
+  stripJsonComments,
 } from '../src/index.js';
 
 let home: string;
@@ -27,13 +28,15 @@ describe('defaults', () => {
     expect(s.agents.order).toEqual(['claude', 'codex', 'gemini']);
     expect(s.agents.failover.enabled).toBe(true);
     expect(s.recording.camera).toEqual({ deviceId: 'default', width: 1920, height: 1080, fps: 30 });
-    expect(s.decision.provider).toBe('auto');
+    expect(s.decision.provider).toBe('off');
     expect(s.decision.limits).toEqual({ perProjectUsd: 2, perDayUsd: 5, perProjectCalls: 200 });
     expect(s.library.download).toBe('on-demand');
-    expect(s.autopilot).toEqual({ stopBefore: ['publish'], maxFixLoops: 3, notify: ['done', 'needs-human'], budget: { decisionUsd: 2 } });
+    expect(s.autopilot).toEqual({ autoStart: true, stopBefore: ['publish'], maxFixLoops: 3, notify: ['done', 'needs-human'], budget: { decisionUsd: 2 } });
+    expect(s.prompts).toEqual({});
     expect(s.telemetry.crashReports).toBe(true);
     expect(s.updates).toEqual({ channel: 'stable', auto: true });
-    expect(s.imageGen.providers.openai).toMatchObject({ via: 'api', model: 'gpt-image-2' });
+    // images are made inside the subscriptions: no API provider by default
+    expect(s.imageGen).toEqual({ order: ['codex'], providers: { codex: { via: 'subscription' } } });
   });
 
   it('has no theme option', () => {
@@ -212,85 +215,187 @@ describe('get/set by dot path', () => {
   });
 });
 
+describe('settings for the simplified app', () => {
+  it('autopilot.autoStart defaults to true and only takes booleans', () => {
+    expect(defaultSettings().autopilot.autoStart).toBe(true);
+    expect(setSetting('autopilot.autoStart', false).autopilot.autoStart).toBe(false);
+    expect(() => setSetting('autopilot.autoStart', 'yes')).toThrow(SettingsError);
+    expect(loadSettings().autopilot.autoStart).toBe(false);
+  });
+
+  it('prompts.finish / prompts.publish are optional strings; unknown prompt keys are refused', () => {
+    expect(setSetting('prompts.finish', '自分の文').prompts.finish).toBe('自分の文');
+    expect(setSetting('prompts.publish', '').prompts.publish).toBe('');
+    expect(() => setSetting('prompts.finish', 42)).toThrow(SettingsError);
+    expect(() => setSetting('prompts.finish', 'x'.repeat(50_001))).toThrow(SettingsError);
+    expect(() => setSetting('prompts.rough-cut', 'x')).toThrow(/unknown setting/);
+    // reset to the default: the key disappears from the file
+    setSetting('prompts.finish', undefined);
+    expect(loadSettings().prompts.finish).toBeUndefined();
+    expect(JSON.parse(readFileSync(settingsPath(), 'utf8')).prompts).not.toHaveProperty('finish');
+  });
+
+  it('a broken prompts section falls back to the defaults and keeps the rest', () => {
+    writeFileSync(settingsPath(), JSON.stringify({ language: 'en', prompts: { finish: 1 } }));
+    const r = loadSettingsWithErrors();
+    expect(r.settings.language).toBe('en');
+    expect(r.settings.prompts).toEqual({});
+    expect(r.errors[0]!.path).toBe('prompts.finish');
+  });
+
+  it('the decision model is off by default and still configurable', () => {
+    expect(defaultSettings().decision.provider).toBe('off');
+    expect(setSetting('decision.provider', 'auto').decision.provider).toBe('auto');
+  });
+});
+
 describe('prompts', () => {
-  it('ships every prompt from docs/13 and docs/17 with ja and en bodies', () => {
-    const ids = DEFAULT_PROMPTS.map((p) => p.id);
-    for (const id of ['finish', 'rough-cut', 'fix-feedback', 'fix-checks', 'captions-polish', 'shorts', 'thumbnail', 'metadata', 'publish', 'announce', 'english', 'same-as-last', 'like-past', 'compare-past', 'learn', 'bench-apply']) {
-      expect(ids).toContain(id);
-    }
-    expect(new Set(ids).size).toBe(ids.length);
+  it('ships exactly finish and publish, with ja and en bodies', () => {
+    expect(PROMPT_IDS).toEqual(['finish', 'publish']);
+    expect(DEFAULT_PROMPTS.map((p) => p.id)).toEqual(['finish', 'publish']);
     for (const p of DEFAULT_PROMPTS) {
       expect(p.body.ja, p.id).toBeTruthy();
       expect(p.body.en, p.id).toBeTruthy();
       expect(p.label.ja && p.label.en).toBeTruthy();
+      expect(p.agent).toBe('default');
     }
+    expect(DEFAULT_PROMPTS.find((p) => p.id === 'finish')!.autopilot).toBe(true);
+    expect(DEFAULT_PROMPTS.find((p) => p.id === 'publish')!.autopilot).toBeUndefined();
   });
 
-  it('finish drives the solocut next loop and never publishes', () => {
-    const f = DEFAULT_PROMPTS.find((p) => p.id === 'finish')!;
+  it('isPromptId accepts only the two ids', () => {
+    expect(isPromptId('finish')).toBe(true);
+    expect(isPromptId('publish')).toBe(true);
+    for (const x of ['rough-cut', 'thumbnail', 'FINISH', '', undefined, null, 1, {}]) expect(isPromptId(x)).toBe(false);
+  });
+
+  describe('finish (startup prompt)', () => {
+    const ja = defaultPromptText('finish', 'ja');
+    const en = defaultPromptText('finish', 'en');
+    it('drives the solocut next loop in autopilot and never publishes', () => {
+      expect(ja).toContain('solocut next --autopilot --json');
+      expect(en).toContain('solocut next --autopilot --json');
+      expect(ja).toContain('投稿はしないでください');
+      expect(en).toContain('Do not publish');
+    });
+    it('does not require the decision model and marks unsure items 要確認', () => {
+      expect(ja).toContain('判定モデルは要りません');
+      expect(ja).toContain('要確認');
+      expect(en).toContain('No decision model is needed');
+    });
+    it('keeps the person centered', () => {
+      expect(ja).toMatch(/中央/);
+      expect(en).toMatch(/center/);
+    });
+    it('lists the free illustration libraries with their terms, and no downloads in advance', () => {
+      for (const lib of ['いらすとや', 'irasutoya.com', '20点', 'ソコスト', 'ICOOON MONO', 'Loose Drawing', 'unDraw', 'Openverse', 'Pixabay', 'Unsplash', 'Pexels']) expect(ja).toContain(lib);
+      for (const lib of ['irasutoya.com', '20 images', 'ICOOON MONO', 'Loose Drawing', 'unDraw', 'Openverse', 'Pixabay', 'Unsplash', 'Pexels']) expect(en).toContain(lib);
+      expect(ja).toContain('前もってダウンロードはしません');
+      expect(ja).toContain('credits.md');
+    });
+    it('makes the thumbnail through the subscriptions (Codex $imagegen, Gemini CLI), never API keys', () => {
+      expect(ja).toContain('codex exec');
+      expect(ja).toContain("'$imagegen");
+      expect(ja).toContain('1280x720');
+      expect(ja).toContain('gemini extensions list');
+      expect(ja).toContain('API キーは使いません');
+      expect(en).toContain('Never use API keys');
+      expect(ja).toContain('thumbnails/');
+    });
+    it('writes publish.json with the shared schema', () => {
+      for (const s of [ja, en]) {
+        expect(s).toContain('publish.json');
+        for (const k of ['"video"', '"thumbnail"', '"title"', '"description"', '"tags"', '"youtube"', '"privacy"', '"tiktok"', '"enabled"', '"chapters"']) expect(s).toContain(k);
+      }
+      // the embedded example is valid JSON apart from the placeholders
+      const json = ja.slice(ja.indexOf('{\n  "video"'), ja.indexOf('\n}', ja.indexOf('{\n  "video"')) + 2);
+      expect(JSON.parse(json)).toMatchObject({ video: 'renders/final.mp4', youtube: { privacy: 'private' }, tiktok: { enabled: false } });
+    });
+    it('ends with a 3-line report', () => {
+      expect(ja).toContain('3行で報告');
+      expect(en).toContain('3 lines');
+    });
+  });
+
+  describe('publish (posting prompt)', () => {
+    const ja = defaultPromptText('publish', 'ja');
+    const en = defaultPromptText('publish', 'en');
+    it('checks publish.json limits and uploads through the app', () => {
+      for (const s of [ja, en]) {
+        expect(s).toContain('publish.json');
+        expect(s).toContain('solocut publish upload');
+        expect(s).toMatch(/100/);
+        expect(s).toMatch(/5000/);
+        expect(s).toContain('private');
+      }
+      expect(ja).toContain('URL');
+      expect(en).toContain('URL');
+    });
+  });
+
+  it('promptOverride: a non-blank string wins, absent / blank / non-string mean the default', () => {
+    expect(promptOverride({ prompts: { finish: 'mine' } }, 'finish')).toBe('mine');
+    expect(promptOverride({ prompts: { finish: '' } }, 'finish')).toBeUndefined();
+    expect(promptOverride({ prompts: { finish: ' \n\t ' } }, 'finish')).toBeUndefined();
+    expect(promptOverride({ prompts: {} }, 'finish')).toBeUndefined();
+    expect(promptOverride({ prompts: { publish: 'p' } }, 'finish')).toBeUndefined();
+    expect(promptOverride(undefined, 'finish')).toBeUndefined();
+    expect(promptOverride({ prompts: { finish: 7 } } as never, 'finish')).toBeUndefined();
+  });
+
+  it('promptsFromSettings replaces both languages and marks the override; defaults stay untouched', () => {
+    const list = promptsFromSettings({ prompts: { finish: '短く {{project}}' } });
+    const f = list.find((p) => p.id === 'finish')!;
+    expect(f.body).toEqual({ ja: '短く {{project}}', en: '短く {{project}}' });
+    expect(f.overridden).toBe(true);
+    expect(f.label.ja).toBe('動画を完成させて');
     expect(f.autopilot).toBe(true);
-    expect(f.body.ja).toContain('solocut next --json');
-    expect(f.body.ja).toContain('投稿はしないでください');
-    expect(f.body.en).toContain('Do not publish');
+    const p = list.find((x) => x.id === 'publish')!;
+    expect(p.overridden).toBeUndefined();
+    expect(p.body.ja).toBe(defaultPromptText('publish', 'ja'));
+    expect(DEFAULT_PROMPTS[0]!.body.ja).not.toBe('短く {{project}}');
+    // the returned objects are copies
+    p.body.ja = 'mutated';
+    expect(defaultPromptText('publish', 'ja')).not.toBe('mutated');
   });
 
-  it('thumbnail goes to an image-capable agent', () => {
-    expect(DEFAULT_PROMPTS.find((p) => p.id === 'thumbnail')!.agent).toBe('codex');
-  });
-
-  it('merges overrides, additions and hides', () => {
-    const errors: string[] = [];
-    const out = mergePrompts(DEFAULT_PROMPTS, [
-      { id: 'finish', body: { ja: '短く' } },
-      { id: 'english', hidden: true },
-      { id: 'mine', label: { ja: '自分用', en: 'Mine' }, body: { en: 'do it' }, agent: 'claude' },
-      { id: 'broken', body: { ja: 'x' } },
-    ], errors);
-    const finish = out.find((p) => p.id === 'finish')!;
-    expect(finish.body.ja).toBe('短く');
-    expect(finish.body.en).toContain('Finish'); // other language kept
-    expect(finish.label.ja).toBe('動画を完成させて');
-    expect(out.find((p) => p.id === 'english')!.hidden).toBe(true);
-    expect(out.find((p) => p.id === 'mine')).toMatchObject({ agent: 'claude', label: { en: 'Mine' } });
-    expect(out.find((p) => p.id === 'broken')).toBeUndefined();
-    expect(errors[0]).toMatch(/broken/);
-    // the defaults are not mutated
-    expect(DEFAULT_PROMPTS.find((p) => p.id === 'finish')!.body.ja).not.toBe('短く');
-  });
-
-  it('loads user then project files; project wins; hidden removed', () => {
-    writeFileSync(join(home, 'prompts.json'), JSON.stringify({ prompts: [{ id: 'finish', body: { ja: 'user' } }, { id: 'english', hidden: true }] }));
+  it('loadPrompts reads the overrides from settings.json; prompts.json files are ignored', () => {
+    writeFileSync(join(home, 'prompts.json'), JSON.stringify({ prompts: [{ id: 'finish', body: { ja: 'old file' } }] }));
     const proj = join(home, 'proj');
     mkdirSync(join(proj, '.solocut'), { recursive: true });
-    writeFileSync(join(proj, '.solocut', 'prompts.json'), JSON.stringify({ prompts: [{ id: 'finish', body: { ja: 'project' } }, { id: 'english', hidden: false }] }));
-    expect(loadPrompts().find((p) => p.id === 'finish')!.body.ja).toBe('user');
-    expect(loadPrompts().find((p) => p.id === 'english')).toBeUndefined();
-    expect(loadPrompts(undefined, { includeHidden: true }).find((p) => p.id === 'english')).toBeDefined();
-    const pp = loadPrompts(proj);
-    expect(pp.find((p) => p.id === 'finish')!.body.ja).toBe('project');
-    expect(pp.find((p) => p.id === 'english')).toBeDefined();
+    writeFileSync(join(proj, '.solocut', 'prompts.json'), JSON.stringify({ prompts: [{ id: 'finish', body: { ja: 'project file' } }] }));
+    expect(loadPrompts(proj).find((p) => p.id === 'finish')!.body.ja).toBe(defaultPromptText('finish', 'ja'));
+    setSetting('prompts.finish', 'from settings');
+    expect(loadPrompts().find((p) => p.id === 'finish')!.body.ja).toBe('from settings');
+    expect(loadPrompts(proj, { includeHidden: true }).map((p) => p.id)).toEqual(['finish', 'publish']);
+    expect(loadPromptsWithErrors().errors).toEqual([]);
   });
 
-  it('a broken prompts.json is reported and ignored', () => {
-    writeFileSync(join(home, 'prompts.json'), '{oops');
+  it('a broken settings.json still yields the default prompts', () => {
+    writeFileSync(settingsPath(), '{oops');
     const r = loadPromptsWithErrors();
-    expect(r.prompts.length).toBe(DEFAULT_PROMPTS.length);
-    expect(r.errors[0]!.message).toMatch(/invalid JSON/);
-    writeFileSync(join(home, 'prompts.json'), JSON.stringify({ prompts: [{ id: 'Bad ID' }] }));
-    expect(loadPromptsWithErrors().errors).toHaveLength(1);
+    expect(r.prompts.map((p) => p.id)).toEqual(['finish', 'publish']);
+    expect(r.prompts[0]!.body.ja).toBe(defaultPromptText('finish', 'ja'));
   });
 
   it('renders vars, falls back to the other language, blanks unknown vars', () => {
-    const p = { id: 'x', label: { ja: 'x', en: 'x' }, agent: 'default', body: { ja: '{{template}} / {{ project }} / {{nope}} / {{date}}' } };
+    const p = { body: { ja: '{{template}} / {{ project }} / {{nope}} / {{date}}' } };
     const out = renderPrompt(p, { template: 'talk-youtube', project: 'p1' }, 'en');
     expect(out).toMatch(/^talk-youtube \/ p1 \/  \/ \d{4}-\d{2}-\d{2}$/);
-    expect(renderPrompt({ ...p, body: {} }, {}, 'ja')).toBe('');
+    expect(renderPrompt({ body: {} }, {}, 'ja')).toBe('');
+    expect(renderPrompt({ body: { ja: '{{date}}' } }, { date: 'today' }, 'ja')).toBe('today');
+    expect(renderPrompt({ body: { ja: '{{1x}} {{}}' } }, {}, 'ja')).toBe('{{1x}} {{}}');
     const finish = DEFAULT_PROMPTS.find((x) => x.id === 'finish')!;
     expect(renderPrompt(finish, { template: 'tech-tutorial', project: 'demo' }, 'ja')).toContain('テンプレート tech-tutorial');
-    expect(renderPrompt(finish, {}, 'ja')).not.toContain('{{');
+    expect(renderPrompt(finish, { project: 'demo' }, 'ja')).toContain('（demo）');
+    for (const id of PROMPT_IDS) for (const lang of ['ja', 'en'] as const) expect(renderPrompt(DEFAULT_PROMPTS.find((x) => x.id === id)!, {}, lang)).not.toContain('{{');
   });
 
-  it('exports a prompts JSON schema', () => {
-    expect((promptsJsonSchema() as { $id: string }).$id).toMatch(/prompts\.v1/);
+  it('renderPromptById: overrides, empty override → default, unknown id throws', () => {
+    expect(renderPromptById('finish', { project: 'X' }, 'ja', { prompts: { finish: 'go {{project}}' } }).text).toBe('go X');
+    expect(renderPromptById('finish', {}, 'en', { prompts: { finish: '   ' } }).text).toBe(renderPrompt({ body: { en: defaultPromptText('finish', 'en') } }, {}, 'en'));
+    expect(renderPromptById('publish', {}, 'ja').prompt.id).toBe('publish');
+    expect(() => renderPromptById('rough-cut', {}, 'ja')).toThrow(/unknown prompt: rough-cut/);
+    expect(() => renderPromptById('', {}, 'ja')).toThrow(/unknown prompt/);
   });
 });

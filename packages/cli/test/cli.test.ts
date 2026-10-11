@@ -132,9 +132,9 @@ describe('status / next / step', () => {
 
   it('a fresh project waits for media', async () => {
     const s = await inDir(['status']);
-    expect(s.json.steps).toHaveLength(22);
-    expect(s.json.steps.map((x: { step: string }) => x.step)).toContain('derive:tiktok');
-    expect(s.json.variants).toEqual({ tiktok: { exists: false, stale: false, lastCheckFailed: 0 }, 'youtube-shorts': { exists: false, stale: false, lastCheckFailed: 0 } });
+    // one video: the template steps only (no derive / per-variant / publish steps)
+    expect(s.json.steps.map((x: { step: string }) => x.step)).toEqual(['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check', 'final', 'thumbnail', 'metadata']);
+    expect(s.json.variants).toBeUndefined();
     expect(s.json.next).toMatchObject({ step: 'ingest', state: 'needs-human' });
     const n = await inDir(['next']);
     expect(n.json).toMatchObject({ ok: true, step: 'ingest', state: 'needs-human' });
@@ -369,7 +369,8 @@ describe('tl', () => {
 
 describe('config / prompts / templates / lib / past', () => {
   it('config get/set/schema/path', async () => {
-    expect((await sb.run(['config', 'get', 'decision.provider', '--json'])).json).toMatchObject({ ok: true, value: 'auto' });
+    // the decision model is optional and off by default (SPEC)
+    expect((await sb.run(['config', 'get', 'decision.provider', '--json'])).json).toMatchObject({ ok: true, value: 'off' });
     expect((await sb.run(['config', 'set', 'recording.camera.fps', '60', '--json'])).json.value).toBe(60);
     expect((await sb.run(['config', 'get', 'recording.camera.fps'])).stdout).toBe('60\n');
     const bad = await sb.run(['config', 'set', 'recording.camera.fps', '61', '--json']);
@@ -385,22 +386,19 @@ describe('config / prompts / templates / lib / past', () => {
   it('prompts list/show with project variables and project overrides', async () => {
     await init();
     mkdirSync(join(dir, '.solocut'), { recursive: true });
-    writeFileSync(join(dir, '.solocut', 'prompts.json'), JSON.stringify({ prompts: [{ id: 'english', hidden: true }] }));
     const list = await inDir(['prompts', 'list']);
-    expect(list.json.prompts.map((p: { id: string }) => p.id)).not.toContain('english');
-    expect((await inDir(['prompts', 'list', '--all'])).json.prompts.map((p: { id: string }) => p.id)).toContain('english');
+    expect(list.json.prompts.map((p: { id: string }) => p.id)).toEqual(['finish', 'publish']);
+    expect((await inDir(['prompts', 'list', '--all'])).json.prompts.map((p: { id: string }) => p.id)).toEqual(['finish', 'publish']);
     const show = await inDir(['prompts', 'show', 'finish']);
     expect(show.json.text).toContain('テンプレート talk-youtube');
     expect(show.json.text).toContain('設定の3つのコツ');
-    const v = await inDir(['prompts', 'show', 'like-past', '--var', 'archive=arc_x']);
-    expect(v.json.text).toContain('arc_x');
     expect((await inDir(['prompts', 'show', 'nope'])).json.error.code).toBe('not-found');
     expect((await inDir(['prompts', 'show', 'finish', '--var', 'novalue'])).code).toBe(2);
   });
 
   it('templates lists the built-ins', async () => {
     const r = await sb.run(['templates', '--json']);
-    expect(r.json.templates.map((x: { id: string }) => x.id)).toEqual(['talk', 'tech']);
+    expect(r.json.templates.map((x: { id: string }) => x.id)).toEqual(['tech']);
     expect(r.json.errors).toEqual([]);
   });
 

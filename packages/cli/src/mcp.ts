@@ -17,7 +17,6 @@ const str = { type: 'string' };
 const bool = { type: 'boolean' };
 const project = {
   project: { type: 'string', description: 'Project folder (default: the server working directory)' },
-  variant: { type: 'string', enum: ['main', 'tiktok', 'youtube-shorts'], description: 'Which video: the main YouTube one (default) or a derived vertical variant (docs/18)' },
 };
 const obj = (properties: Record<string, unknown>, required: string[] = []): McpTool['inputSchema'] => ({ type: 'object', properties: { ...properties, ...project }, ...(required.length ? { required } : {}), additionalProperties: false });
 const s = (v: unknown) => String(v);
@@ -43,15 +42,14 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'validate', description: 'Validate timeline.json (schema + semantics).', inputSchema: obj({}), argv: () => ['validate'] },
   { name: 'propose_cuts', description: 'Build segments from silence, fillers, retakes and NG markers.', inputSchema: obj({ replace: bool, dryRun: bool }), argv: (a) => ['propose', 'cuts', ...flag('--replace', a.replace), ...flag('--dry-run', a.dryRun)] },
   { name: 'captions_build', description: 'Build captions from the transcript.', inputSchema: obj({}), argv: () => ['captions', 'build'] },
-  { name: 'derive', description: 'Derive a vertical variant (TikTok / YouTube Shorts) from the main video: picks highlights, reframes to 9:16, rebuilds captions.', inputSchema: obj({ target: { type: 'string', enum: ['tiktok', 'youtube-shorts'] }, maxSec: { type: 'integer' }, selection: { type: 'array', items: str }, replace: bool }, ['target']), argv: (a) => ['derive', '--target', s(a.target), ...opt('--max-sec', a.maxSec), ...(Array.isArray(a.selection) ? ['--selection', a.selection.join(',')] : []), ...flag('--replace', a.replace)] },
-  { name: 'render', description: 'Render the preview, or the final video; all=true renders every video (main + variants).', inputSchema: obj({ quality: { type: 'string', enum: ['preview', 'final'] }, target: str, all: bool }), argv: (a) => ['render', a.quality === 'final' ? '--final' : '--preview', ...opt('--target', a.target), ...flag('--all', a.all)] },
-  { name: 'check', description: 'Machine checks on the preview (black frames, freezes, loudness, spec); writes checks/<run>/report.md. all=true checks every video.', inputSchema: obj({ all: bool }), argv: (a) => ['check', ...flag('--all', a.all)] },
+  { name: 'render', description: 'Render the preview, or the final video (renders/youtube/final.mp4).', inputSchema: obj({ quality: { type: 'string', enum: ['preview', 'final'] } }), argv: (a) => ['render', a.quality === 'final' ? '--final' : '--preview'] },
+  { name: 'check', description: 'Machine checks on the preview (black frames, freezes, loudness, spec); writes checks/<run>/report.md.', inputSchema: obj({}), argv: () => ['check'] },
   { name: 'multicam_material', description: 'Per segment: which cameras could show it, face visibility/gaze/sharpness, speech and emphasized words, plus the camera-switch check. Decide switches following prompts/multicam.md.', inputSchema: obj({}), argv: () => ['multicam', 'material'] },
   { name: 'split_for_switch', description: 'Split a segment at source frames where the camera should switch (then setCamera each piece).', inputSchema: obj({ segment: str, at: { type: 'array', items: { type: 'integer' } }, reason: str }, ['segment', 'at']), argv: (a) => ['edit', 'split-for-switch', '--segment', s(a.segment), '--at', (Array.isArray(a.at) ? a.at : []).join(','), ...opt('--reason', a.reason)] },
   { name: 'sfx_apply', description: 'Place sound effects from the template sfx rules (replaces earlier template-placed ones).', inputSchema: obj({ dryRun: bool }), argv: (a) => ['sfx', 'apply', ...flag('--dry-run', a.dryRun)] },
-  { name: 'tracks_apply', description: 'Face/cursor-following zoom (and click punch-ins when the template follows clicks) plus click-ring and keystroke overlays from the input logs.', inputSchema: obj({ followClicks: bool, overlays: bool, dryRun: bool }), argv: (a) => ['tracks', 'apply', ...(a.followClicks === true ? ['--follow-clicks'] : a.followClicks === false ? ['--no-follow-clicks'] : []), ...(a.overlays === false ? ['--no-overlays'] : []), ...flag('--dry-run', a.dryRun)] },
+  { name: 'tracks_apply', description: 'Keep the person\'s face centred in the camera (template faceReframe), face/cursor-following zoom (and click punch-ins when the template follows clicks) plus click-ring and keystroke overlays from the input logs.', inputSchema: obj({ followClicks: bool, overlays: bool, dryRun: bool }), argv: (a) => ['tracks', 'apply', ...(a.followClicks === true ? ['--follow-clicks'] : a.followClicks === false ? ['--no-follow-clicks'] : []), ...(a.overlays === false ? ['--no-overlays'] : []), ...flag('--dry-run', a.dryRun)] },
   { name: 'masks_from_analysis', description: 'Pixelate private text found on screen (derived/analysis/pii.*.json); the masks are marked for review.', inputSchema: obj({ source: str, kinds: str, kind: { type: 'string', enum: ['pixelate', 'blur', 'fill'] }, dryRun: bool }), argv: (a) => ['masks', 'from-analysis', ...opt('--source', a.source), ...opt('--kinds', a.kinds), ...opt('--kind', a.kind), ...flag('--dry-run', a.dryRun)] },
-  { name: 'thumb_pick', description: 'Use an image in the project as the video\'s thumbnail.', inputSchema: obj({ image: str }, ['image']), argv: (a) => ['thumb', 'pick', s(a.image)] },
+  { name: 'thumb_pick', description: 'Use an image in the project as the video\'s thumbnail (publish.json "thumbnail").', inputSchema: obj({ image: str }, ['image']), argv: (a) => ['thumb', 'pick', s(a.image)] },
   { name: 'frame', description: 'A still of one timeline frame (frame number or timecode). Returns the image.', inputSchema: obj({ at: str, width: { type: 'integer' } }, ['at']), argv: (a) => ['frame', '--at', s(a.at), ...opt('--width', a.width ?? 960)], image: true },
   { name: 'past_list', description: 'Past videos in the archive, newest first.', inputSchema: obj({ kind: str, template: str, limit: { type: 'integer' } }), argv: (a) => ['past', 'list', ...opt('--kind', a.kind), ...opt('--template', a.template), ...opt('--limit', a.limit)] },
   { name: 'past_search', description: 'Full-text search over past videos (titles, chapters, captions).', inputSchema: obj({ query: str }, ['query']), argv: (a) => ['past', 'search', s(a.query)] },
@@ -60,7 +58,13 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'past_reuse', description: 'Ops (and a template patch) that apply parts of a past video to this one.', inputSchema: obj({ id: str, what: str, apply: bool }, ['id']), argv: (a) => ['past', 'reuse', s(a.id), ...opt('--what', a.what), ...flag('--apply', a.apply)] },
   { name: 'feedback_list', description: 'Video feedback sessions.', inputSchema: obj({}), argv: () => ['feedback', 'list'] },
   { name: 'feedback_show', description: 'One feedback session (feedback.md).', inputSchema: obj({ id: str }, ['id']), argv: (a) => ['feedback', 'show', s(a.id)] },
-  { name: 'meta_set', description: 'Store title, description and tags for a target and write renders/<target>/metadata.md.', inputSchema: obj({ target: str, title: str, description: str, tags: { type: 'array', items: str }, candidates: { type: 'array', items: str } }), argv: (a) => ['meta', 'set', ...opt('--target', a.target), ...opt('--title', a.title), ...opt('--description', a.description), ...(Array.isArray(a.tags) ? ['--tags', a.tags.join(',')] : []), ...(Array.isArray(a.candidates) ? a.candidates.flatMap((c) => ['--candidates', s(c)]) : [])] },
+  {
+    name: 'meta_set', description: 'Write the post to publish.json: title, description (chapters and credits are added), tags, YouTube privacy, TikTok on/off. Never publishes.',
+    inputSchema: obj({ title: str, description: str, tags: { type: 'array', items: str }, privacy: { type: 'string', enum: ['private', 'unlisted', 'public'] }, tiktok: bool, thumbnail: str }),
+    argv: (a) => ['meta', 'set', ...opt('--title', a.title), ...opt('--description', a.description), ...(Array.isArray(a.tags) ? ['--tags', a.tags.join(',')] : []), ...opt('--privacy', a.privacy),
+      ...(a.tiktok === true ? ['--tiktok'] : a.tiktok === false ? ['--no-tiktok'] : []), ...opt('--thumbnail', a.thumbnail)],
+  },
+  { name: 'meta_check', description: 'Validate publish.json (limits of YouTube / TikTok, files exist).', inputSchema: obj({}), argv: () => ['meta', 'check'] },
 ];
 
 export type RunCli = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -111,8 +115,7 @@ export function createMcpServer(run: RunCli, o: { defaultProject?: string } = {}
         const bad = checkArgs(tool, a);
         if (bad) return ok(m.id, { content: [{ type: 'text', text: bad }], isError: true });
         const proj = (a.project as string | undefined) ?? o.defaultProject;
-        const variant = typeof a.variant === 'string' && a.variant !== 'main' ? a.variant : undefined;
-        const argv = [...tool.argv(a), '--json', ...(proj ? ['--project', proj] : []), ...(variant ? ['--variant', variant] : [])];
+        const argv = [...tool.argv(a), '--json', ...(proj ? ['--project', proj] : [])];
         const r = await run(argv);
         const content: object[] = [{ type: 'text', text: r.stdout.trim() || r.stderr.trim() }];
         if (tool.image && r.code === 0) {

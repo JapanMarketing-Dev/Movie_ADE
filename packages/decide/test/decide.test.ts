@@ -258,6 +258,23 @@ describe('agent CLI providers (the user subscription)', () => {
     expect(isCliProvider('openai')).toBe(false);
   });
 
+  it('resolveProvider: the model is optional — off, empty, missing or unknown settings resolve to off', () => {
+    const which = (c: string) => `/bin/${c}`;
+    expect(resolveProvider('off', which)).toBe('off');
+    expect(resolveProvider('', which)).toBe('off');
+    expect(resolveProvider('  ', which)).toBe('off');
+    expect(resolveProvider(undefined, which)).toBe('off');
+    expect(resolveProvider(null, which)).toBe('off');
+    expect(resolveProvider('chatgpt-web', which)).toBe('off');
+    expect(resolveProvider(' codex-cli ', () => null)).toBe('codex-cli');
+    expect(resolveProvider('custom', () => null)).toBe('custom');
+  });
+
+  it('decide refuses with code off (callers fall back to the rules) before touching the cache', async () => {
+    await expect(decide({ state: {}, questions: [{ id: 'a', kind: 'yesno', text: 'x' }] }, { provider: 'off', model: 'm', cacheDir: join(dir, 'never') })).rejects.toMatchObject({ code: 'off' });
+    expect(existsSync(join(dir, 'never'))).toBe(false);
+  });
+
   it('claude-cli: print mode JSON, Read only, images copied next to the prompt, usage in calls, cached', async () => {
     const { runs, runCli } = runner(() => ({ stdout: JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: `Here you go:\n${JSON.stringify(good)}`, usage: { input_tokens: 900, output_tokens: 60 } }) }));
     const usage: Usage[] = [];

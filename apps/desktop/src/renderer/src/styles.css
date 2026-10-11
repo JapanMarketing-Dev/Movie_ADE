@@ -395,6 +395,35 @@ textarea.input {
   object-fit: contain;
   background: #000;
 }
+/* raw take: the camera as picture-in-picture over the screen recording, and which video is shown */
+.player > video.raw-pip {
+  inset: auto 12px 52px auto;
+  width: 24%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.player > video.raw-pip.is-out {
+  visibility: hidden;
+}
+.player .player-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  z-index: 2;
+}
+.player .player-label.is-edited {
+  background: rgba(255, 74, 61, 0.8);
+}
 .player .placeholder {
   max-width: 360px;
   text-align: center;
@@ -827,54 +856,7 @@ textarea.input {
   text-align: center;
 }
 
-/* ---------- archive / library / settings ---------- */
-.arc {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  height: 100%;
-}
-.arc-list {
-  overflow: auto;
-  padding: 24px;
-}
-.arc-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 14px;
-}
-.arc-card {
-  all: unset;
-  cursor: pointer;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--bg-1);
-}
-.arc-card.sel {
-  border-color: var(--accent);
-}
-.arc-card .thumb {
-  aspect-ratio: 16/9;
-  background: #000;
-  display: grid;
-  place-items: center;
-  color: var(--text-3);
-}
-.arc-card .thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.arc-card .meta {
-  padding: 8px 10px;
-}
-.arc-detail {
-  border-left: 1px solid var(--line);
-  background: var(--bg-1);
-  padding: 20px;
-  overflow: auto;
-}
+/* ---------- library / settings ---------- */
 .stats {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -955,27 +937,6 @@ textarea.input {
 .segmented button.on {
   background: var(--bg-3);
   color: var(--text);
-}
-.teleprompter {
-  height: 100%;
-  overflow: auto;
-  background: #000;
-  color: #fff;
-  font-size: 30px;
-  line-height: 1.6;
-  padding: 40px 32px 50vh;
-  white-space: pre-wrap;
-}
-.teleprompter-bar {
-  position: fixed;
-  top: 8px;
-  right: 10px;
-  display: flex;
-  gap: 6px;
-  opacity: 0.35;
-}
-.teleprompter-bar:hover {
-  opacity: 1;
 }
 @keyframes pulse {
   50% {
@@ -1104,33 +1065,6 @@ textarea.input {
 .thumb-grid.large {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
-.thumb-card {
-  all: unset;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--bg-1);
-  cursor: pointer;
-}
-.thumb-card img {
-  width: 100%;
-  aspect-ratio: 16/9;
-  object-fit: cover;
-  border-radius: 5px;
-  background: #000;
-}
-.thumb-card.sel,
-.thumb-card.fav {
-  border-color: var(--accent);
-}
-.pub-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
 .card.form {
   display: flex;
   flex-direction: column;
@@ -1143,28 +1077,6 @@ textarea.input {
 }
 .tpl.alias {
   opacity: 0.7;
-}
-.posts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-@media (max-width: 1300px) {
-  .posts {
-    grid-template-columns: 1fr;
-  }
-}
-.post.off {
-  opacity: 0.6;
-}
-.approve-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  position: sticky;
-  bottom: 0;
-  z-index: 3;
 }
 .an-jobs {
   display: flex;

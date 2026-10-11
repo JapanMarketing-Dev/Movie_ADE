@@ -68,7 +68,6 @@ export function ProjectMenu({
         >
           <Clapperboard className="app-titlebar__project-icon" size={13} />
           <span className={`app-titlebar__project-name${project ? '' : ' is-empty'}`}>{project?.title ?? t('projectMenu.none')}</span>
-          {project?.template && <span className="app-titlebar__template">{project.template.id}</span>}
           <ChevronDown size={12} strokeWidth={2} />
         </button>
       </Tooltip>

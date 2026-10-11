@@ -2,7 +2,7 @@ import type { Op } from './ops.js';
 import type { CheckFinding, Segment, Timeline } from './schema.js';
 import { fpsValue, frameToSeconds } from './time.js';
 import { allIds, freshId, sourceLocalSeconds, takeFrameToSeconds, videoSources } from './timeline.js';
-import type { Tracks } from './tracks.js';
+import { faceFrameSec, type Tracks } from './tracks.js';
 
 /** A transcribed word in take seconds (same shape as @solocut/captions Word). */
 export interface TakeWord { w: string; start: number; end: number }
@@ -65,8 +65,7 @@ export function cameraMaterial(t: Timeline, tracks: Tracks, words?: WordsInput):
       if (track) {
         const la = sourceLocalSeconds(t, s, a);
         const lb = sourceLocalSeconds(t, s, b);
-        const fps = track.fps > 0 ? track.fps : 30;
-        const frames = track.frames.filter((f) => f.f / fps >= la && f.f / fps < lb);
+        const frames = track.frames.filter((f) => faceFrameSec(track, f) >= la && faceFrameSec(track, f) < lb);
         if (frames.length) {
           info.faceVisible = round3(frames.filter((f) => f.faces.some((x) => x.score >= 0.3)).length / frames.length);
           const areas = frames.map((f) => Math.max(0, ...f.faces.filter((x) => x.score >= 0.3).map((x) => x.w * x.h))).filter((a) => a > 0);
@@ -96,6 +95,57 @@ export function cameraMaterial(t: Timeline, tracks: Tracks, words?: WordsInput):
 }
 
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/**
+ * The camera that shows the person: role 'front' (the recorder's main camera), else the camera whose face is seen most
+ * across the segments, else the first by id. Null without cameras.
+ */
+export function personCamera(t: Timeline, material: SegmentMaterial[] = []): string | null {
+  const cams = Object.entries(t.sources).filter(([, s]) => s.kind === 'camera').map(([id, s]) => ({ id, role: s.kind === 'camera' ? s.role : 'other' }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (!cams.length) return null;
+  const front = cams.find((c) => c.role === 'front');
+  if (front) return front.id;
+  const seen = new Map<string, number>();
+  for (const m of material) for (const c of m.cameras) if (c.faceVisible !== null) seen.set(c.id, (seen.get(c.id) ?? 0) + c.faceVisible * m.durationSec);
+  const best = [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  return best && best[1] > 0 ? best[0] : cams[0]!.id;
+}
+
+export interface CameraSuggestion {
+  segment: string;
+  camera: string;
+  /** Why (for --reason): the person camera, or another camera because the person's face is not visible there. */
+  reason: 'person' | 'person-face-hidden' | 'only-camera';
+  /** Unsure: hand to a human (needsReview). */
+  needsReview: boolean;
+}
+
+/**
+ * A deterministic camera per segment (no decision model): the person camera, unless its face is visible in less
+ * than `minVisible` (default 0.3) of the segment while another camera of the take shows a face clearly more often —
+ * then that one, marked needsReview. Segments without a candidate camera are left out.
+ */
+export function suggestCameras(material: SegmentMaterial[], person: string | null, o: { minVisible?: number } = {}): CameraSuggestion[] {
+  const min = o.minVisible ?? 0.3;
+  const out: CameraSuggestion[] = [];
+  for (const m of material) {
+    if (!m.cameras.length) continue;
+    const mine = m.cameras.find((c) => c.id === person);
+    if (!mine) {
+      out.push({ segment: m.segment, camera: m.cameras[0]!.id, reason: 'only-camera', needsReview: m.cameras.length > 1 });
+      continue;
+    }
+    const other = m.cameras.filter((c) => c.id !== person && (c.faceVisible ?? 0) > (mine.faceVisible ?? 0) + 0.2)
+      .sort((a, b) => (b.faceVisible ?? 0) - (a.faceVisible ?? 0))[0];
+    if (mine.faceVisible !== null && mine.faceVisible < min && other) {
+      out.push({ segment: m.segment, camera: other.id, reason: 'person-face-hidden', needsReview: true });
+    } else {
+      out.push({ segment: m.segment, camera: person!, reason: 'person', needsReview: false });
+    }
+  }
+  return out;
+}
 
 /**
  * splitSegment ops that cut a segment at the given source frames (strictly inside; duplicates ignored), so each

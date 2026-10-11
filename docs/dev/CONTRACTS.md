@@ -384,12 +384,16 @@ export function setSetting(key: string, value: unknown, o?: { by?: string }): Se
 export function applySetting(current: Settings, key: string, value: unknown): Settings;  // validate only
 export function parseCliValue(s: string): unknown;    // JSON when possible, else string
 export function settingsJsonSchema(): object;
-export const PromptSchema, PromptPatchSchema, PromptsSchema;  export type Prompt = { id; label: {ja,en}; agent; body: {ja?,en?}; autopilot?; hidden? };
-export function loadPrompts(projectDir?: string, o?: { includeHidden?: boolean }): Prompt[];  // default ⊕ ~/.solocut/prompts.json ⊕ <project>/.solocut/prompts.json
-export function loadPromptsWithErrors(projectDir?, o?): { prompts: Prompt[]; errors: { file; message }[] };
-export function mergePrompts(base: Prompt[], patches: PromptPatch[]): Prompt[];   // override by id / add (needs label+body) / hidden
-export function renderPrompt(p: Prompt, vars: Record<string, string>, lang: 'ja'|'en'): string;  // {{var}}; missing → ""; {{date}} auto
-export const DEFAULT_PROMPTS: Prompt[];               // docs/13 + docs/17 (16 prompts, ja+en)
+export const PROMPT_IDS = ['finish', 'publish'];  export type PromptId; export function isPromptId(x: unknown): x is PromptId;
+export const PromptSchema;  export type Prompt = { id: PromptId; label: {ja,en}; agent; body: {ja?,en?}; autopilot?; overridden? };
+export const DEFAULT_PROMPTS: Prompt[];               // docs/13: finish (startup, autopilot) + publish (posting), ja+en
+export function promptOverride(s: Pick<Settings,'prompts'> | undefined, id: PromptId): string | undefined;  // blank → undefined
+export function promptsFromSettings(s?: Pick<Settings,'prompts'>): Prompt[];  // settings prompts.finish / prompts.publish replace both languages
+export function defaultPromptText(id: PromptId, lang: 'ja'|'en'): string;
+export function loadPrompts(projectDir?: string, o?: { includeHidden?: boolean }): Prompt[];  // from ~/.solocut/settings.json (args kept for old callers, ignored)
+export function loadPromptsWithErrors(projectDir?, o?): { prompts: Prompt[]; errors: [] };
+export function renderPrompt(p: Pick<Prompt,'body'>, vars: Record<string, string>, lang: 'ja'|'en'): string;  // {{var}}; missing → ""; {{date}} auto
+export function renderPromptById(id: string, vars, lang, settings?): { text: string; prompt: Prompt };  // unknown id → throws
 ```
 
 ## @solocut/templates
@@ -628,7 +632,7 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
     (`<project>/templates/<id>/template.yaml`, when id is the project's template) or `~/.solocut/templates/<id>/template.yaml`;
     the merged template must load or the file is restored (`invalid-template`); a hand-written override is never touched
     (`template-override`). → `{ template, scope: 'project'|'user', file, patch, dryRun }`. Errors `invalid-samples`, `invalid-profile`.
-- Decision model in the CLI (`decision.ts`): settings `decision.provider` default **`auto`** (agent CLI on PATH, else off);
+- Decision model in the CLI (`decision.ts`): settings `decision.provider` default **`off`** (optional; `auto` = agent CLI on PATH, else off);
   env `SOLOCUT_DECISION_PROVIDER` overrides (tests/CI: off). Agent CLIs need no API key and no `cloudConsent`; API
   providers keep consent + key + USD limits. CLI budget: `decision.limits.perProjectCalls` (default 200) minus the `calls`
   logged in `.solocut/decisions.jsonl`. Batching: rough-cut judges 40 candidates per call, derive scores every segment in
@@ -728,7 +732,7 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
   "created": "ISO", "tools": { "ffmpeg": "9.0.2" } }
 ```
 
-## One take → three videos (docs/18) — added 2026-10-11, applies to everyone
+## One take → three videos (docs/18) — RETIRED 2026-10-11 (one 16:9 video per project now; kept for history)
 
 - A project has a main timeline (`timeline.json`, YouTube 16:9) and derived variants in
   `variants/<target>/timeline.json` for `tiktok` and `youtube-shorts` (9:16). Same Timeline type.

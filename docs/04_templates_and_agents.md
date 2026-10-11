@@ -4,163 +4,83 @@
 
 ## テンプレートの役割
 
-テンプレートは「この種類の動画は、こう作る」を1か所にまとめた定義。次の3つを兼ねる。
+テンプレートは「動画はこう作る」を1か所にまとめた定義。次の3つを兼ねる。
 
-1. **見た目と仕様**: キャンバス、レイアウト、字幕のスタイル、音声、出力先
-2. **編集方針**: 何を切るか、どこまで詰めるか、判定モデルのしきい値
+1. **見た目と仕様**: キャンバス、レイアウト、字幕のスタイル、音声、出力
+2. **編集方針**: 何を切るか、どこまで詰めるか（自然言語のプロンプト）
 3. **作業手順**: エージェントがどの順で何をするか（`pipeline`）と、各手順の合格条件
 
 エージェントは毎回テンプレートから生成された指示書を読み、`solocut next` で次の手順を確認しながら進む。同じテンプレートなら、Claude Code でも Codex でも同じ手順・同じ品質基準で仕上がる。
 
+**テンプレートは1つだけ（2026-10-11）。** アプリは常に標準テンプレート `tech` を使い、利用者がテンプレート・動画の種類・言語を選ぶ画面はない。1回の撮影から **16:9 の動画を1本**（YouTube 形式。画面収録＋人物のカメラ、字幕、カット、BGM・効果音）作る。同じファイルを YouTube にも TikTok にも投稿できる。縦型の別バージョン（TikTok / Shorts 用の派生）、告知用の投稿、「動画3本」は作らない（旧 docs/18 は廃止）。
+
 ## テンプレートの構成
 
 ```
-templates/tiktok-talk/
-├── template.yaml      定義（スキーマで検証する）
-├── rules.md           自由記述の編集方針（そのままエージェントに渡す）
-├── layouts/           レイアウトの定義（YAML）
-├── styles/            字幕のスタイル（ASS のスタイル定義＋アニメーション）
-├── assets/            既定のフォント、ロゴの位置、効果音
-└── examples/          良い例・悪い例のフレーム（判定モデルの参考画像に使う）
-```
-
-### プロンプトで制御する
-
-テンプレートの中心は `rules.md` と `prompts/` の**自然言語のプロンプト**。数値（template.yaml）で表しにくい「どう編集するか」は、すべてプロンプトに書く。
-
-```
-templates/talk-youtube/
-├── template.yaml
-├── rules.md               全体の編集方針
+templates/tech/
+├── template.yaml          定義（スキーマで検証する）
+├── rules.md               全体の編集方針（そのままエージェントに渡す）
 └── prompts/
     ├── rough-cut.md       カットの方針（何を残し、何を切るか）
-    ├── multicam.md        画角の切り替え方
-    ├── captions.md        字幕の書き方（強調、言い換えの可否）
-    ├── sfx.md             効果音の入れ方
-    └── thumbnail.md       サムネイルの方向性
+    ├── multicam.md        画面と顔・カメラの切り替え方（人物のカメラを優先）
+    ├── captions.md        字幕の書き方
+    ├── sfx.md             効果音・BGM・イラスト（いらすとや等の無料素材）
+    ├── thumbnail.md       サムネイルの方向性と作り方（Codex / Gemini のサブスクリプションで作る）
+    └── metadata.md        投稿の内容（publish.json）の書き方
 ```
 
 - `solocut next` は手順ごとに、対応するプロンプトのファイルをエージェントに示す（「この手順では `prompts/multicam.md` に従う」）
-- 利用者はプロンプトを書き換えるだけで編集の仕方を変えられる。プロンプトの改善自体もエージェントに頼める（「さっきのフィードバックを踏まえて multicam.md を直して」）
-- フィードバックで同じ指摘が繰り返されたら、Solocut がプロンプトへの追記を提案する（同じ直しを毎回させないため）
+- 利用者はプロンプトを書き換えるだけで編集の仕方を変えられる（`~/.solocut/templates/tech/` かプロジェクトの `templates/tech/` に `extends: tech` で上書きを置く）
+- 旧テンプレートの id（`talk`、`talk-youtube`、`talk-tiktok`、`shorts-from-long`、`tech-tutorial`、`tech-short`）は既存のプロジェクトのために読み込めるが、一覧には出さない（`alias: true`）。どれも 16:9 の1本だけを作る。古い `outputs` の縦型の設定（`derive` など）は無視する
+
+### 人物を中央に（顔を追う切り抜き）
+
+カメラに人物が映る区間は、**顔がカメラの枠の中央に来るように切り抜く**（`features.faceReframe: true`。`tech` では既定で有効）。
+
+- 顔の解析はアプリ（MediaPipe）が `derived/analysis/faces.<素材>.json` に書く（`fps` は解析の間隔、`f` は素材のフレーム、`t` は素材の秒）
+- `solocut tracks apply` が、全画面のカメラ（camera-full）には `focus` と `scale`（cover の切り抜きを最大 1.35 倍に拡大）、丸ワイプには `cameraFocus` と `cameraScale`（最大 1.6 倍）を入れる。拡大は区間ごとに1つ（中央値。ズームが呼吸しない）、位置は one-euro フィルタでなめらかに追う。顔が枠の端にあって中央にできないときは、切り抜きの範囲でできるだけ寄せる
+- 顔が複数映るときは、大きく確かな顔を人物とし、一度選んだ人物はほぼ同じ大きさで映っている間は替えない
+- 顔が見えない区間・顔の解析がないカメラはそのまま（`tracks apply` の出力 `center.noFace` / `center.noTrack`）。手で決めた切り抜きを残すときは `--no-center`
+- 計算は core の `centerPerson` / `faceCrop`（純関数）。描画は compile の cover 切り抜き（`scale=… force_original_aspect_ratio=increase,crop=…`）
 
 ### マルチカメラ（画角の切り替え）
 
-複数のカメラで同時に撮った素材（アプリ内の収録でも、別撮りの取り込みでも）を、プロンプトに沿って切り替える。アプリは切り替えの判断をせず、**材料と部品**だけを出す。
+複数のカメラで同時に撮った素材を、プロンプトに沿って切り替える。アプリは切り替えの判断をせず、**材料と部品**だけを出す。判定モデルは使わない。
 
-| 材料（`solocut analyze` が出す） | 内容 |
-|---|---|
-| カメラごとの役割 | 正面・寄り・引き・斜め（取り込み時に判定モデルが推定し、人が直せる） |
-| 顔の位置・大きさ・向き、目線がカメラを向いているか | カメラごと、0.5 秒ごと |
-| 話している区間、声の大きさ、強調語 | 文字起こしと音声から |
-| 動き（手振り、画面の操作） | フレームの差分、マウスのログ |
-| ピンぼけ・露出の悪い区間 | 判定モデル |
+- **人物のカメラ**: 収録の take.json で `role: 'main'` のカメラが人物のカメラ。取り込み（`solocut ingest`）で素材の role を `front` にし、ほかは `other`。`main` がなければ最初のカメラ
+- `solocut multicam material` は区間ごとのカメラの材料（顔が映っている割合 faceVisible、目線、鮮明さ、発話、強調語）に加えて、`person`（人物のカメラ）と `suggestions`（決定的な目安: 基本は人物のカメラ。人物の顔が 30% 未満しか見えず、別のカメラがはっきり映しているときだけそちら、needsReview 付き）を返す
+- エージェントは目安とプロンプトから自分で決め、`solocut edit split-for-switch` と `setCamera` で反映し、理由を `--reason` に書く。自信がない切り替えには needsReview を付ける
+- `camera-switch` のチェックは、同じ画角が長すぎる・言葉の途中で切り替えている箇所を機械的に見つける
 
-| 部品（ops） | 内容 |
-|---|---|
-| `setCamera <segment> <camera>` | 区間で使うカメラを決める |
-| `splitAt <frame>` | 区間を分ける（カメラを切り替える位置） |
-| `punchIn <segment> --scale 1.15 --focus face` | デジタルズーム（寄り） |
-| `setLayout <segment> <layout>` | ワイプ、上下分割など |
-
-プロンプトの例（`prompts/multicam.md`）:
-
-```markdown
-- 基本は正面（cam-front）。1つのカメラを 8 秒以上続けない
-- 強調語や結論を言う直前で、寄り（cam-close）に切り替える
-- 画面の操作を説明しているときは、画面を大きく、顔はワイプ
-- 引き（cam-wide）は章の始まりにだけ使う
-- 目線が外れている・ピンぼけの区間のカメラは使わない
-- 切り替えは文の切れ目で行い、言葉の途中では切り替えない
-```
-
-判定モデルは、切り替えた位置の前後のフレームを見て「不自然な切り替えではないか」「同じ画角が続きすぎていないか」をチェックする（`camera-switch` のチェック）。
-
-### template.yaml の例（TikTok 縦型トーク）
+### template.yaml（tech の要点）
 
 ```yaml
-id: tiktok-talk
-name: TikTok 縦型トーク
-extends: base-vertical           # 継承できる
-targets: [tiktok, youtube-shorts, instagram-reels]
-canvas: { width: 1080, height: 1920, fps: 30 }
-
-record:
-  tracks: [camera, mic]           # 撮影画面の初期設定
-  camera: { width: 1920, height: 1080, fps: 30 }
-
+id: tech
+extends: base-horizontal
+name: { ja: 動画（16:9・1本）, en: Video (16:9, one file) }
+kind: tech
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+record: { tracks: [screen, camera, mic], cursorLog: true, keyLog: true }
 layouts:
-  default: camera-full
-  allowed: [camera-full, screen-top-camera-bottom]
-
-cut:
-  silence: { minMs: 300, padMs: 80 }      # 300ms 以上の無音を詰める。前後に 80ms 残す
-  fillers: [えー, えっと, あのー, まあ]
-  retakes: keep-last                      # 言い直しは後のほうを残す
-  ngMarkers: cut                          # 撮影時の NG の目印の区間は切る
-  maxDurationSec: 60
-
-captions:
-  style: tiktok-bold
-  highlight: word                         # 単語ごとのハイライト
-  maxCharsPerLine: 12
-  maxLines: 2
-  emphasis: auto                          # 強調語を判定モデルが選ぶ
-  position: { anchorY: 1350 }
-  safeArea: tiktok
-
-audio: { loudness: -14, truePeak: -1, denoise: light, bgm: { duckDb: -12 } }
-
-decisions:
-  cutKeep: { autoAbove: 0.7, autoBelow: 0.3 }   # この間の値は人の確認へ
-  frameCheck: { passAbove: 0.8 }
-
-checks: [black-frames, freeze, loudness, spec, cut-boundaries, caption-safe-area, caption-face-overlap, pii-on-screen]
-
-pipeline:
-  - ingest
-  - sync
-  - transcribe
-  - rough-cut          # 合格条件: 要確認の区間がすべて決まっている
-  - captions
-  - layout
-  - preview
-  - check              # 合格条件: すべてのチェックに合格、または人が承認
-  - review             # 人のフィードバックを待つ
-  - final
+  default: screen-with-wipe
+  allowed: [screen-with-wipe, screen-full, camera-full, scene]
+  wipe: { shape: circle, corner: br, style: circle-gradient }
+features: { autoZoom: true, faceReframe: true, keystrokes: true, cursorHighlight: true, piiMask: true }
+outputs:
+  youtube: { }            # 1本だけ（renders/youtube/final.mp4）
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check, final, thumbnail, metadata]
 ```
 
-### 組み込みテンプレート
+- `review`（人の確認）は pipeline に置かない。人は完成した動画をアプリの投稿画面で見て、OK なら投稿する（[14](./14_publishing.md)）
+- `publish` の手順・縦型の `derive:*` の手順はない。`solocut derive` と `--variant` も廃止（古いプロジェクトの `variants/` は読むだけ）
 
-| ID | 用途 | キャンバス | 主なレイアウト |
-|---|---|---|---|
-| `tech-tutorial` | **技術動画**（YouTube）。画面収録の解説 | 1920×1080 | 画面＋右下に顔のワイプ。操作している箇所への自動ズーム、キー操作の表示、要所でカメラのみ |
-| `tech-short` | **技術動画**（TikTok / Shorts）。画面の要点を縦型で | 1080×1920 | 上に画面（操作箇所を追って切り出す）、下に顔 |
-| `talk-youtube` | **語り動画**（YouTube）。カメラに向かって話す解説 | 1920×1080 | カメラのみ。ジャンプカットごとに軽いズームで変化をつける。図解・画像の挿入 |
-| `talk-tiktok` | **語り動画**（TikTok / Shorts / Reels） | 1080×1920 | カメラのみ（16:9 から顔を追ってリフレーム）。大きな強調字幕と効果音 |
-| `shorts-from-long` | 長尺の技術動画・語り動画から縦型ショートを切り出す | 1080×1920 | 見どころの候補を判定モデルが出し、人が選ぶ |
-
-技術動画用の機能（`tech-*` テンプレートで有効）:
+技術動画用の機能:
 
 - **自動ズーム**: 収録時のマウスの位置とクリック・キー入力のログから、操作している箇所へ寄る。動きは平滑化し、操作が止まったら引く
-- **キー操作の表示**: ショートカットキーを押したときに、画面の隅にキーを表示する（収録時のキー入力のログから。パスワード入力欄にいるときは記録しない）
-- **カーソルの強調**: クリックの位置に輪を出す。カーソルを少し大きくする
-- **コードの読みやすさ**: 画面の文字が小さいときは、判定モデルが「読めるか」を判定し、ズームを提案する
-- **個人情報**: ターミナルやブラウザに出たトークン・メールアドレスを自動でモザイクにする（[05](./05_decision_model.md)）
-
-利用者は組み込みのものを `extends` して自分用のテンプレートを作れる（`~/.solocut/templates/` またはプロジェクトの中）。テンプレートの作成・変更自体もエージェントに頼める（スキーマがあるので検証できる）。
-
-### レイアウトの定義
-
-```yaml
-# layouts/screen-top-camera-bottom.yaml
-id: screen-top-camera-bottom
-slots:
-  screen: { x: 0, y: 0,   w: 1080, h: 960, fit: cover, focus: auto }   # focus: auto はマウスやカーソル周辺へ寄せる
-  camera: { x: 0, y: 960, w: 1080, h: 960, fit: cover, focus: face }   # 顔の位置へ寄せる
-```
-
-`focus: face` と `focus: auto` の切り出し位置は、解析結果（顔の位置、マウスの位置）から作る。急に動かないよう平滑化し、シーンの切り替わりでだけ大きく動かす。
+- **キー操作の表示**: ショートカットキーを押したときに、画面の隅にキーを表示する（パスワード入力欄にいるときは記録しない）
+- **カーソルの強調**: クリックの位置に輪を出す
+- **個人情報**: ターミナルやブラウザに出たトークン・メールアドレスを自動でモザイクにする（要確認つき）
 
 ## エージェントへの指示書（AGENTS.md）
 
@@ -168,18 +88,17 @@ slots:
 
 生成する内容:
 
-1. **役割**: あなたはこのプロジェクトの動画編集者。テンプレート `tiktok-talk` の手順に従う
+1. **役割**: あなたはこのプロジェクトの動画編集者。テンプレート `tech` の手順に従う
 2. **最初にすること**: `solocut status --json` と `solocut next --json` を実行する
 3. **守ること**
    - `media/` の中は変更しない
    - 編集は `solocut edit` で行う（`timeline.json` を直接編集したら、必ず `solocut validate`）
    - 手順の合格条件を満たすまで、次の手順に進まない
-   - 迷ったら、判定モデル（`solocut decide`）の結果と `rules.md` に従う。それでも決まらなければ `.solocut/questions.md` に質問を書いて人に聞く
+   - 迷ったら編集方針に従って自分で決める（判定モデルは不要）。自信がない判断には needsReview を付けて先へ進み、人に聞きたいことは `.solocut/questions.md` に書く
+   - 動画は 16:9 の1本だけ。投稿の内容は `publish.json` に書き、投稿はしない
 4. **テンプレートの編集方針**（`rules.md` の全文）
 5. **CLI の使い方**（コマンド一覧と `--json` の出力例）
 6. **終わったとき**: `.solocut/handoff.md` に、やったこと・残っていること・次の一手を書く
-
-あわせて、Claude Code と Codex 向けに `solocut` スキル（CLI の詳しい使い方とよくある編集のレシピ）を入れる。
 
 ## `solocut next` の動き
 
@@ -187,14 +106,19 @@ slots:
 
 ```json
 {
-  "step": "rough-cut",
-  "state": "needs-human",
-  "why": "判定モデルの確信度が中間（0.3〜0.7）の区間が4つあります",
-  "do": "人の確認を待ってください。アプリの「確認」画面に表示済みです。待つ間に captions の手順へ進めます",
-  "commands": ["solocut captions build"],
-  "blocking": ["s14", "s22", "s23", "s31"]
+  "step": "metadata",
+  "state": "ready",
+  "why": "publish.json がないか、内容が足りません: description: 説明文がありません",
+  "do": "prompts/metadata.md に沿って、タイトル・説明文・タグを publish.json に書く（投稿はしない）",
+  "commands": ["solocut tl summary --json", "solocut meta set --title \"…\" --description \"…\" --tags a,b --json", "solocut meta check --json"],
+  "prompt": "/…/templates/tech/prompts/metadata.md"
 }
 ```
+
+- **どの手順も判定モデル・API キーを必要としない**（[05](./05_decision_model.md)）。判断が要るところは `do` にエージェントへの問いとして書き、決定的な目安（無音・言いよどみの規則、`multicam material` の suggestions など）を出す。自信のない結果は needsReview
+- `metadata` は `publish.json` が有効（タイトル・説明文・動画の場所・各上限）なら、印がなくても合格。`thumbnail` は `publish.json` の `thumbnail` が存在する PNG / JPEG を指していれば合格
+- `check` で素材が原因の直せない不合格（マイクの音が小さいなど）は、`solocut step check needs-human --note "…"` にすると、自動操縦（`--autopilot`）では先へ進み、人が最後に確認する
+- 全部終わると `state: done`（「動画ができました。人が投稿画面で確認し、OK なら投稿します」）。エージェントは handoff.md を書き、投稿はしない
 
 エージェントは、この出力を見て次のコマンドを実行する。テンプレートの手順をエージェントの記憶に頼らず、ツールの側で強制できる。
 

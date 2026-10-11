@@ -4,13 +4,15 @@ import { PRESETS } from './presets.js';
 import type { CheckFinding, Mask, Rect, Target, Timeline } from './schema.js';
 import { fpsValue } from './time.js';
 import { allIds, freshId, sourceLocalSeconds, takeFrameToSeconds, videoSources } from './timeline.js';
-import type { Tracks } from './tracks.js';
+import { faceFrameSec, type Tracks } from './tracks.js';
 
 /** derived/analysis/pii.<sourceId>.json: detected private text per source frame (normalized boxes). */
 export interface PiiAnalysis {
-  frames: { f: number; boxes: { x: number; y: number; w: number; h: number; kind: string; text?: string }[] }[];
-  /** Frames per second of `f` (default: the source fps). */
+  frames: { f: number; t?: number; boxes: { x: number; y: number; w: number; h: number; kind: string; text?: string }[] }[];
+  /** Frames per second of `f` in older files; samples per second when `sourceFps` is given. */
   fps?: number;
+  /** Frame rate of the source file: `f` counts source frames at this rate. */
+  sourceFps?: number;
 }
 
 function intersect(a: Rect, b: Rect): number {
@@ -43,10 +45,10 @@ export function checkCaptionFaceOverlap(t: Timeline, tracks: Tracks, o: { minOve
         const src = t.sources[id];
         const track = tracks.faces?.[id];
         if (!src || src.kind !== 'camera' || !track) continue;
-        const fps = track.fps > 0 ? track.fps : 30;
         const { rects } = sourceBoxToCanvasAt(t, frame, id, (sf) => {
-          const near = track.frames.reduce<typeof track.frames[number] | null>((best, fr) =>
-            Math.abs(fr.f / fps - sf / fpsValue(src.fps)) < 0.5 && (!best || Math.abs(fr.f / fps - sf / fpsValue(src.fps)) < Math.abs(best.f / fps - sf / fpsValue(src.fps))) ? fr : best, null);
+          const at = sf / fpsValue(src.fps);
+          const dist = (fr: { f: number; t?: number }) => Math.abs(faceFrameSec(track, fr) - at);
+          const near = track.frames.reduce<typeof track.frames[number] | null>((best, fr) => (dist(fr) < 0.5 && (!best || dist(fr) < dist(best)) ? fr : best), null);
           const face = near?.faces.filter((x) => x.score >= 0.3).sort((p, q) => q.w * q.h - p.w * p.h)[0];
           return face ? { x: face.x * src.size.width, y: face.y * src.size.height, w: face.w * src.size.width, h: face.h * src.size.height } : null;
         });
@@ -118,7 +120,8 @@ export function checkMosaicTracking(t: Timeline, pii: Record<string, PiiAnalysis
     const src = t.sources[sourceId];
     if (!src || (src.kind !== 'screen' && src.kind !== 'camera')) continue;
     const sfps = src.fps.num / src.fps.den;
-    const afps = analysis.fps ?? sfps;
+    // `f` counts source frames when the file names the source rate (the desktop writes fps = samples per second)
+    const afps = analysis.sourceFps ?? analysis.fps ?? sfps;
     const drift = src.kind === 'camera' && src.drift ? src.drift : 1;
     const masks = t.masks.filter((m) => m.source === sourceId);
     for (const seg of t.segments) {
@@ -126,7 +129,7 @@ export function checkMosaicTracking(t: Timeline, pii: Record<string, PiiAnalysis
       const la = sourceLocalSeconds(t, src, takeFrameToSeconds(t, seg.src.take, seg.src.from));
       const lb = sourceLocalSeconds(t, src, takeFrameToSeconds(t, seg.src.take, seg.src.to));
       for (const fr of analysis.frames) {
-        const sec = fr.f / afps;
+        const sec = typeof fr.t === 'number' && Number.isFinite(fr.t) ? fr.t : fr.f / afps;
         if (sec < la || sec >= lb) continue;
         const frame = Math.min(seg.range.end - 1, seg.range.start + Math.round(((sec - la) / drift) * F));
         const sourceFrame = sec * sfps;

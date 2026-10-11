@@ -114,8 +114,12 @@ describe('one check at a time', () => {
     release('ok');
     expect(await a).toBe('ok');
     expect(run).toHaveBeenCalledTimes(1);
-    await loop.checkNow();
+    // the check finished: the next request starts a new one (which must be released too, or it never settles)
+    const c = loop.checkNow();
+    expect(c === a).toBe(false);
     expect(run).toHaveBeenCalledTimes(2);
+    release('network-error');
+    expect(await c).toBe('network-error');
   });
   it('a throwing run is an error outcome, not a rejection', async () => {
     const loop = new UpdateLoop({ enabled: true, run: () => Promise.reject(new Error('x')), isBusy: () => false });

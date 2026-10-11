@@ -178,7 +178,7 @@ export function initSentry(crashReports: boolean, opts: TelemetryOptions = {}): 
       user: { id: installId() },
       tags: { 'os.platform': process.platform, arch: process.arch, electron: process.versions.electron, build: `${process.platform}-${process.arch}` },
     },
-    getRendererName: (contents) => (contents.getURL().includes('analysis.html') ? 'analysis' : contents.getURL().includes('teleprompter') ? 'teleprompter' : 'main-window'),
+    getRendererName: (contents) => (contents.getURL().includes('analysis.html') ? 'analysis' : contents.getURL().includes('region=') ? 'region-picker' : 'main-window'),
     beforeBreadcrumb: (crumb) => (gate.allow() && keepBreadcrumb(crumb) ? scrubBreadcrumb(crumb, scrubContext()) : null),
     beforeSend: (event, hint) => {
       if (!gate.allow()) return null;

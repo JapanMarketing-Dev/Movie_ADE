@@ -1,0 +1,16 @@
+// Solocut's OAuth token exchange (docs/14). The desktop app never holds the TikTok client secret: it posts the
+// authorization code (PKCE) or refresh token here, and this worker adds client_key / client_secret.
+// Secrets (set once, never in this file); the app's client_key picks the pair:
+//   npx wrangler secret put TIKTOK_CLIENT_KEY            (production)
+//   npx wrangler secret put TIKTOK_CLIENT_SECRET
+//   npx wrangler secret put TIKTOK_SANDBOX_CLIENT_KEY    (sandbox "solocut-dev")
+//   npx wrangler secret put TIKTOK_SANDBOX_CLIENT_SECRET
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "solocut-oauth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "solocut.app/oauth/*", "zone_name": "solocut.app" }],
+  "observability": { "enabled": false }
+}

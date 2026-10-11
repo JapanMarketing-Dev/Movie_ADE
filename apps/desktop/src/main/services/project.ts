@@ -4,11 +4,17 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, promises as fsp, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem, Variant } from '../../shared/types';
-import { isUnknownOpError, parseNext, parseVariantStatus, parseSteps, previewCandidates, reviewOps, stepsForVariant, timelineOverview, variantArgs, variantTimelinePath } from '../../shared/project';
+import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem, Variant, VideoList } from '../../shared/types';
+import { isUnknownOpError, parseNext, parseVariantStatus, parseSteps, reviewOps, stepsForVariant, timelineOverview, variantArgs, variantTimelinePath } from '../../shared/project';
 import { mediaUrl } from '../../shared/ipc';
+import { resolveVideosRoot } from '@solocut/settings';
 import { runCli } from './cli';
 import { allowMediaRoot } from './media-protocol';
+import { rawTake } from './rawTake';
+import { getPath, language, settingsObject } from './platform';
+import { latestRender, listVideos, takeChange, uniqueChild, videoFolderName } from './videos';
+
+export { latestRender } from './videos';
 
 const RECENT_MAX = 20;
 
@@ -62,49 +68,31 @@ export function openProject(dir: string): ProjectInfo {
   return p;
 }
 
-export function slugify(title: string): string {
-  const s = title
-    .normalize('NFKC')
-    .trim()
-    .replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
-    .replace(/\s+/g, '-')
-    .slice(0, 60);
-  return s.length > 0 && s !== '.' && s !== '..' ? s : `video-${Date.now()}`;
+/** The one template every new video uses (the UI no longer chooses one). */
+export const DEFAULT_TEMPLATE_ID = 'tech';
+
+/** The master folder (settings `videos.root`, `~` expanded). */
+export function videosRoot(): string {
+  return resolveVideosRoot(getPath(settingsObject(), 'videos.root'));
 }
 
-export async function createProject(o: { parentDir: string; title: string; template: string; language: 'ja' | 'en' }): Promise<CliResult<ProjectInfo>> {
-  let dir = join(o.parentDir, slugify(o.title));
-  for (let i = 2; existsSync(dir); i++) dir = join(o.parentDir, `${slugify(o.title)}-${i}`);
-  mkdirSync(dir, { recursive: true });
-  const r = await runCli(['init', '--template', o.template, '--title', o.title, '--lang', o.language], { cwd: dir });
+export function videos(): VideoList {
+  return listVideos(videosRoot());
+}
+
+/**
+ * A new video: `<parentDir or videos.root>/<YYYY-MM-DD>-<slug or HHMM>/` (unique), initialised with DEFAULT_TEMPLATE_ID
+ * in the app's UI language. The title may be empty (the folder then gets the time, the project its folder name).
+ */
+export async function createProject(o: { parentDir?: string; title?: string } = {}): Promise<CliResult<ProjectInfo>> {
+  const parent = o.parentDir?.trim() || videosRoot();
+  const title = (o.title ?? '').trim();
+  mkdirSync(parent, { recursive: true });
+  const dir = uniqueChild(parent, videoFolderName(title));
+  mkdirSync(dir);
+  const r = await runCli(['init', '--template', DEFAULT_TEMPLATE_ID, '--title', title || basename(dir), '--lang', language()], { cwd: dir });
   if (!r.ok || !isProjectDir(dir)) return { ...r, ok: false, data: undefined, error: r.error ?? 'solocut init did not create solocut.json' };
   return { ...r, data: openProject(dir) };
-}
-
-/** Newest playable render of a variant: its preview first, else (main only) the newest video under renders/. */
-export function latestRender(dir: string, variant: Variant = 'main'): { path: string; mtimeMs: number } | null {
-  for (const rel of previewCandidates(variant)) {
-    const p = join(dir, rel);
-    if (existsSync(p)) return { path: p, mtimeMs: statSync(p).mtimeMs };
-  }
-  const root = variant === 'main' ? join(dir, 'renders') : join(dir, 'renders', variant);
-  let best: { path: string; mtimeMs: number } | null = null;
-  const walk = (d: string, depth: number) => {
-    if (depth > 2 || !existsSync(d)) return;
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      const p = join(d, e.name);
-      // the main video never picks up a vertical variant's render
-      if (e.isDirectory()) {
-        if (variant === 'main' && (e.name === 'tiktok' || e.name === 'youtube-shorts' || e.name === 'thumbnails')) continue;
-        walk(p, depth + 1);
-      } else if (/\.(mp4|mov|webm)$/i.test(e.name) && !e.name.endsWith('.part')) {
-        const m = statSync(p).mtimeMs;
-        if (!best || m > best.mtimeMs) best = { path: p, mtimeMs: m };
-      }
-    }
-  };
-  walk(root, 0);
-  return best;
 }
 
 export function availableVariants(dir: string): Variant[] {
@@ -144,6 +132,8 @@ export async function snapshot(dir: string, variant: Variant = 'main'): Promise<
   }
   const r = latestRender(dir, variant);
   if (r) snap.preview = { path: r.path, mtimeMs: r.mtimeMs, url: mediaUrl(r.path, r.mtimeMs) };
+  const raw = rawTake(dir);
+  if (raw) snap.raw = raw;
   return snap;
 }
 
@@ -165,23 +155,9 @@ export async function review(dir: string, item: ReviewItem, decision: 'accept' |
   return r;
 }
 
-export async function useAsReference(dir: string, archiveId: string): Promise<CliResult> {
-  const t = readJson(join(dir, 'timeline.json')) as { meta?: { references?: unknown[] } } | undefined;
-  const refs = Array.isArray(t?.meta?.references) ? [...t!.meta!.references!] : [];
-  if (!refs.some((r) => typeof r === 'object' && r !== null && (r as { archive?: unknown }).archive === archiveId)) {
-    refs.push({ archive: archiveId, use: ['pacing', 'scenes', 'captions', 'sfx'] });
-  }
-  return applyOps(dir, [{ op: 'setMeta', patch: { references: refs } }]);
-}
-
-export function readScript(dir: string): string | null {
-  const p = join(dir, 'script.md');
-  return existsSync(p) ? readFileSync(p, 'utf8') : null;
-}
-
 // ---------- watching ----------
 
-export type ChangeKind = 'timeline' | 'status' | 'renders' | 'project';
+export type ChangeKind = 'timeline' | 'status' | 'renders' | 'project' | 'takes';
 
 export class ProjectWatcher {
   private watchers: FSWatcher[] = [];
@@ -214,6 +190,10 @@ export class ProjectWatcher {
     add(join(dir, '.solocut'), (name) => (name === 'status.json' || name === 'history.jsonl' ? 'status' : null));
     mkdirSync(join(dir, 'renders'), { recursive: true });
     add(join(dir, 'renders'), () => 'renders', true);
+    // media/takes: a new take folder or its take.json, so the raw-take preview shows right after recording (before
+    // ingest). The media files being written while recording are ignored.
+    mkdirSync(join(dir, 'media', 'takes'), { recursive: true });
+    add(join(dir, 'media', 'takes'), takeChange, true);
     // variants/<target>/timeline.json (docs/18)
     mkdirSync(join(dir, 'variants'), { recursive: true });
     add(join(dir, 'variants'), (name) => (name && /timeline\.json$/.test(name) ? 'timeline' : null), true);

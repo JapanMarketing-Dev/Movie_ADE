@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fractionToFrame, frameToFraction, itemAt, itemWidthPct, laneStats, rulerTicks, secondsToFrame } from '../src/renderer/src/screens/parts/timelineModel';
 import { findingTitle, itemImagePath, parseFindings, shortTimecode } from '../src/renderer/src/screens/parts/findingsModel';
-import { checklistReady, publishChecklist, statEntries, type ChecklistInput } from '../src/renderer/src/screens/parts/screenModel';
 import { DEFAULT_LAYOUT, layoutFromObject, layoutToSettings, sameLayout, SIDEBAR_MAX } from '../src/renderer/src/shell/layout';
 import type { FeedbackItem, LaneItem, TimelineOverview } from '../src/shared/types';
 
@@ -113,58 +112,6 @@ describe('findings model', () => {
     expect(findingTitle({ ...base, request: '一行目\n二行目' })).toBe('一行目');
     expect(findingTitle({ ...base, spoken: '話した' })).toBe('話した');
     expect(findingTitle(base)).toBe('');
-  });
-});
-
-describe('screen model', () => {
-  it('formats archive stats', () => {
-    expect(statEntries(null)).toEqual([]);
-    expect(statEntries({ a: 1, b: 2.345, c: null, d: '', e: [1, 2, 3], f: true, g: false, h: 'x', i: { k: 1 }, j: Number.NaN })).toEqual([
-      ['a', '1'],
-      ['b', '2.35'],
-      ['e', '3'],
-      ['f', '✓'],
-      ['g', '—'],
-      ['h', 'x'],
-      ['i', '{"k":1}'],
-      ['j', '—'],
-    ]);
-    const long = statEntries({ o: { text: 'x'.repeat(100) } })[0]![1];
-    expect(long.length).toBe(58);
-    expect(long.endsWith('…')).toBe(true);
-  });
-  const base: ChecklistInput = {
-    include: { youtube: true, 'youtube-shorts': false, tiktok: false },
-    mainIssues: 0,
-    shortsIssues: 0,
-    tiktokFile: false,
-    tiktokChecks: false,
-    connected: true,
-  };
-  it('lists only the rows that apply and is ready when all pass', () => {
-    const c = publishChecklist(base);
-    expect(c.map((x) => x.id)).toEqual(['anyPost', 'account', 'youtube']);
-    expect(checklistReady(c)).toBe(true);
-  });
-  it('blocks on each problem', () => {
-    expect(checklistReady(publishChecklist({ ...base, connected: false }))).toBe(false);
-    expect(publishChecklist({ ...base, mainIssues: 2 }).find((x) => x.id === 'youtube')).toEqual({ id: 'youtube', ok: false, issues: 2 });
-    const none = publishChecklist({ ...base, include: { youtube: false, 'youtube-shorts': false, tiktok: false } });
-    expect(none).toEqual([{ id: 'anyPost', ok: false }]);
-    expect(checklistReady(none)).toBe(false);
-    expect(checklistReady([])).toBe(false);
-  });
-  it('TikTok only needs no YouTube account; it needs the file and the checklist', () => {
-    const tt = { ...base, connected: false, include: { youtube: false, 'youtube-shorts': false, tiktok: true } };
-    expect(publishChecklist(tt).map((x) => x.id)).toEqual(['anyPost', 'tiktok']);
-    expect(checklistReady(publishChecklist(tt))).toBe(false);
-    expect(checklistReady(publishChecklist({ ...tt, tiktokFile: true }))).toBe(false);
-    expect(checklistReady(publishChecklist({ ...tt, tiktokFile: true, tiktokChecks: true }))).toBe(true);
-  });
-  it('orders three posts as on screen: YouTube, TikTok, Shorts', () => {
-    const all = publishChecklist({ ...base, include: { youtube: true, 'youtube-shorts': true, tiktok: true }, shortsIssues: 1 });
-    expect(all.map((x) => x.id)).toEqual(['anyPost', 'account', 'youtube', 'tiktok', 'youtube-shorts']);
-    expect(all.at(-1)).toEqual({ id: 'youtube-shorts', ok: false, issues: 1 });
   });
 });
 

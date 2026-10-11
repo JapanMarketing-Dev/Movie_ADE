@@ -139,12 +139,15 @@ export function titleAss(layout: TitleLayout, format: ThumbFormat, style: TitleS
 
 // ---------- image generation providers ----------
 
-export type ThumbProvider = 'codex' | 'openai' | 'gemini' | 'frame';
+/**
+ * 'codex': Codex CLI on the user's ChatGPT subscription; 'frame': no generation (the frame itself). Paid image APIs
+ * (API keys) are never called (SPEC: image generation happens inside the subscriptions).
+ */
+export type ThumbProvider = 'codex' | 'frame';
 
 export interface GenRequest { frame: string; prompt: string; n: number; format: ThumbFormat; outDir: string; /** Style references (e.g. a past thumbnail). */ references?: string[] }
 export interface GenContext {
   env: NodeJS.ProcessEnv;
-  fetch?: typeof fetch;
   /** Runs a command (tests inject a fake). `input` is written to stdin. */
   run?: RunFn;
   model?: string;
@@ -235,88 +238,8 @@ export async function generateCodex(req: GenRequest, ctx: GenContext): Promise<s
   return out;
 }
 
-async function readJson(res: Response, provider: ThumbProvider): Promise<unknown> {
-  const text = await res.text();
-  if (!res.ok) throw new ThumbError(provider, `HTTP ${res.status}: ${text.slice(0, 200)}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ThumbError(provider, 'response is not JSON');
-  }
-}
-
-function writeB64(dir: string, name: string, b64: string, provider: ThumbProvider): string {
-  if (typeof b64 !== 'string' || !b64) throw new ThumbError(provider, 'response has no image data');
-  const buf = Buffer.from(b64, 'base64');
-  if (buf.length < 64) throw new ThumbError(provider, 'image data is too small');
-  mkdirSync(dir, { recursive: true });
-  const p = join(dir, name);
-  writeFileSync(p, buf);
-  return p;
-}
-
-/** OpenAI Images API edits (gpt-image-2) with the frame as the reference image. */
-export async function generateOpenAI(req: GenRequest, ctx: GenContext): Promise<string[]> {
-  const key = ctx.env.SOLOCUT_OPENAI_API_KEY ?? ctx.env.OPENAI_API_KEY;
-  if (!key) throw new ThumbError('openai', 'no API key (SOLOCUT_OPENAI_API_KEY)');
-  const f = ctx.fetch ?? fetch;
-  const form = new FormData();
-  form.append('model', ctx.model ?? 'gpt-image-2');
-  form.append('prompt', `${req.prompt}\nKeep the person's face from the reference unchanged. Do not draw any text or letters.`);
-  form.append('n', String(req.n));
-  form.append('size', req.format === 'youtube' ? '1536x1024' : '1024x1536');
-  form.append('quality', 'high');
-  for (const [i, img] of [req.frame, ...(req.references ?? [])].entries()) {
-    form.append('image[]', new Blob([readFileSync(img)], { type: mimeOf(img) }), `image-${i}${extname(img)}`);
-  }
-  let res: Response;
-  try {
-    res = await f('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: form });
-  } catch (e) {
-    throw new ThumbError('openai', (e as Error).message);
-  }
-  const j = (await readJson(res, 'openai')) as { data?: { b64_json?: string }[] };
-  if (!Array.isArray(j.data) || !j.data.length) throw new ThumbError('openai', 'response has no data');
-  return j.data.map((d, i) => writeB64(req.outDir, `openai-${Date.now()}-${i}.png`, d.b64_json ?? '', 'openai'));
-}
-
-/** Gemini API (Nano Banana) generateContent with the frame inline; one request per image. */
-export async function generateGemini(req: GenRequest, ctx: GenContext): Promise<string[]> {
-  const key = ctx.env.SOLOCUT_GEMINI_API_KEY ?? ctx.env.GEMINI_API_KEY;
-  if (!key) throw new ThumbError('gemini', 'no API key (SOLOCUT_GEMINI_API_KEY)');
-  const f = ctx.fetch ?? fetch;
-  const model = ctx.model ?? 'gemini-nano-banana-2.1';
-  const data = readFileSync(req.frame).toString('base64');
-  const out: string[] = [];
-  for (let i = 0; i < req.n; i++) {
-    let res: Response;
-    try {
-      res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { text: `${req.prompt}\nAspect ratio ${req.format === 'youtube' ? '16:9' : '9:16'}. Keep the person's face unchanged. No text or letters.` },
-            { inline_data: { mime_type: mimeOf(req.frame), data } },
-            ...(req.references ?? []).map((r) => ({ inline_data: { mime_type: mimeOf(r), data: readFileSync(r).toString('base64') } })),
-          ] }],
-          generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: req.format === 'youtube' ? '16:9' : '9:16' } },
-        }),
-      });
-    } catch (e) {
-      throw new ThumbError('gemini', (e as Error).message);
-    }
-    const j = (await readJson(res, 'gemini')) as { candidates?: { content?: { parts?: { inlineData?: { data?: string }; inline_data?: { data?: string } }[] } }[] };
-    const part = j.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data || p.inline_data?.data);
-    out.push(writeB64(req.outDir, `gemini-${Date.now()}-${i}.png`, part?.inlineData?.data ?? part?.inline_data?.data ?? '', 'gemini'));
-  }
-  return out;
-}
-
 export const PROVIDERS: Record<Exclude<ThumbProvider, 'frame'>, (req: GenRequest, ctx: GenContext) => Promise<string[]>> = {
   codex: generateCodex,
-  openai: generateOpenAI,
-  gemini: generateGemini,
 };
 
 /** Try providers in order; the first one that returns images wins. 'frame' (no generation) always succeeds. */

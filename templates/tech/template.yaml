@@ -1,11 +1,12 @@
-# 技術動画。1回の画面収録から、YouTube の本編（16:9）と、縦型の TikTok・YouTube Shorts（9:16）の3本を作る。
+# Solocut の標準テンプレート（アプリはいつもこれを使う）。画面収録＋人物のカメラから、YouTube 形式の 16:9 の動画を1本作る。
+# 同じ動画ファイルを YouTube にも TikTok にも投稿できる（縦型の別バージョンは作らない）。
 id: tech
 version: 2
 extends: base-horizontal
-name: { ja: 技術動画（YouTube＋TikTok＋Shorts）, en: Tech video (YouTube + TikTok + Shorts) }
+name: { ja: 動画（16:9・1本）, en: Video (16:9, one file) }
 description:
-  ja: 画面収録の解説動画。操作している箇所へ自動でズームし、キー操作を表示する。顔は右下の丸ワイプ、章の頭はカメラのみ
-  en: Screen-recorded tutorial. Auto-zoom to the operated area, keystroke display, circular face wipe, camera-only at chapter starts
+  ja: 画面収録とカメラの解説動画。操作している箇所へ自動でズームし、キー操作を表示する。人物は顔が中央に来るように切り抜き、右下の丸ワイプ、章の頭はカメラのみ
+  en: Screen recording plus camera. Auto-zoom to the operated area, keystroke display, the person's face kept centred (circular wipe), camera-only at chapter starts
 kind: tech
 targets: [youtube]
 canvas: { width: 1920, height: 1080, fps: 30 }
@@ -56,16 +57,17 @@ zoom: { followClicks: true }
 
 features:
   autoZoom: true
+  # 人物の顔がカメラの枠の中央に来るように切り抜く（solocut tracks apply。顔の解析は derived/analysis/faces.*.json）
+  faceReframe: true
   keystrokes: true
   cursorHighlight: true
   piiMask: true
 
 checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, pii-on-screen, mosaic-tracking, camera-switch]
 
-# 1回の撮影から3本（docs/18）。本編（YouTube 16:9）から、縦型の2本を派生させる。
+# 出力は YouTube 形式の 16:9 を1本だけ（renders/youtube/final.mp4）。
 outputs:
-  youtube:        { }
-  tiktok:         { derive: vertical, maxSec: 90, captions: tiktok-bold, layout: split-v }
-  youtube-shorts: { derive: vertical, sameAs: tiktok, maxSec: 60, captions: tiktok-bold, layout: split-v, hook: shorts }
+  youtube: { }
 
-pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check, thumbnail, metadata, review, final]
+# 人の確認はアプリの投稿画面で、完成した動画を見て行う（OK なら投稿）。そのため review の手順は置かず、final まで進める。
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check, final, thumbnail, metadata]

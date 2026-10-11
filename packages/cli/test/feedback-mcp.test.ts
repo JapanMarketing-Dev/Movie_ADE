@@ -147,16 +147,26 @@ describe('mcp server', () => {
     const r = (await server.handle({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'edit', arguments: { ops: [{ op: 'setMeta', patch: {} }], dryRun: true } } })) as { result: { content: { type: string; text: string }[]; isError: boolean } };
     expect(r.result.isError).toBe(false);
     expect(calls.at(-1)).toEqual(['edit', '--ops', '[{"op":"setMeta","patch":{}}]', '--dry-run', '--json', '--project', '/p']);
-    await server.handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'render', arguments: { quality: 'final', target: 'youtube', project: '/other' } } });
-    expect(calls.at(-1)).toEqual(['render', '--final', '--target', 'youtube', '--json', '--project', '/other']);
-    await server.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'meta_set', arguments: { title: 'T', tags: ['a', 'b'] } } });
-    expect(calls.at(-1)).toEqual(['meta', 'set', '--title', 'T', '--tags', 'a,b', '--json', '--project', '/p']);
-    await server.handle({ jsonrpc: '2.0', id: 61, method: 'tools/call', params: { name: 'derive', arguments: { target: 'tiktok', selection: ['seg_1', 'seg_2'], maxSec: 60 } } });
-    expect(calls.at(-1)).toEqual(['derive', '--target', 'tiktok', '--max-sec', '60', '--selection', 'seg_1,seg_2', '--json', '--project', '/p']);
-    await server.handle({ jsonrpc: '2.0', id: 62, method: 'tools/call', params: { name: 'tl_summary', arguments: { variant: 'tiktok' } } });
-    expect(calls.at(-1)).toEqual(['tl', 'summary', '--json', '--project', '/p', '--variant', 'tiktok']);
-    await server.handle({ jsonrpc: '2.0', id: 63, method: 'tools/call', params: { name: 'check', arguments: { all: true, variant: 'main' } } });
-    expect(calls.at(-1)).toEqual(['check', '--all', '--json', '--project', '/p']);
+    await server.handle({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'render', arguments: { quality: 'final', project: '/other' } } });
+    expect(calls.at(-1)).toEqual(['render', '--final', '--json', '--project', '/other']);
+    await server.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'meta_set', arguments: { title: 'T', tags: ['a', 'b'], privacy: 'unlisted', tiktok: true } } });
+    expect(calls.at(-1)).toEqual(['meta', 'set', '--title', 'T', '--tags', 'a,b', '--privacy', 'unlisted', '--tiktok', '--json', '--project', '/p']);
+    await server.handle({ jsonrpc: '2.0', id: 61, method: 'tools/call', params: { name: 'meta_check', arguments: {} } });
+    expect(calls.at(-1)).toEqual(['meta', 'check', '--json', '--project', '/p']);
+    await server.handle({ jsonrpc: '2.0', id: 63, method: 'tools/call', params: { name: 'check', arguments: {} } });
+    expect(calls.at(-1)).toEqual(['check', '--json', '--project', '/p']);
+  });
+
+  it('one video: no derive tool, no variant argument', async () => {
+    const names = MCP_TOOLS.map((x) => x.name);
+    expect(names).not.toContain('derive');
+    for (const t of MCP_TOOLS) expect(Object.keys(t.inputSchema.properties)).not.toContain('variant');
+    const n = calls.length;
+    const r = (await server.handle({ jsonrpc: '2.0', id: 62, method: 'tools/call', params: { name: 'tl_summary', arguments: { variant: 'tiktok' } } })) as { result: { isError: boolean } };
+    expect(r.result.isError).toBe(true);
+    expect(calls.length).toBe(n);
+    const d = (await server.handle({ jsonrpc: '2.0', id: 64, method: 'tools/call', params: { name: 'derive', arguments: {} } })) as { error?: { code: number } };
+    expect(d.error?.code).toBe(-32602);
   });
 
   it('CLI failures become isError results; bad args are reported without running', async () => {

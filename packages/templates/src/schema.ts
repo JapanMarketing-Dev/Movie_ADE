@@ -120,24 +120,14 @@ export const TemplateFileSchema = z.object({
     emphasisColor: z.string().optional(),
     emphasisScale: z.number().positive().optional(),
   }).optional(),
-  /**
-   * docs/18: the videos made from one take. The main timeline is the output without `derive`; derived outputs are
-   * vertical variants (variants/<target>/timeline.json). `sameAs` reuses another variant's selection.
-   */
-  outputs: z.partialRecord(z.enum(TARGETS), z.object({
-    enabled: z.boolean().default(true),
-    derive: z.enum(['vertical']).optional(),
-    sameAs: z.enum(TARGETS).optional(),
-    maxSec: z.number().positive().max(600).optional(),
-    captions: z.string().optional(),
-    layout: z.enum(LAYOUT_IDS).optional(),
-    hook: z.enum(['default', 'shorts']).optional(),
-  })).optional(),
+  /** The one video a project makes (16:9). Older templates listed vertical variants here; extra keys are ignored. */
+  outputs: z.partialRecord(z.enum(TARGETS), z.object({ enabled: z.boolean().default(true) })).optional(),
   features: z.object({
     autoZoom: z.boolean().default(false),
     keystrokes: z.boolean().default(false),
     cursorHighlight: z.boolean().default(false),
     piiMask: z.boolean().default(false),
+    /** Keep the person's face centred in the camera's frame (solocut tracks apply, core centerPerson). */
     faceReframe: z.boolean().default(false),
     highlightPicker: z.boolean().default(false),
   }).prefault({}),

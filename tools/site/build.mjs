@@ -1,4 +1,4 @@
-// Renders site/{index,download,privacy}.html (English) and site/ja/* (Japanese) from tools/site/content.mjs.
+// Renders site/{index,download,privacy,terms}.html (English) and site/ja/* (Japanese) from tools/site/content.mjs.
 // Usage: node tools/site/build.mjs
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -114,6 +114,7 @@ function footer(t) {
       <a href="${t.root}download">${esc(t.nav.download)}</a>
       <a href="${REPO}/tree/main/docs" target="_blank" rel="noopener noreferrer">${esc(t.nav.docs)}</a>
       <a href="${t.root}privacy">${esc(t.footer.privacy)}</a>
+      <a href="${t.root}terms">${esc(t.footer.terms)}</a>
       <a href="${REPO}/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">${esc(t.footer.license)}</a>
       <a href="${REPO}" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="${X_URL}" target="_blank" rel="noopener noreferrer">X</a>
@@ -154,7 +155,7 @@ function mock(t) {
       </div>
     </div>
     <div class="mock-tl">
-      <div class="tl-head"><span>timeline.json</span><span>1080×1920 · 30fps</span></div>
+      <div class="tl-head"><span>timeline.json</span><span>1920×1080 · 30fps</span></div>
       ${[0, 1, 2, 3].map(row).join('\n      ')}
       <div class="checks">${checks}</div>
     </div>
@@ -198,7 +199,7 @@ function demo(t) {
         <span class="fb-say">${esc(d.say)}</span><span class="fb-tc">00:00:41:07</span></div>
       <div class="fb-card"><b>${esc(d.card[0])}</b><span>${esc(d.card[1])}</span><em>→ claude</em></div>
     </div>`;
-  const pubs = ['YouTube', 'TikTok', 'YouTube Shorts', 'X', 'Threads', 'Instagram · Facebook'];
+  const pubs = ['YouTube', 'TikTok'];
   const publish = `<div class="sc sc-publish" data-scene="4">
       <div class="pub-video"><div class="pv-thumb">${person}<b>${esc(d.cap)}</b></div><span class="pub-ok">✓ ${esc(d.approve)}</span></div>
       <ul class="pubs">${pubs.map((p, i) => `<li style="--i:${i}"><span>${p}</span><em>✓</em></li>`).join('')}</ul>
@@ -226,19 +227,20 @@ function home(t) {
   const frames = t.checks.frames.map(([s, h, p]) => `<div class="frame ${s}"><div class="img"></div><div class="meta"><b>${esc(h)}</b>${esc(p)}</div></div>`).join('');
   const libs = t.libs.items.map(([n, d, w]) => `<div class="lib"><b>${esc(n)}</b><span>${esc(d)}</span>${w ? `<br><em>${esc(w)}</em>` : ''}</div>`).join('');
   const faq = t.faq.items.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${md(a)}</p></details>`).join('\n        ');
-  const tplYaml = `<span class="k">id</span>: tiktok-talk
-<span class="k">canvas</span>: { width: 1080, height: 1920, fps: 30 }
-<span class="k">layouts</span>: [camera-full, screen-top-camera-bottom]
+  const tplYaml = `<span class="k">id</span>: solocut
+<span class="k">canvas</span>: { width: 1920, height: 1080, fps: 30 }
+<span class="k">layouts</span>: [screen-with-wipe, camera-full, screen-full]
+<span class="k">camera</span>: { main: face-centered }
 <span class="k">cut</span>:
   <span class="k">silence</span>: { minMs: 300, padMs: 80 }
   <span class="k">fillers</span>: [<span class="s">${t.lang === 'ja' ? 'えー, えっと, あのー' : 'um, uh, like'}</span>]
   <span class="k">retakes</span>: keep-last
-<span class="k">captions</span>: { style: tiktok-bold, highlight: word, safeArea: tiktok }
+<span class="k">captions</span>: { style: default, highlight: word }
 <span class="k">audio</span>: { loudness: -14, truePeak: -1 }
 <span class="k">checks</span>: [cut-boundaries, caption-safe-area, pii-on-screen]
 <span class="k">pipeline</span>:
   [ingest, sync, transcribe, rough-cut, captions,
-   layout, preview, check, review, final]`;
+   layout, preview, check, final, thumbnail, publish]`;
 
   return `${head(t, { title: t.title, description: t.description, path: t.home })}
 ${header(t, 'home')}
@@ -284,7 +286,7 @@ ${header(t, 'home')}
   <section class="section" id="templates">
     <div class="wrap split rev">
       <div class="reveal"><p class="kicker">${esc(t.tpl.kicker)}</p><h2>${esc(t.tpl.h2)}</h2><p class="lede" style="font-size:17px">${md(t.tpl.p)}</p>${bullets(t.tpl.bullets)}</div>
-      <div class="card reveal"><pre class="code"><span class="c"># templates/tiktok-talk/template.yaml</span>
+      <div class="card reveal"><pre class="code"><span class="c"># template.yaml</span>
 ${tplYaml}</pre></div>
     </div>
   </section>
@@ -416,33 +418,126 @@ ${header(t, 'download')}
 ${footer(t)}`;
 }
 
+const CONTACT = 'takumi.endoh@japan-marketing.co.jp';
+const LINKS = {
+  ytTerms: 'https://www.youtube.com/t/terms',
+  googlePrivacy: 'https://policies.google.com/privacy',
+  revoke: 'https://security.google.com/settings/security/permissions',
+  tiktokTerms: 'https://www.tiktok.com/legal/terms-of-service',
+  license: `${REPO}/blob/main/LICENSE`,
+};
+// Paragraph text; [label](url) becomes a link.
+const linkify = (s) => esc(s).replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g, (_m, l, u) => `<a href="${u}"${u.startsWith('http') ? ' target="_blank" rel="noopener noreferrer"' : ''}>${l}</a>`);
+
 const PRIVACY = {
-  en: { h1: 'Privacy', body: [
-    'Solocut runs on your computer. Your recordings, audio, transcripts and projects stay on your machine.',
-    'Transcription runs locally with whisper.cpp by default. If you choose a cloud transcription service or a cloud decision model, only the data needed for that task (audio for transcription; frame images and transcript text for checks) is sent to the provider you chose, with your own API key, after you agree.',
-    'The app checks solocut.app for updates. Crash reports (stack traces and environment information, never media, transcripts or file paths) are sent to Sentry; you can turn this off in Settings.',
-    'This website uses Cloudflare Web Analytics, which does not use cookies.',
+  en: { h1: 'Privacy', updated: 'Last updated: October 11, 2026', sections: [
+    ['', [
+      'Solocut is a desktop app that runs on your computer. Your recordings, audio, transcripts and projects stay on your machine. JapanMarketing LLC (“we”) does not run a server that receives your videos.',
+    ]],
+    ['Editing and transcription', [
+      'Transcription runs locally with whisper.cpp. Editing is done by the AI agent you choose (for example Claude Code, Codex or Gemini CLI) under your own subscription and that provider’s terms; Solocut does not send your data to an AI service by itself. A decision model is optional and off by default; if you turn on a cloud one, only frame images and transcript text needed for the check are sent to the provider you chose, after you agree.',
+    ]],
+    ['YouTube (YouTube API Services)', [
+      'Solocut uses YouTube API Services to upload your videos to your own YouTube channel when you connect your Google account and press OK to post. By connecting, you agree to the [YouTube Terms of Service](' + LINKS.ytTerms + '), and Google’s handling of data is described in the [Google Privacy Policy](' + LINKS.googlePrivacy + ').',
+      'Solocut only uses this access to upload the video, thumbnail and metadata (title, description, tags, privacy and similar settings) that you approved, and to read back the upload status. It does not read, collect or share other data from your Google account, and nothing is sent to us.',
+      'The OAuth tokens are stored only on your device, encrypted with the operating system’s keychain (macOS Keychain, Windows DPAPI or the Linux secret service). You can disconnect in Solocut’s settings at any time, which deletes the tokens, and you can revoke Solocut’s access at [Google security settings](' + LINKS.revoke + ').',
+    ]],
+    ['TikTok', [
+      'If you connect TikTok, Solocut uses TikTok’s Content Posting API only to post the video and caption you approved to your account. Tokens are stored on your device in the same way and can be removed by disconnecting. Use of TikTok is subject to [TikTok’s Terms of Service](' + LINKS.tiktokTerms + ').',
+    ]],
+    ['Updates, crash reports and this website', [
+      'The app checks solocut.app for updates. Crash reports (stack traces and environment information, never media, transcripts or file paths) are sent to Sentry; you can turn this off in Settings.',
+      'This website uses Cloudflare Web Analytics, which does not use cookies.',
+    ]],
+    ['Contact', ['Questions about privacy: [' + CONTACT + '](mailto:' + CONTACT + ').']],
   ] },
-  ja: { h1: 'プライバシー', body: [
-    'Solocut はお使いのコンピューターの中で動きます。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。',
-    '文字起こしは、初期設定では whisper.cpp で端末内で行います。クラウドの文字起こしや判定モデルを選んだ場合に限り、その処理に必要なデータ（文字起こしは音声、チェックはフレーム画像と文字起こし）を、あなたが選んだ事業者へ、あなたの API キーで、同意のうえで送ります。',
-    'アプリは solocut.app で更新を確認します。クラッシュレポート（スタックトレースと環境の情報。映像・文字起こし・ファイルのパスは含みません）を Sentry に送ります。設定でオフにできます。',
-    'このサイトは Cookie を使わない Cloudflare Web Analytics を利用しています。',
+  ja: { h1: 'プライバシー', updated: '最終更新日：2026年10月11日', sections: [
+    ['', [
+      'Solocut はお使いのコンピューターの中で動くデスクトップアプリです。収録した映像・音声、文字起こし、プロジェクトは端末の中に残ります。JapanMarketing合同会社（以下「当社」）は、あなたの動画を受け取るサーバーを運用していません。',
+    ]],
+    ['編集と文字起こし', [
+      '文字起こしは whisper.cpp で端末内で行います。編集はあなたが選んだ AI エージェント（Claude Code、Codex、Gemini CLI など）が、あなたのサブスクリプションと各提供元の規約のもとで行います。Solocut が自らデータを AI サービスへ送ることはありません。判定モデルは任意で初期設定はオフです。クラウドの判定モデルを有効にした場合に限り、チェックに必要なフレーム画像と文字起こしを、同意のうえで、あなたが選んだ事業者へ送ります。',
+    ]],
+    ['YouTube（YouTube API サービス）', [
+      'Solocut は、あなたが Google アカウントを連携し「OK・投稿する」を押したときに、あなた自身の YouTube チャンネルへ動画をアップロードするために YouTube API サービスを利用します。連携することで [YouTube 利用規約](' + LINKS.ytTerms + ') に同意したものとみなされます。Google によるデータの取り扱いは [Google プライバシー ポリシー](' + LINKS.googlePrivacy + ') をご覧ください。',
+      'このアクセスは、あなたが承認した動画・サムネイル・メタデータ（タイトル、説明、タグ、公開設定など）のアップロードと、アップロード状況の確認にだけ使います。Google アカウントのほかのデータを読み取る・集める・共有することはなく、当社に送られることもありません。',
+      'OAuth のトークンは端末内にのみ、OS のキーチェーン（macOS のキーチェーン、Windows の DPAPI、Linux のシークレットサービス）で暗号化して保存します。Solocut の設定からいつでも連携を解除でき、解除するとトークンは削除されます。[Google のセキュリティ設定](' + LINKS.revoke + ') からアクセス権を取り消すこともできます。',
+    ]],
+    ['TikTok', [
+      'TikTok を連携した場合、Solocut は TikTok の Content Posting API を、あなたが承認した動画とキャプションをあなたのアカウントに投稿するためだけに使います。トークンは同じく端末内に保存し、連携の解除で削除できます。TikTok の利用は [TikTok 利用規約](' + LINKS.tiktokTerms + ') に従います。',
+    ]],
+    ['更新・クラッシュレポート・このサイト', [
+      'アプリは solocut.app で更新を確認します。クラッシュレポート（スタックトレースと環境の情報。映像・文字起こし・ファイルのパスは含みません）を Sentry に送ります。設定でオフにできます。',
+      'このサイトは Cookie を使わない Cloudflare Web Analytics を利用しています。',
+    ]],
+    ['お問い合わせ', ['プライバシーに関するお問い合わせ：[' + CONTACT + '](mailto:' + CONTACT + ')']],
   ] },
 };
 
-function privacy(t) {
-  const p = PRIVACY[t.lang];
-  return `${head(t, { title: `${p.h1} — Solocut`, description: p.body[0], path: `${t.root}privacy` })}
-${header(t, 'privacy')}
+const TERMS = {
+  en: { h1: 'Terms of Service', updated: 'Last updated: October 11, 2026', sections: [
+    ['', ['These terms apply to the Solocut desktop app and the website solocut.app, provided by JapanMarketing LLC (“we”). By using Solocut you agree to them.']],
+    ['The software', [
+      'Solocut is open-source software under the [MIT License](' + LINKS.license + '). It is free to use, copy, modify and distribute under that license. Third-party tools that Solocut downloads on demand (such as FFmpeg and whisper.cpp) are subject to their own licenses.',
+    ]],
+    ['Your content and accounts', [
+      'Your recordings, projects and videos are yours. Solocut processes them on your computer and does not claim any rights to them. You are responsible for having the rights to what you record and post, and for the accounts you connect.',
+      'Editing is done by the AI agent you choose (for example Claude Code, Codex or Gemini CLI) under your own subscription; your use of those services is subject to their providers’ terms.',
+    ]],
+    ['YouTube', [
+      'Solocut uses YouTube API Services to post your videos to your channel after you press OK. By connecting your Google account you agree to be bound by the [YouTube Terms of Service](' + LINKS.ytTerms + '). Google’s [Privacy Policy](' + LINKS.googlePrivacy + ') applies to data handled by Google. You can revoke Solocut’s access at any time at [Google security settings](' + LINKS.revoke + ') or by disconnecting in Solocut.',
+    ]],
+    ['TikTok', [
+      'If you connect TikTok, videos are posted to your account under [TikTok’s Terms of Service](' + LINKS.tiktokTerms + ') and community guidelines. Nothing is posted until you press OK.',
+    ]],
+    ['No warranty', [
+      'Solocut is provided “as is”, without warranty of any kind, express or implied, including fitness for a particular purpose. To the extent permitted by law, we are not liable for any damages arising from its use, including lost data or content posted by mistake. Please review your video and its post settings before pressing OK.',
+    ]],
+    ['Changes', ['We may update these terms; the date above shows the latest version. Continued use after a change means you accept the updated terms.']],
+    ['Contact', ['[' + CONTACT + '](mailto:' + CONTACT + ')']],
+  ] },
+  ja: { h1: '利用規約', updated: '最終更新日：2026年10月11日', sections: [
+    ['', ['本規約は、JapanMarketing合同会社（以下「当社」）が提供する Solocut のデスクトップアプリと、ウェブサイト solocut.app に適用されます。Solocut を利用することで、本規約に同意したものとみなします。']],
+    ['ソフトウェア', [
+      'Solocut は [MIT ライセンス](' + LINKS.license + ') のオープンソースソフトウェアです。同ライセンスのもとで無料で利用・複製・改変・再配布できます。Solocut が必要に応じてダウンロードする外部ツール（FFmpeg、whisper.cpp など）は、それぞれのライセンスに従います。',
+    ]],
+    ['あなたのコンテンツとアカウント', [
+      '収録した映像、プロジェクト、動画はあなたのものです。Solocut はそれらをあなたのコンピューターの中で処理し、いかなる権利も主張しません。撮影・投稿する内容の権利と、連携するアカウントの管理は、あなたの責任となります。',
+      '編集は、あなたが選んだ AI エージェント（Claude Code、Codex、Gemini CLI など）が、あなたのサブスクリプションで行います。それらのサービスの利用には各提供元の規約が適用されます。',
+    ]],
+    ['YouTube', [
+      'Solocut は、あなたが「OK」を押したあとに動画をあなたのチャンネルへ投稿するために YouTube API サービスを利用します。Google アカウントを連携することで、[YouTube 利用規約](' + LINKS.ytTerms + ') に拘束されることに同意したものとみなされます。Google が扱うデータには [Google プライバシー ポリシー](' + LINKS.googlePrivacy + ') が適用されます。アクセス権は [Google のセキュリティ設定](' + LINKS.revoke + ') または Solocut の連携解除から、いつでも取り消せます。',
+    ]],
+    ['TikTok', [
+      'TikTok を連携した場合、動画は [TikTok 利用規約](' + LINKS.tiktokTerms + ') とコミュニティガイドラインのもとであなたのアカウントに投稿されます。「OK」を押すまで何も投稿されません。',
+    ]],
+    ['保証の否認', [
+      'Solocut は「現状のまま」提供され、特定目的への適合性を含め、明示・黙示を問わずいかなる保証もしません。法令で認められる範囲で、当社は Solocut の利用により生じた損害（データの消失や誤った投稿を含む）について責任を負いません。「OK」を押す前に、動画と投稿の設定を必ず確認してください。',
+    ]],
+    ['変更', ['当社は本規約を変更することがあります。最新版は上記の日付で示します。変更後も利用を続けた場合、変更後の規約に同意したものとみなします。']],
+    ['お問い合わせ', ['[' + CONTACT + '](mailto:' + CONTACT + ')']],
+  ] },
+};
+
+function legalPage(t, page, doc) {
+  const body = doc.sections
+    .map(([h, ps]) => `${h ? `<h2 style="font-size:20px;margin:32px 0 8px">${esc(h)}</h2>\n    ` : ''}${ps.map((b) => `<p class="lede" style="font-size:17px">${linkify(b)}</p>`).join('\n    ')}`)
+    .join('\n    ');
+  const description = doc.sections[0][1][0].replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  return `${head(t, { title: `${doc.h1} — Solocut`, description, path: `${t.root}${page}` })}
+${header(t, page)}
 <main id="main">
   <section class="dl-hero"><div class="wrap" style="max-width:820px">
-    <h1>${esc(p.h1)}</h1>
-    ${p.body.map((b) => `<p class="lede" style="font-size:17px">${esc(b)}</p>`).join('\n    ')}
+    <h1>${esc(doc.h1)}</h1>
+    <p class="sums">${esc(doc.updated)}</p>
+    ${body}
   </div></section>
 </main>
 ${footer(t)}`;
 }
+
+const privacy = (t) => legalPage(t, 'privacy', PRIVACY[t.lang]);
+const terms = (t) => legalPage(t, 'terms', TERMS[t.lang]);
 
 function out(rel, html) {
   const file = join(ROOT, rel);
@@ -455,4 +550,5 @@ for (const [t, dir] of [[en, ''], [ja, 'ja/']]) {
   out(`${dir}index.html`, home(t));
   out(`${dir}download.html`, download(t));
   out(`${dir}privacy.html`, privacy(t));
+  out(`${dir}terms.html`, terms(t));
 }

@@ -1,10 +1,10 @@
 import { Clapperboard, ListChecks, Send, Settings, Video } from 'lucide-react';
-import type { ProjectInfo, RecentProject, Variant } from '@shared/types';
+import type { ProjectInfo, RecentProject } from '@shared/types';
 import iconUrl from '../assets/icon.svg';
 import { IconButton, RecordButton, Segmented, Tooltip, type SegmentedOption } from '../ui';
 import { useST } from './i18n';
 import { LayoutToggles } from './LayoutToggles';
-import { MODES, VARIANT_ORDER, type Mode } from './modes';
+import { MODES, type Mode } from './modes';
 import { ProjectMenu } from './ProjectMenu';
 import { shortcutLabel, type ShortcutId } from './shortcut';
 
@@ -12,7 +12,7 @@ import { shortcutLabel, type ShortcutId } from './shortcut';
  * Title bar (36px), the window's drag strip (ported from Ferret src/renderer/components/TitleBar.tsx).
  *
  *   left   … logo / project switcher (recent projects)
- *   center … the four modes 撮影 / 編集 / 確認 / 投稿, and YouTube / TikTok / Shorts while editing or reviewing
+ *   center … the four modes 撮影 / 編集 / 確認 / 投稿 (one 16:9 video per project: no output switcher)
  *   right  … panel toggles / ● Record / settings
  *
  * The macOS traffic lights take the left inset (--titlebar-inset in shell.css).
@@ -24,9 +24,6 @@ export function TitleBar({
   project,
   recent,
   mode,
-  variant,
-  variants,
-  showVariant,
   recording,
   recordLabel,
   recordDisabled,
@@ -35,17 +32,12 @@ export function TitleBar({
   onNewProject,
   onRefreshRecent,
   onMode,
-  onVariant,
   onRecord,
   onSettings,
 }: {
   project: ProjectInfo | null;
   recent: RecentProject[];
   mode: Mode | null;
-  variant: Variant;
-  /** variants that already have a timeline (others get a dot: not derived yet) */
-  variants: Variant[];
-  showVariant: boolean;
   recording: boolean;
   recordLabel: string;
   recordDisabled: boolean;
@@ -54,7 +46,6 @@ export function TitleBar({
   onNewProject: () => void;
   onRefreshRecent: () => void;
   onMode: (mode: Mode) => void;
-  onVariant: (v: Variant) => void;
   onRecord: () => void;
   onSettings: () => void;
 }) {
@@ -70,13 +61,6 @@ export function TitleBar({
       testId: `mode-${m}`,
     };
   });
-  const variantOptions: SegmentedOption<Variant>[] = VARIANT_ORDER.map((v) => ({
-    value: v,
-    label: t(`variant.${v}`),
-    title: variants.includes(v) || v === 'main' ? t(`variant.${v}.title`) : `${t(`variant.${v}.title`)} — ${t('variant.notDerived')}`,
-    suffix: v !== 'main' && !variants.includes(v) ? <span className="segmented__dot" aria-hidden="true" /> : undefined,
-    testId: `variant-${v}`,
-  }));
 
   return (
     <header className="app-titlebar" data-testid="titlebar">
@@ -97,9 +81,6 @@ export function TitleBar({
 
       <div className="app-titlebar__center">
         <Segmented ariaLabel={t('mode.group')} value={mode} onChange={onMode} options={modeOptions} />
-        {showVariant && project && (
-          <Segmented ariaLabel={t('variant.group')} value={variant} onChange={onVariant} options={variantOptions} size="sm" className="variant-switch" />
-        )}
       </div>
 
       <div className="app-titlebar__right">

@@ -1,26 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Archive,
   ChevronDown,
   Clapperboard,
   Film,
   FolderOpen,
   Home,
+  ListChecks,
   MessageSquareText,
   Package,
   Plus,
   RefreshCw,
   Search,
+  Send,
+  Settings,
   Video,
   X,
   type LucideIcon,
 } from 'lucide-react';
-import type { ArchiveListItem, ProjectInfo, ProjectSnapshot, RecentProject, Variant } from '@shared/types';
+import type { ProjectInfo, ProjectSnapshot, RecentProject } from '@shared/types';
 import { api } from '../lib/api';
 import { IconButton, TextField, Tooltip } from '../ui';
 import { dayBucket, initialOf } from './format';
 import { useST, type SKey } from './i18n';
-import { VARIANT_ORDER, type Screen } from './modes';
+import { sidebarActive, sidebarPages, type Screen } from './modes';
 import { matchesAll } from './search';
 import { shortcutLabel } from './shortcut';
 import { parseFeedbackList, parseTakes, type FeedbackEntry, type TakeEntry } from './projectItems';
@@ -29,14 +31,23 @@ import { parseFeedbackList, parseTakes, type FeedbackEntry, type TakeEntry } fro
  * Left sidebar (ported from Ferret src/renderer/components/Sidebar.tsx; Orca由来の寸法: 見出し 32px・行 28px・
  * 子の行は 18px 字下げ、MIT、Ferret 経由).
  *
- *   pages     … ホーム / 過去の動画 / ライブラリ
- *   projects  … recent projects with search; the open project expands into
- *               takes, the three renders (YouTube / TikTok / Shorts), feedback sessions and its archive entries.
+ *   pages     … ホーム / 撮影 / 編集 / 確認 / 投稿 / ライブラリ / 設定
+ *   projects  … recent videos with search; the open one expands into its finished video, takes and feedback sessions.
  * Sections collapse; the state is kept per section in localStorage.
  */
-type SectionKey = 'takes' | 'renders' | 'feedback' | 'archive';
+type SectionKey = 'takes' | 'renders' | 'feedback';
 
 const COLLAPSE_KEY = 'solocut.sidebar.collapsed';
+
+const PAGE_ICON: Partial<Record<Screen, LucideIcon>> = {
+  home: Home,
+  record: Video,
+  workspace: Clapperboard,
+  review: ListChecks,
+  publish: Send,
+  library: Package,
+  settings: Settings,
+};
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -51,26 +62,22 @@ export function Sidebar({
   screen,
   project,
   recent,
-  snapshots,
-  variant,
+  snapshot,
   onNavigate,
   onOpenProject,
   onNewProject,
   onOpenFolder,
-  onVariant,
   onRefreshRecent,
 }: {
   screen: Screen;
   project: ProjectInfo | null;
   recent: RecentProject[];
-  /** snapshots of the open project per variant (renders) */
-  snapshots: Partial<Record<Variant, ProjectSnapshot>>;
-  variant: Variant;
+  /** snapshot of the open project (its finished video) */
+  snapshot: ProjectSnapshot | null;
   onNavigate: (s: Screen) => void;
   onOpenProject: (dir: string) => void;
   onNewProject: () => void;
   onOpenFolder: () => void;
-  onVariant: (v: Variant) => void;
   onRefreshRecent: () => void;
 }) {
   const t = useST();
@@ -105,22 +112,22 @@ export function Sidebar({
     return { today, older };
   }, [projects, project?.dir]);
 
-  const pages: { id: Screen; icon: LucideIcon; key: SKey }[] = [
-    { id: 'home', icon: Home, key: 'nav.home' },
-    { id: 'archive', icon: Archive, key: 'nav.archive' },
-    { id: 'library', icon: Package, key: 'nav.library' },
-  ];
+  const pages = sidebarPages(!!project);
 
   return (
     <aside className="sidebar" data-testid="sidebar" aria-label={t('sidebar.label')}>
       <div className="sidebar__list">
         <nav className="sb-pages" aria-label={t('sidebar.pages')}>
-          {pages.map(({ id, icon: Icon, key }) => (
-            <button key={id} type="button" className={`sb-page${screen === id ? ' is-active' : ''}`} aria-current={screen === id || undefined} onClick={() => onNavigate(id)}>
-              <Icon size={14} />
-              <span>{t(key)}</span>
-            </button>
-          ))}
+          {pages.map(({ screen: id, key, disabled }) => {
+            const Icon = PAGE_ICON[id] ?? Home;
+            const active = sidebarActive(id, screen);
+            return (
+              <button key={id} type="button" className={`sb-page${active ? ' is-active' : ''}`} aria-current={active || undefined} disabled={disabled} onClick={() => onNavigate(id)} data-testid={`sb-page-${id}`}>
+                <Icon size={14} />
+                <span>{t(key)}</span>
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sb-head">
@@ -193,19 +200,10 @@ export function Sidebar({
                         </span>
                         <span className="sb-project__name">{r.title}</span>
                         {!r.exists && <span className="sb-project__missing">{t('projectMenu.missing')}</span>}
-                        {active && snapshots.main?.next?.state === 'needs-human' && <span className="sb-project__attention" title={t('sidebar.needsHuman')} />}
+                        {active && snapshot?.next?.state === 'needs-human' && <span className="sb-project__attention" title={t('sidebar.needsHuman')} />}
                       </div>
                       {active && (
-                        <ProjectChildren
-                          dir={r.dir}
-                          screen={screen}
-                          snapshots={snapshots}
-                          variant={variant}
-                          collapsed={collapsed}
-                          onToggle={toggle}
-                          onNavigate={onNavigate}
-                          onVariant={onVariant}
-                        />
+                        <ProjectChildren dir={r.dir} screen={screen} snapshot={snapshot} collapsed={collapsed} onToggle={toggle} onNavigate={onNavigate} />
                       )}
                     </div>
                   );
@@ -222,36 +220,29 @@ export function Sidebar({
 function ProjectChildren({
   dir,
   screen,
-  snapshots,
-  variant,
+  snapshot,
   collapsed,
   onToggle,
   onNavigate,
-  onVariant,
 }: {
   dir: string;
   screen: Screen;
-  snapshots: Partial<Record<Variant, ProjectSnapshot>>;
-  variant: Variant;
+  snapshot: ProjectSnapshot | null;
   collapsed: Record<string, boolean>;
   onToggle: (key: string) => void;
   onNavigate: (s: Screen) => void;
-  onVariant: (v: Variant) => void;
 }) {
   const t = useST();
   const [takes, setTakes] = useState<TakeEntry[] | null>(null);
   const [feedback, setFeedback] = useState<FeedbackEntry[] | null>(null);
-  const [archive, setArchive] = useState<ArchiveListItem[] | null>(null);
 
   const load = useCallback(async () => {
-    const [a, b, c] = await Promise.all([
+    const [a, b] = await Promise.all([
       api.invoke('project:cli', dir, ['takes']).catch(() => null),
       api.invoke('project:cli', dir, ['feedback', 'list']).catch(() => null),
-      api.invoke('archive:list').catch(() => [] as ArchiveListItem[]),
     ]);
     setTakes(a?.ok ? parseTakes(a.data) : []);
     setFeedback(b?.ok ? parseFeedbackList(b.data) : []);
-    setArchive(c.filter((x) => x.projectDir === dir));
   }, [dir]);
 
   useEffect(() => {
@@ -289,31 +280,20 @@ function ProjectChildren({
         'renders',
         'sidebar.renders',
         null,
-        VARIANT_ORDER.map((v) => {
-          const s = snapshots[v];
-          const exists = v === 'main' || (snapshots.main?.variants.includes(v) ?? false);
-          const rendered = !!s?.preview;
-          const stale = !!s?.stale;
-          const sel = variant === v && (screen === 'workspace' || screen === 'review');
+        (() => {
+          const rendered = !!snapshot?.preview;
+          const stale = !!snapshot?.stale;
+          const sel = screen === 'workspace' || screen === 'review';
           return (
-            <button
-              key={v}
-              type="button"
-              className={`sb-item${sel ? ' is-selected' : ''}`}
-              onClick={() => {
-                onVariant(v);
-                onNavigate('workspace');
-              }}
-              title={s?.preview?.path ?? t(`variant.${v}.title`)}
-            >
+            <button type="button" className={`sb-item${sel ? ' is-selected' : ''}`} onClick={() => onNavigate('workspace')} title={snapshot?.preview?.path ?? t('sidebar.render.video')}>
               <Film size={13} aria-hidden="true" />
-              <span className="sb-item__label">{t(`variant.${v}`)}</span>
-              <span className={`sb-item__state is-${!exists ? 'none' : stale ? 'stale' : rendered ? 'ok' : 'todo'}`}>
-                {t(!exists ? 'sidebar.render.notDerived' : stale ? 'sidebar.render.stale' : rendered ? 'sidebar.render.ready' : 'sidebar.render.none')}
+              <span className="sb-item__label">{t('sidebar.render.video')}</span>
+              <span className={`sb-item__state is-${stale ? 'stale' : rendered ? 'ok' : 'todo'}`}>
+                {t(stale ? 'sidebar.render.stale' : rendered ? 'sidebar.render.ready' : 'sidebar.render.none')}
               </span>
             </button>
           );
-        }),
+        })(),
       )}
       {section(
         'takes',
@@ -354,24 +334,6 @@ function ProjectChildren({
               <span className="sb-item__label sb-item__label--mono">{f.id}</span>
               <span className="sb-item__meta">{t('sidebar.items', { n: String(f.items) })}</span>
               <span className={`sb-item__state is-${f.status === 'open' ? 'todo' : 'ok'}`}>{t(f.status === 'open' ? 'sidebar.fb.open' : 'sidebar.fb.done')}</span>
-            </button>
-          ))
-        ),
-      )}
-      {section(
-        'archive',
-        'sidebar.archive',
-        archive?.length ?? null,
-        archive === null ? (
-          <p className="sb-project__empty">…</p>
-        ) : archive.length === 0 ? (
-          <p className="sb-project__empty">{t('sidebar.noArchive')}</p>
-        ) : (
-          archive.map((a) => (
-            <button key={a.id} type="button" className="sb-item" onClick={() => onNavigate('archive')} title={a.title}>
-              <Archive size={13} aria-hidden="true" />
-              <span className="sb-item__label">{a.title}</span>
-              {a.createdAt && <span className="sb-item__meta">{a.createdAt.slice(5, 10)}</span>}
             </button>
           ))
         ),
