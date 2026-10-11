@@ -278,7 +278,7 @@ export function renderFrame(plan: FramePlan /* from compileFrame */, o: { projec
 //   (mac) | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' (win/linux) | null — listed in `ffmpeg -encoders` AND a 1-frame probe
 //   encode succeeds; cached per ffmpeg binary in memory + ~/.solocut/cache/hwenc.json; env SOLOCUT_HWENC=off|<encoder>.
 //   Hardware chunks have their own cache keys. Concurrency default renderConcurrency({ hardware }): ≈ cores/3 chunks
-//   (max 6; hardware max 3) with x264 `-threads` = cores/chunks. Result gains `encoder`. Abort: every worker's ffmpeg
+//   (max 6; hardware max 4) with x264 `-threads` = cores/chunks. Result gains `encoder`. Abort: every worker's ffmpeg
 //   is killed, the promise rejects (AbortError) only after temp files are removed; only complete chunks are cached.
 // Fast preview audio (default; executeRenderPlan({ fastAudio: false }) = the full single-graph mix): missing stems render in
 //   parallel into <cache>/audio/stem-<key>.wav (+ .json { lufs } sidecar written after the stem; a stem without its
@@ -304,11 +304,17 @@ export function wordsFromWhisperJson(json: unknown): Word[];
   // U+FFFD tokens (split UTF-8) are re-filled from the segment text; without tokens (-oj) one word per segment
 export function buildCaptions(words: Word[], o: { fps: Rational; maxCharsPerLine: number; maxLines: number; language: 'ja'|'en';
   minGapMs?: number /* 600 */; style: string; mapTime?: (sec: number) => Frame | null; minFrames?: number; idPrefix?: string;
-  decided?: Decided }): Caption[];
+  decided?: Decided; glossary?: string[] }): Caption[];
+  // sentence end = endsSentence(prev, next, language): 。．！？!?… always; an ASCII '.' not when it closes an abbreviation
+  //   (e.g. i.e. etc. Dr. …) or is followed directly by a letter/digit (ja) / lowercase letter or digit (en) —
+  //   "CLAUDE.md", "example.com", "2.1.296" stay together (also in sentences()/findRetakes).
+  // glossary: terms (case-insensitive, longest first) are atomic — never split across captions (even at a pause) or lines.
   // groups at pauses / sentence ends, breaks only where a BudouX phrase and a word end coincide (ja), never overlaps,
   // bridges gaps < 0.25 s, min duration 0.6 s when there is room; ids cap_0001…; maxLines can be exceeded only by a single
   // word longer than a caption; position from CAPTION_STYLES[style]
-export function layoutLines(text: string, maxChars: number, language: 'ja'|'en'): string[];  // fewest lines, balanced, no phrase split
+export function layoutLines(text: string, maxChars: number, language: 'ja'|'en', glossary?: string[]): string[];  // fewest lines, balanced,
+  // no phrase split; never inside a glossary term (a term longer than a line overflows on its own line)
+export function glossaryRanges(text: string, glossary?: string[]): [number, number][]; export function endsSentence(prev: string, next: string | undefined, language: 'ja'|'en'): boolean;
 export function toAss(captions: Caption[], style: CaptionStyle, canvas: Canvas, fps: Rational): string;
   // escapes { } \ and newlines; \an + \pos from position; karaoke \k per word (when words match the lines); emphasis color/scale/box
 export function toSrt(captions: Caption[], fps: Rational): string;
@@ -365,6 +371,8 @@ export const DEFAULT_MANIFEST: ToolManifest;           // pinned URLs + sha256, 
 ## @solocut/settings
 
 ```ts
+// settings.ui.layout = { sidebar: true, center: true, terminal: true, sidebarWidth?: int 120–1200, terminalWidth?: int 200–2400 };
+// settings.onboarding.completedAt = ISO datetime (with offset) | null (default null); appearance.uiScale 0.75–2 (default 1).
 export const SettingsSchema;  export type Settings;   // docs/11 + autopilot; every field defaulted; decision.provider default 'off'
 export function settingsPath(): string;               // ~/.solocut/settings.json
 export function loadSettings(): Settings;             // defaults merged; jsonc comments allowed
@@ -643,6 +651,14 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
   `status`/`next` treat a todo `masks` step as done when the timeline already has `mask_pii_*` masks.
 - `doctor`: `agents` lists the catalog agents that are installed or `popular` (detectAgents with the CLI's PATH, which the
   app sets to the login shell's). Settings `agents.order` / prompt `agent` accept any lower-case catalog id or `custom:<name>`.
+- Errors (errors.ts): every failure is `{ ok: false, error: { code, message, details? } }` with an actionable message in
+  the project language (English-only messages get Japanese via `localize`). Library errors are translated:
+  `ffmpeg-features` (missing filter, e.g. libass → `solocut lib install ffmpeg`), `ffmpeg-encoder`, `ffmpeg-failed`,
+  `disk-full`, `media`, `not-found` (ENOENT / unreadable media), `permission`, `tool-<ToolchainError code>`,
+  `decision-<DecideError code>`, `template-invalid`, `invalid-setting`, `archive`; anything else `internal` (with
+  "SOLOCUT_DEBUG=1 and report"). `details.cause` keeps the original text, `details.detail` the ffmpeg tail (≤ 2000 chars).
+  Also: `--take` must name an existing take (`not-found`), `transcribe --model` is small | large-v3-turbo-q5 (`usage`),
+  `captions build --style` must be a known style (`usage`), `analyze` marks the analyze step done, `sfx apply` marks sfx done.
 History: `.solocut/history.jsonl` (main) / `.solocut/history.<variant>.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.

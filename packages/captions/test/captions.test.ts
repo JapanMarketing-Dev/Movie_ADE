@@ -3,7 +3,7 @@ import type { Caption } from '@solocut/core';
 import { validateTimeline } from '@solocut/core';
 import type { Word } from '../src/index.js';
 import {
-  buildCaptions, CAPTION_STYLES, charLen, DEFAULT_FILLERS, dice, findFillers, findRetakes, layoutLines, normalizeForMatch,
+  breakAtoms, buildCaptions, CAPTION_STYLES, charLen, endsSentence, glossaryRanges, sentences, DEFAULT_FILLERS, dice, findFillers, findRetakes, layoutLines, normalizeForMatch,
   phrases, toAss, toSrt, wordsFromWhisperJson,
 } from '../src/index.js';
 
@@ -214,6 +214,80 @@ function cap(p: Partial<Caption> = {}): Caption {
     decided: { by: 'rule', reason: 'x' }, ...p,
   };
 }
+
+describe('periods inside tokens and glossary terms', () => {
+  const opt = (extra: Partial<Parameters<typeof buildCaptions>[1]> = {}) => ({ fps: F30, maxCharsPerLine: 16, maxLines: 2, language: 'ja' as const, style: 'x', ...extra });
+  it('endsSentence: file names, domains, versions and abbreviations are not sentence ends', () => {
+    expect(endsSentence('CLAUDE.', 'md', 'ja')).toBe(false);
+    expect(endsSentence('CLAUDE.', 'MD', 'ja')).toBe(false);
+    expect(endsSentence('2.1.', '296', 'ja')).toBe(false);
+    expect(endsSentence('example.', 'com', 'en')).toBe(false);
+    expect(endsSentence('e.g.', 'Claude', 'en')).toBe(false);
+    expect(endsSentence('i.e.', 'the', 'en')).toBe(false);
+    expect(endsSentence('Dr.', 'Smith', 'en')).toBe(false);
+    expect(endsSentence('done.', 'Next', 'en')).toBe(true); // English: capital after a space starts a sentence
+    expect(endsSentence('done.', undefined, 'en')).toBe(true);
+    expect(endsSentence('です。', 'md', 'ja')).toBe(true); // full-width stop always ends
+    expect(endsSentence('です.', 'では', 'ja')).toBe(true);
+    expect(endsSentence('本当?', 'md', 'ja')).toBe(true);
+    expect(endsSentence('待って...', 'md', 'ja')).toBe(true);
+    expect(endsSentence('CLAUDE', 'md', 'ja')).toBe(false);
+    expect(endsSentence('', 'x', 'ja')).toBe(false);
+  });
+  it('"CLAUDE.md" stays in one caption (ja), with and without a period-word split', () => {
+    for (const toks of [['CLAUDE.', 'md', 'を', '書きます。'], ['CLAUDE', '.', 'md', 'を', '書きます。'], ['CLAUDE.md', 'を', '書きます。']]) {
+      const caps = buildCaptions(timed(toks), opt());
+      expect(caps.map((c) => c.text)).toEqual(['CLAUDE.mdを書きます。']);
+    }
+  });
+  it('versions and domains do not split; a real sentence end still does', () => {
+    const caps = buildCaptions(timed(['バージョン', '2.', '1.', '296', 'です。', 'example.', 'com', 'を', '見て。', '次', 'へ']), opt({ maxCharsPerLine: 30 }));
+    expect(caps.map((c) => c.text)).toEqual(['バージョン2.1.296です。', 'example.comを見て。', '次へ']);
+    const en = buildCaptions(timed(['Open', 'CLAUDE.', 'md', 'e.g.', 'Claude', 'reads', 'it.', 'Next', 'step']), opt({ language: 'en', maxCharsPerLine: 40, maxLines: 1 }));
+    expect(en.map((c) => c.text)).toEqual(['Open CLAUDE. md e.g. Claude reads it.', 'Next step']);
+  });
+  it('glossaryRanges: case-insensitive, longest first, no overlaps, empty terms ignored', () => {
+    expect(glossaryRanges('Claude Codeとclaude', ['Claude', 'Claude Code', ' '])).toEqual([[0, 11], [12, 18]]);
+    expect(glossaryRanges('abc', [])).toEqual([]);
+    expect(glossaryRanges('', ['x'])).toEqual([]);
+    expect(glossaryRanges('aaaa', ['aa'])).toEqual([[0, 2], [2, 4]]);
+  });
+  it('layoutLines never breaks inside a glossary term; an over-long term gets its own line', () => {
+    const text = 'これはClaude Codeの話です';
+    const plain = layoutLines(text, 8, 'ja');
+    const g = layoutLines(text, 8, 'ja', ['Claude Code']);
+    expect(g.some((l) => l.includes('Claude Code'))).toBe(true);
+    expect(g.join('').replace(/\s/g, '')).toBe(plain.join('').replace(/\s/g, ''));
+    const long = layoutLines('設定はsuper-long-config-file-name.jsonにあります', 10, 'ja', ['super-long-config-file-name.json']);
+    expect(long.some((l) => l.includes('super-long-config-file-name.json'))).toBe(true);
+    for (const l of long) if (!l.includes('super-long')) expect(charLen(l)).toBeLessThanOrEqual(10);
+    // English: a multi-word term never straddles lines
+    const en = layoutLines('we use Visual Studio Code daily', 12, 'en', ['Visual Studio Code']);
+    expect(en.filter((l) => l.includes('Visual Studio Code'))).toHaveLength(1);
+    expect(breakAtoms('Visual Studio Code', 'en', 5, ['visual studio code'])).toEqual(['Visual Studio Code']);
+    expect(breakAtoms('Visual Studio Code', 'en', 5).length).toBeGreaterThan(1);
+  });
+  it('buildCaptions keeps glossary terms in one caption across pauses, sentence marks and tight limits', () => {
+    // a long pause between "Claude" and "Code" would normally split the caption
+    const w = timed(['Claude', 'Code', 'で', '作る'], { gap: 0.02 });
+    for (const x of w.slice(1)) [x.start, x.end] = [x.start + 2, x.end + 2];
+    expect(buildCaptions(w, opt()).map((c) => c.text)).toEqual(['Claude', 'Codeで作る']);
+    const caps = buildCaptions(w, opt({ glossary: ['Claude Code'] }));
+    expect(caps[0]!.text.startsWith('Claude Code')).toBe(true);
+    // tight lines: the term is never split across captions
+    const tight = buildCaptions(timed(['今日', 'は', 'Claude', 'Code', 'と', 'CLAUDE.', 'md', 'の', '話']), opt({ maxCharsPerLine: 6, maxLines: 1, glossary: ['Claude Code', 'CLAUDE.md'] }));
+    const texts = tight.map((c) => c.text);
+    expect(texts.some((t) => t.includes('Claude Code'))).toBe(true);
+    expect(texts.some((t) => t.includes('CLAUDE.md'))).toBe(true);
+    expect(texts.join('')).toBe('今日はClaude CodeとCLAUDE.mdの話');
+    for (const c of tight) expect(c.range.end).toBeGreaterThan(c.range.start);
+  });
+  it('sentences() (retake detection) does not split at file-name periods either', () => {
+    const ss = sentences(timed(['CLAUDE.', 'md', 'を', '更新。', '次。']));
+    expect(ss).toHaveLength(2);
+    expect(ss[0]!.norm).toBe(normalizeForMatch('CLAUDE.mdを更新。'));
+  });
+});
 
 describe('toAss', () => {
   const style = CAPTION_STYLES['tiktok-bold']!;

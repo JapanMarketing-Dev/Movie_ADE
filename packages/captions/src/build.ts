@@ -1,6 +1,6 @@
 import type { Caption, Decided, Frame, Rational } from '@solocut/core';
 import { secondsToFrame } from '@solocut/core';
-import { layoutLines, phrases } from './lines.js';
+import { glossaryRanges, layoutLines, phrases } from './lines.js';
 import { CAPTION_STYLES } from './styles.js';
 import type { Word } from './whisper.js';
 
@@ -19,11 +19,27 @@ export interface BuildOptions {
   /** Id prefix (default "cap_"). Ids are `${prefix}${n}` with a 4-digit counter. */
   idPrefix?: string;
   decided?: Decided;
+  /** Terms never split across captions or lines ("Claude Code", "CLAUDE.md"); matched case-insensitively. */
+  glossary?: string[];
 }
 
-interface MWord { w: string; start: number; end: number; s: Frame; e: Frame }
+interface MWord { w: string; start: number; end: number; s: Frame; e: Frame; i: number }
 
 const SENTENCE_END = /[。．！？!?.…]$/u;
+const ABBREVIATION = /(?:^|[\s(])(?:e\.g|i\.e|etc|vs|cf|approx|ca|Mr|Mrs|Ms|Dr|St|Jr|Sr|No|Fig|Vol|Inc|Ltd|Co)\.$/i;
+
+/**
+ * Does `prev` end a sentence before `next`? Sentence punctuation does, except an ASCII period that is part of a
+ * token: followed directly by a letter/digit (file names "CLAUDE.md", domains, versions "2.1.296"; in English only a
+ * lowercase letter/digit, since words are space-separated there) or closing a known abbreviation ("e.g.").
+ */
+export function endsSentence(prev: string, next: string | undefined, language: 'ja' | 'en'): boolean {
+  if (!SENTENCE_END.test(prev)) return false;
+  if (!prev.endsWith('.') || prev.endsWith('..')) return true;
+  if (ABBREVIATION.test(prev)) return false;
+  if (next === undefined) return true;
+  return !(language === 'ja' ? /^[A-Za-z0-9]/ : /^[a-z0-9]/).test(next);
+}
 
 const LATIN_END = /[A-Za-z0-9]$/;
 const LATIN_START = /^[A-Za-z0-9]/;
@@ -88,7 +104,16 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
     if (s === null) continue;
     let e = map(w.end);
     if (e === null || e < s) e = s + Math.max(1, Math.round((w.end - w.start) * fpsN));
-    mapped.push({ w: text, start: w.start, end: w.end, s, e: Math.max(e, s + 1) });
+    mapped.push({ w: text, start: w.start, end: w.end, s, e: Math.max(e, s + 1), i: mapped.length });
+  }
+  // glued[i]: no break allowed after word i (inside a glossary term)
+  const glued: boolean[] = new Array<boolean>(mapped.length).fill(false);
+  if (o.glossary?.length) {
+    const { text, ends } = joinWithEnds(mapped, o.language);
+    const ranges = glossaryRanges(text, o.glossary);
+    ends.forEach((end, i) => {
+      if (ranges.some(([s, e]) => end > s && end < e)) glued[i] = true;
+    });
   }
 
   // 2. sentence groups
@@ -96,7 +121,7 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
   let cur: MWord[] = [];
   for (const w of mapped) {
     const prev = cur[cur.length - 1];
-    if (prev && (w.start - prev.end > gap || w.s < prev.s || SENTENCE_END.test(prev.w))) {
+    if (prev && !glued[prev.i] && (w.start - prev.end > gap || w.s < prev.s || endsSentence(prev.w, w.w, o.language))) {
       groups.push(cur);
       cur = [];
     }
@@ -105,7 +130,18 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
   if (cur.length) groups.push(cur);
 
   // 3. pack units into captions
-  const fits = (ws: MWord[]) => layoutLines(joinWords(ws, o.language), o.maxCharsPerLine, o.language).length <= o.maxLines;
+  const glossary = o.glossary ?? [];
+  const fits = (ws: MWord[]) => layoutLines(joinWords(ws, o.language), o.maxCharsPerLine, o.language, glossary).length <= o.maxLines;
+  // units never end inside a glossary term
+  const atomic = (us: MWord[][]): MWord[][] => {
+    const out: MWord[][] = [];
+    for (const u of us) {
+      const last = out[out.length - 1];
+      if (last && glued[last[last.length - 1]!.i]) last.push(...u);
+      else out.push([...u]);
+    }
+    return out;
+  };
   const chunks: MWord[][] = [];
   for (const g of groups) {
     let acc: MWord[] = [];
@@ -120,9 +156,15 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
         acc = [...u];
         return;
       }
-      for (const w of u) push([w]); // a unit too long on its own: fall back to single words
+      // a unit too long on its own: fall back to single words (glossary terms stay together)
+      const pieces = atomic(u.map((w) => [w]));
+      if (pieces.length === 1) {
+        acc = [...u];
+        return;
+      }
+      for (const piece of pieces) push(piece);
     };
-    for (const u of units(g, o.language)) push(u);
+    for (const u of atomic(units(g, o.language))) push(u);
     if (acc.length) chunks.push(acc);
   }
 
@@ -136,7 +178,7 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
       text,
       spoken: text,
       words: ws.map((w) => ({ text: w.w, start: w.s, end: w.e })),
-      lines: layoutLines(text, o.maxCharsPerLine, o.language),
+      lines: layoutLines(text, o.maxCharsPerLine, o.language, glossary),
       emphasis: [],
       style: o.style,
       position: { ...position },

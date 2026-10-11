@@ -1,8 +1,8 @@
 export type { Word } from './whisper.js';
 export { piecesToWords, wordsFromWhisperJson } from './whisper.js';
-export { breakAtoms, charLen, layoutLines, phrases } from './lines.js';
+export { breakAtoms, charLen, glossaryRanges, layoutLines, phrases } from './lines.js';
 export type { BuildOptions } from './build.js';
-export { buildCaptions } from './build.js';
+export { buildCaptions, endsSentence } from './build.js';
 export type { CaptionStyle } from './styles.js';
 export { CAPTION_STYLES } from './styles.js';
 export { toAss, toSrt } from './ass.js';

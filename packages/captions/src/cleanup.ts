@@ -1,3 +1,4 @@
+import { endsSentence } from './build.js';
 import type { Word } from './whisper.js';
 
 /** Default filler words per language (candidates; the decision model / template decides what to cut). */
@@ -79,12 +80,13 @@ export function sentences(words: Word[], pauseSec = 0.7): Sentence[] {
     out.push({ start: cur[0]!.start, end: cur[cur.length - 1]!.end, text, norm: normalizeForMatch(text) });
     cur = [];
   };
-  for (const w of words) {
+  words.forEach((w, i) => {
     const prev = cur[cur.length - 1];
     if (prev && w.start - prev.end > pauseSec) flush();
     cur.push(w);
-    if (/[。．！？!?.]$/u.test(w.w)) flush();
-  }
+    const next = words[i + 1]?.w;
+    if (endsSentence(w.w, next, /[a-z]/i.test(cur[0]!.w) ? 'en' : 'ja')) flush();
+  });
   flush();
   return out;
 }

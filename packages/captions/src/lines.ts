@@ -24,26 +24,66 @@ function hardSplit(s: string, max: number): string[] {
   return out;
 }
 
-/** Atoms that lines may break between: BudouX phrases (ja) or space-separated words (en). Over-long atoms are split. */
-export function breakAtoms(text: string, language: 'ja' | 'en', maxChars: number): string[] {
-  const raw = language === 'ja' ? phrases(text) : text.split(/(?<=\s)/).filter((w) => w !== '');
-  const atoms: string[] = [];
-  for (const a of raw) {
-    if (charLen(a.trimEnd()) > maxChars) atoms.push(...hardSplit(a, maxChars));
-    else atoms.push(a);
+/**
+ * Character ranges [start, end) of glossary terms in `text` (case-insensitive, longest term first, no overlaps).
+ * Terms are atomic: nothing may break inside them.
+ */
+export function glossaryRanges(text: string, glossary: readonly string[] = []): [number, number][] {
+  const lower = text.toLowerCase();
+  const taken: [number, number][] = [];
+  const terms = [...new Set(glossary.map((g) => g.trim()).filter((g) => g !== ''))].sort((a, b) => b.length - a.length);
+  for (const term of terms) {
+    const t = term.toLowerCase();
+    for (let at = lower.indexOf(t); at >= 0; at = lower.indexOf(t, at + 1)) {
+      const r: [number, number] = [at, at + t.length];
+      if (!taken.some(([s, e]) => r[0] < e && s < r[1])) taken.push(r);
+    }
   }
+  return taken.sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * Atoms that lines may break between: BudouX phrases (ja) or space-separated words (en). Over-long atoms are split,
+ * except across a glossary term: atoms overlapping a term are merged and kept whole (a line may overflow then).
+ */
+export function breakAtoms(text: string, language: 'ja' | 'en', maxChars: number, glossary: readonly string[] = []): string[] {
+  let raw = language === 'ja' ? phrases(text) : text.split(/(?<=\s)/).filter((w) => w !== '');
+  const ranges = glossaryRanges(text, glossary);
+  const isProtected = new Set<number>();
+  if (ranges.length) {
+    const merged: string[] = [];
+    let at = 0;
+    for (const a of raw) {
+      const inside = ranges.some(([s, e]) => at > s && at < e); // boundary before `a` falls inside a term
+      if (inside && merged.length) merged[merged.length - 1] += a;
+      else merged.push(a);
+      at += a.length;
+    }
+    raw = merged;
+    at = 0;
+    raw.forEach((a, i) => {
+      if (ranges.some(([s, e]) => s < at + a.length && at < e)) isProtected.add(i);
+      at += a.length;
+    });
+  }
+  const atoms: string[] = [];
+  raw.forEach((a, i) => {
+    if (charLen(a.trimEnd()) > maxChars && !isProtected.has(i)) atoms.push(...hardSplit(a, maxChars));
+    else atoms.push(a);
+  });
   return atoms;
 }
 
 /**
  * Break text into lines of at most `maxChars` without splitting a phrase (unless the phrase itself is longer than a
- * line). Uses the fewest lines possible, then balances their lengths.
+ * line) or a glossary term (never; a term longer than a line gets a line of its own). Uses the fewest lines
+ * possible, then balances their lengths.
  */
-export function layoutLines(text: string, maxChars: number, language: 'ja' | 'en'): string[] {
+export function layoutLines(text: string, maxChars: number, language: 'ja' | 'en', glossary: readonly string[] = []): string[] {
   if (!(maxChars >= 1)) throw new RangeError('maxChars must be >= 1');
   const t = text.trim();
   if (t === '') return [];
-  const atoms = breakAtoms(t, language, maxChars);
+  const atoms = breakAtoms(t, language, maxChars, glossary);
   const n = atoms.length;
   const len = (i: number, j: number) => charLen(atoms.slice(i, j).join('').trim());
   // Fewest lines: greedy is optimal for line count.
@@ -63,10 +103,10 @@ export function layoutLines(text: string, maxChars: number, language: 'ja' | 'en
     for (let j = 1; j <= n; j++) {
       for (let i = j - 1; i >= 0; i--) {
         const l = len(i, j);
-        if (l > maxChars) break;
+        if (l > maxChars && i < j - 1) break; // a single over-long atom (a glossary term) stands alone on its line
         const prev = cost[k - 1]![i]!;
         if (prev === INF) continue;
-        const c = prev + (maxChars - l) ** 2;
+        const c = prev + Math.max(0, maxChars - l) ** 2;
         if (c < cost[k]![j]!) {
           cost[k]![j] = c;
           back[k]![j] = i;
