@@ -108,18 +108,36 @@ export function mergeRemovals(list: Removal[], gap = 0.001): Removal[] {
 
 export interface Keep { start: number; end: number; removedBefore: Removal[] }
 
-/** Kept ranges between removals. Keeps shorter than minKeepMs are dropped (absorbed into the removal before them). */
-export function planKeeps(durationSec: number, removals: Removal[], minKeepMs: number, lang: 'ja' | 'en' = 'ja'): { keeps: Keep[]; trailing: Removal[] } {
+/**
+ * Kept ranges between removals. Keeps shorter than minKeepMs are dropped (absorbed into the removal before them) —
+ * unless a transcribed word sits in them right after a short pause (whisper squeezes the last words of a sentence
+ * into a few ms after a pause): then that pause is not cut and the fragment joins the keep before it. A short
+ * fragment after a long silence is still dropped (whisper invents words in long silences: 「ご視聴ありがとうございました」).
+ */
+export function planKeeps(durationSec: number, removals: Removal[], minKeepMs: number, lang: 'ja' | 'en' = 'ja', o: { words?: { start: number; end: number }[]; maxBridgeSec?: number } = {}): { keeps: Keep[]; trailing: Removal[] } {
   const merged = mergeRemovals(removals);
   const minKeep = minKeepMs / 1000;
   const keeps: Keep[] = [];
   let pending: Removal[] = [];
   let at = 0;
   const pushRemoval = (r: Removal) => pending.push(r);
+  /** The removals since the last keep are one short pause right after it. */
+  const bridges = () => {
+    const last = keeps.at(-1);
+    const gap = pending.length === 1 && pending[0]!.kind === 'silence' ? pending[0]! : null;
+    return !!last && !!gap && gap.start <= last.end + 1e-6 && gap.end - gap.start <= (o.maxBridgeSec ?? 1.5);
+  };
+  const hasWord = (a: number, b: number) => (o.words ?? []).some((w) => {
+    const mid = (w.start + w.end) / 2;
+    return mid >= a && mid < b;
+  });
   for (const r of merged) {
     if (r.start > at) {
       if (r.start - at >= minKeep - 1e-9) {
         keeps.push({ start: at, end: r.start, removedBefore: pending });
+        pending = [];
+      } else if (r.start - at > 0.001 && hasWord(at, r.start) && bridges()) {
+        keeps.at(-1)!.end = r.start; // keep the short pause: the sentence goes on
         pending = [];
       } else if (r.start - at > 0.001) {
         pushRemoval({ start: at, end: r.start, kind: 'silence', by: 'rule', reason: L(lang, `短すぎる断片（${r3(r.start - at)} 秒）`, `fragment too short (${r3(r.start - at)}s)`) });
@@ -130,6 +148,9 @@ export function planKeeps(durationSec: number, removals: Removal[], minKeepMs: n
   }
   if (durationSec - at >= minKeep - 1e-9) {
     keeps.push({ start: at, end: durationSec, removedBefore: pending });
+    pending = [];
+  } else if (durationSec - at > 0.001 && hasWord(at, durationSec) && bridges()) {
+    keeps.at(-1)!.end = durationSec;
     pending = [];
   } else if (durationSec - at > 0.001) {
     pushRemoval({ start: at, end: durationSec, kind: 'silence', by: 'rule', reason: L(lang, `短すぎる断片（${r3(durationSec - at)} 秒）`, `fragment too short (${r3(durationSec - at)}s)`) });

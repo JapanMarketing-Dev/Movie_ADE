@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { loadSettings } from '@solocut/settings';
 
 // <project>/publish.json: the post the agent writes and the human approves in the app (SPEC 「Publish metadata file」).
 // The app parses it with apps/desktop/src/shared/publish.ts; the CLI checks the same limits so `solocut next` can tell
@@ -161,14 +162,38 @@ export function validatePublish(raw: unknown, o: ValidateOptions = {}): { valid:
 }
 
 /** A fresh publish.json for a project (title from the timeline, private, TikTok off; the description is still to write). */
-export function defaultPublish(title: string): PublishJson {
+export function defaultPublish(title: string, privacy: PrivacyDefaults = { youtube: 'private', tiktok: 'SELF_ONLY' }): PublishJson {
   return {
     video: DEFAULT_VIDEO,
     title,
     description: '',
     tags: [],
-    youtube: { categoryId: '28', privacy: 'private', madeForKids: false, containsSyntheticMedia: false, chapters: true },
-    tiktok: { enabled: false, caption: '', privacy: 'SELF_ONLY', allowComment: false, allowDuet: false, allowStitch: false, isAigc: false },
+    youtube: { categoryId: '28', privacy: privacy.youtube, madeForKids: false, containsSyntheticMedia: false, chapters: true },
+    tiktok: { enabled: false, caption: '', privacy: privacy.tiktok, allowComment: false, allowDuet: false, allowStitch: false, isAigc: false },
+  };
+}
+
+export interface PrivacyDefaults { youtube: (typeof YT_PRIVACY)[number]; tiktok: (typeof TIKTOK_PRIVACY)[number] }
+
+/** settings publish.youtube.privacy / publish.tiktok.privacy (defaults private / SELF_ONLY; bad values fall back). */
+export function privacyDefaults(settings: { publish?: { youtube?: { privacy?: unknown }; tiktok?: { privacy?: unknown } } } = loadSettings()): PrivacyDefaults {
+  const yt = settings.publish?.youtube?.privacy;
+  const tt = settings.publish?.tiktok?.privacy;
+  return {
+    youtube: (YT_PRIVACY as readonly unknown[]).includes(yt) ? (yt as PrivacyDefaults['youtube']) : 'private',
+    tiktok: (TIKTOK_PRIVACY as readonly unknown[]).includes(tt) ? (tt as PrivacyDefaults['tiktok']) : 'SELF_ONLY',
+  };
+}
+
+/** Fill youtube.privacy / tiktok.privacy from the defaults where publish.json does not set them (never overrides). */
+export function fillPrivacy(v: PublishJson, d: PrivacyDefaults): PublishJson {
+  const yt: Record<string, unknown> = isObj(v.youtube) ? v.youtube : {};
+  const tt: Record<string, unknown> = isObj(v.tiktok) ? v.tiktok : {};
+  const unset = (x: unknown) => x === undefined || x === null || x === '';
+  return {
+    ...v,
+    youtube: { ...yt, ...(unset(yt.privacy) ? { privacy: d.youtube } : {}) },
+    tiktok: { ...tt, ...(unset(tt.privacy) ? { privacy: d.tiktok } : {}) },
   };
 }
 

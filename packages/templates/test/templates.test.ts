@@ -110,7 +110,8 @@ describe('built-in templates', () => {
 
   it('sfx rules, zoom.followClicks and captionLook validate; bad values are rejected', () => {
     const tech = loadTemplate('tech');
-    expect(tech.sfx?.rules.map((r) => r.on)).toEqual(['section', 'scene-in']);
+    expect(tech.sfx?.rules.map((r) => r.on)).toEqual(['section', 'zoom-in', 'scene-in', 'emphasis']);
+    expect(TemplateFileSchema.shape.sfx.unwrap().shape.rules.element.shape.on.options).toContain('zoom-in');
     expect(tech.zoom?.followClicks).toBe(true);
     expect(loadTemplate('talk').zoom).toBeUndefined();
     const base = { id: 'x', version: 1, name: { ja: 'x', en: 'x' }, kind: 'talk', targets: ['youtube'], canvas: { width: 1920, height: 1080, fps: 30 },
@@ -356,14 +357,26 @@ describe('nextStep', () => {
     expect(nextStep(t, st, ctx({ openItems: 0 })).step).toBe('multicam');
   });
 
-  it('autopilot proceeds past undecided rough-cut but not past sync', () => {
+  it('autopilot never waits on a needs-human step (rough-cut, sync, check, review): it stays 要確認 and the run goes on', () => {
     const t = tpl();
     const rc = nextStep(t, status(t, upTo(t, 'rough-cut'), { 'rough-cut': 'needs-human' }), ctx({ autopilot: true, openItems: 3 }));
     expect(rc.step).toBe('multicam');
-    const sync = nextStep(t, status(t, ['ingest'], { sync: 'needs-human' }), ctx({ autopilot: true }));
-    expect(sync).toMatchObject({ step: 'sync', state: 'needs-human' });
-    // meanwhile transcription can run (it does not depend on sync)
-    expect(sync.meanwhile).toBe('transcribe');
+    expect(nextStep(t, status(t, ['ingest'], { sync: 'needs-human' }), ctx({ autopilot: true })).step).toBe('analyze');
+    const rv = withReview();
+    expect(nextStep(rv, status(rv, upTo(rv, 'final'), { review: 'needs-human' }), ctx({ autopilot: true })).step).toBe('final');
+    // a human-driven run waits and says where to look; meanwhile transcription can run (it does not depend on sync)
+    const sync = nextStep(t, status(t, ['ingest'], { sync: 'needs-human' }), ctx());
+    expect(sync).toMatchObject({ step: 'sync', state: 'needs-human', meanwhile: 'transcribe' });
+    expect(sync.do).toContain('編集画面の「要確認」');
+    expect(sync.do).toContain('--autopilot');
+    expect(sync.do).not.toContain('「確認」画面');
+    expect(nextStep(t, status(t, ['ingest'], { sync: 'needs-human' }), ctx({ lang: 'en' })).do).toMatch(/Edit screen.*On autopilot/);
+  });
+
+  it('only the settings stopBefore list stops autopilot', () => {
+    const t = tpl();
+    const n = nextStep(t, status(t, upTo(t, 'final')), ctx({ autopilot: true, stopBefore: ['final'] }));
+    expect(n).toMatchObject({ step: 'final', state: 'needs-human' });
   });
 
   it('check failed → check again with preview first; 0 failures passes', () => {

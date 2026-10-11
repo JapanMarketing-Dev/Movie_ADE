@@ -381,3 +381,52 @@ export function trustWorkspace(
 }
 
 export type { TrustOutcome }
+
+// ───────────────────────── Claude Code の「権限確認を省くモード」への同意 ─────────────────────────
+
+/**
+ * Claude Code は --dangerously-skip-permissions で起動するたびに「Bypass Permissions mode を使いますか」と聞く。
+ * 一度「はい」を選ぶと settings.json に skipDangerousModePermissionPrompt: true を書くので、Solocut が起動の前に
+ * 同じ項目を書いておく（撮影のあとに自動で起動したエージェントが、人の返事を待って止まらないように）。
+ * 書くのは --dangerously-skip-permissions を付けて起動するときだけ（設定の agents.skipPermissions が入）。
+ */
+const CLAUDE_BYPASS_CONSENT_KEY = 'skipDangerousModePermissionPrompt'
+
+/** settings.json の中身に同意の印を足す。すでに true なら unchanged、オブジェクトでなければ refuse */
+export function applyClaudeBypassConsent(settings: unknown): ClaudeFolderTrustChange {
+  if (!isRecord(settings)) return { kind: 'refuse' }
+  if (settings[CLAUDE_BYPASS_CONSENT_KEY] === true) return { kind: 'unchanged' }
+  return { kind: 'changed', config: { ...settings, [CLAUDE_BYPASS_CONSENT_KEY]: true } }
+}
+
+/** 同意を書く settings.json（アカウント切り替えの CLAUDE_CONFIG_DIR、無ければ ~/.claude） */
+export function claudeSettingsFile(env: { CLAUDE_CONFIG_DIR?: string }, homeDir: string): string {
+  return join(env.CLAUDE_CONFIG_DIR?.trim() || join(homeDir, '.claude'), 'settings.json')
+}
+
+/**
+ * Claude Code の settings.json に同意の印を書く。ファイルが無ければ作る（フォルダも）。壊れた・読めないファイルは
+ * 書き換えない（そのときは Claude Code が一度聞く）。例外は投げない
+ */
+export function acceptClaudeBypassConsent(env: Record<string, string | undefined>, homeDir: string = env.HOME ?? homedir()): TrustOutcome {
+  const file = claudeSettingsFile(env, homeDir)
+  try {
+    const target = resolveFileTarget(file)
+    if (target === 'unreadable') return 'unreadable'
+    if (target === 'missing') {
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+      writeFileSync(file, `${JSON.stringify({ [CLAUDE_BYPASS_CONSENT_KEY]: true }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      return 'granted'
+    }
+    const current = readJsonObject(target)
+    if (!current) return 'unreadable'
+    const change = applyClaudeBypassConsent(current)
+    if (change.kind !== 'changed') return change.kind === 'refuse' ? 'unreadable' : 'unchanged'
+    replaceFileAtomically(target, `${JSON.stringify(change.config, null, 2)}\n`)
+    return 'granted'
+  } catch (error) {
+    // settings.json は秘密（env の API キーなど）を含みうるので種類だけ
+    reportHandled(errorKind(error), { area: 'agent-launch', op: 'accept claude bypass consent' })
+    return 'unreadable'
+  }
+}

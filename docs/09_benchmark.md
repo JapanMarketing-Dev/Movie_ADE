@@ -14,6 +14,33 @@ URL を貼る（YouTube / TikTok）
   → 「テンプレートに取り込む」でテンプレートの差分を作る → エージェントが適用する
 ```
 
+## お手本の動画を測る（2026-10-11 実装: `solocut bench analyze`）
+
+お手本は**手元の動画ファイル**で渡す。利用者が選んだファイルか、アプリ内のブラウザで再生したお手本をアプリが録画したファイル（下の「取り込み方」。YouTube / TikTok からはダウンロードしない、yt-dlp も使わない）。
+
+```sh
+solocut bench analyze <動画ファイル> [--from 秒] [--to 秒] [--url <元の URL>] [--apply [--global]]
+solocut bench apply <profile.json> [--template tech] [--global]   # 測った結果をあとからテンプレートへ
+solocut bench unapply [--template tech] [--global]                 # お手本を外す
+```
+
+- アプリの流れ: 利用者がファイルを選ぶか、アプリ内のブラウザでお手本を再生して録画する → `bench analyze <ファイル> [--from --to --url] --json` → 結果の要約を見て、利用者が「この動画」（プロジェクトの中で `bench apply`）か「すべての動画」（`--global`）を選ぶ
+- **アプリが録画したお手本は、他から見えない一時フォルダに書き、解析が終わったら（成功しても失敗しても）すぐ消す。アプリの終了時にも残っていれば消す**。yt-dlp は使わず、YouTube / TikTok から動画ファイルをダウンロードもしない
+- `--json` のとき、`bench analyze` は stderr に進み具合を 1 行ずつ出す: `{"progress":{"task":"bench","fraction":0.35,"label":"音量を測っています","stage":"loudness"}}`（stage は cuts → loudness → sfx → captions → done）。最後に stdout に結果の JSON（`path`、`profile`、`patch`、`applied`、`warnings`）
+- `bench apply` は何を入れたかを `<templates>/<id>/.benchmark.json` に残す。もう一度 apply すると前のお手本を外してから入れる（重ならない）。`bench unapply` はその分だけを上書きから取り除く（人が手で足した設定は残す。何も残らなければ上書きのフォルダごと消す）。適用されていなければ `not-applied` で終了コード 1
+
+- ffmpeg / ffprobe だけで、1 秒ごとの数値（core の BenchmarkSample）を作る（@solocut/media `analyzeReference`）
+  - カット: `select='gt(scene,0.3)',showinfo` のシーンの切り替わり → 1 ショットの平均の長さ、ジャンプカットの頻度
+  - 音量: `ebur128` の瞬時ラウドネス（1 秒ごとの中央値）
+  - 効果音: 10 ms ごとのエネルギーが直前 150 ms の中央値より 15 dB 以上跳ねた所（ポン・クリック・ドンのような立ち上がりの速い音。話し声の音節はゆっくり立ち上がる）。推定であり分類はしない
+  - 字幕: 1 秒に 1 枚、160×90 のグレースケールで、画面の下 45%（と上 20%）に「とても明るい画素ととても暗い画素が隣り合う行」（白文字に暗い縁）が続く帯を探す → 位置・高さ・行数。帯の中身が変わった時を字幕の切り替わりとする。OCR（tesseract）は使わないので 1 行の文字数は分からず、テンプレートの値を保つ
+- 結果は `~/.solocut/benchmarks/bench_<日時>.json`（プロファイル）と `.samples.json`（1 秒ごとの数値）。映像・音声そのものは保存しない
+- `--apply`（または `bench apply`）で、プロファイルをテンプレートの上書き（`extends` した template.yaml）として書く
+  - 既定はプロジェクトの中なら**この動画だけ**（`<project>/templates/tech/`）。`--global` で**これからのすべての動画**（`~/.solocut/templates/tech/`）。プロジェクトの外では `--global` と同じ
+  - CLI はテンプレートを読むたびに上書きを重ねるので、「動画を完成させて」（finish）の流れは何もしなくてもお手本に合わせた設定で進む（字幕のスタイル・位置・行数・強調、効果音の規則と 1 分あたりの上限、BGM の音量、ジャンプカットのズーム）
+  - 字幕の見た目（文字の大きさ・色・縁）は `captionLook` に入り、`solocut captions build` が字幕のスタイルをそれに寄せる（文字の大きさは画面の高さの 4.5〜9% に収める）
+  - 1 本の 16:9 の動画なので、字幕のスタイルは `tech-bold` か `youtube-clean` から選ぶ（縦型のスタイルにはしない）。効果音はお手本が多くても 1 分に 8 回まで
+
 ## 取り込み方（ダウンロードしない）
 
 - **動画ファイルはダウンロードしない**（yt-dlp なども使わない）。YouTube と TikTok の利用規約は、許可されていない方法でのダウンロードを禁止しているため

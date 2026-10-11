@@ -588,7 +588,7 @@ export async function cmdPropose(ctx: Ctx, args: string[]): Promise<void> {
     rules: { silence: tpl.cut.silence, retakes: tpl.cut.retakes, ngMarkers: tpl.cut.ngMarkers, minKeepMs: tpl.cut.minKeepMs },
   });
   const judged = await judge(ctx, p, tpl, cands, words, warnings);
-  const { keeps, trailing } = planKeeps(durationSec, judged.cut, tpl.cut.minKeepMs, p.file.language);
+  const { keeps, trailing } = planKeeps(durationSec, judged.cut, tpl.cut.minKeepMs, p.file.language, { words });
   if (!keeps.length) throw new CliError('nothing-left', t(ctx, 'すべて無音と判定されました。音声の素材とテンプレートの silence.noiseDb を確認してください', 'everything was cut as silence; check the voice source and silence.noiseDb'));
   const video = chooseVideo(tl, tpl, take);
   const toFrame = (sec: number) => secondsToFrame(sec, rate);
@@ -699,7 +699,8 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
   // an older project's vertical variant keeps the vertical style, sized by the style itself
   const style = o.style ?? (p.variant ? 'tiktok-bold' : tpl.captions.style);
   if (o.style && !cap.CAPTION_STYLES[o.style]) throw new CliError('usage', t(ctx, `字幕のスタイルがありません: ${o.style}（${Object.keys(cap.CAPTION_STYLES).join(', ')}）`, `unknown caption style: ${o.style} (${Object.keys(cap.CAPTION_STYLES).join(', ')})`));
-  const styleDef = cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!;
+  // a benchmark (solocut bench apply) may have measured the look of a reference: size and colors follow it
+  const styleDef = cap.styleWithLook(cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!, p.variant ? undefined : tpl.captionLook);
   const maxCharsPerLine = p.variant ? styleDef.maxCharsPerLine[p.file.language] : tpl.captions.maxCharsPerLine;
   const maxLines = p.variant ? styleDef.maxLines : tpl.captions.maxLines;
   const position = p.variant ? styleDef.position : tpl.captions.position;
@@ -717,9 +718,15 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
   const terms = glossaryOf(p);
   // glossary terms (and the misheard spans that will be respelled as them) are never split across captions or lines
   const glossary = captionGlossary(words.map((w) => w.w), terms, p.file.language);
+  const F = tl.canvas.fps.num / tl.canvas.fps.den;
+  const autoEmphasis = !p.variant && tpl.captions.emphasis === 'auto';
   const built = cap.buildCaptions(words, {
-    fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style, glossary,
+    fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style, glossary, endFrame: durationFrames(tl),
     mapTime: (sec: number) => takeFrameToTimeline(tl, tr.take, secondsToFrame(sec, rate)),
+    ...(tpl.captions.minDurationMs ? { minFrames: Math.round((tpl.captions.minDurationMs / 1000) * F) } : {}),
+    ...(tpl.captions.maxDurationMs ? { maxDurationMs: tpl.captions.maxDurationMs } : {}),
+    // key terms in the accent color without a decision model (template captions.emphasis: auto)
+    ...(autoEmphasis ? { emphasis: { auto: true } } : {}),
   });
   // glossary pass: near-misses of the project's terms are respelled; the original stays in `spoken`
   const captions: Caption[] = built.map((c) => {
@@ -727,6 +734,7 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
     if (!fixed.corrections.length) return { ...c, position };
     return {
       ...c, position, text: fixed.text, lines: cap.layoutLines(fixed.text, maxCharsPerLine, p.file.language, glossary),
+      ...(autoEmphasis ? { emphasis: cap.pickEmphasis(fixed.text, { language: p.file.language, glossary: [...glossary, ...terms.map((x) => x.term)] }).map((word) => ({ word, style: 'color' as const })) } : {}),
       corrections: [...(c.corrections ?? []), ...fixed.corrections.map((x) => ({
         from: x.from, to: x.to, decided: { by: 'rule' as const, reason: `glossary: "${x.from}" → "${x.to}"`, confidence: x.score, ruleRef: 'meta.glossary' },
       }))],

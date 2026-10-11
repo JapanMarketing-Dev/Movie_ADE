@@ -1,14 +1,16 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import {
   applyTracks, benchmarkProfile, cameraMaterial, centerPerson, personCamera, suggestCameras, checkCameraSwitches, fpsValue, frameToTimecode, overlaysFromInputLogs,
   profileToTemplatePatch, sfxFromRules, type BenchmarkSample, type LicenseRef, type Mask, type Op, type SfxLibraryItem,
   type StyleProfile, type Timeline,
 } from '@solocut/core';
+import { loadTemplate } from '@solocut/templates';
 import { solocutHome } from '@solocut/toolchain';
 import { loadAnalysis } from '../analysis.js';
 import { piiMaskOps, type PiiFile } from '../pii.js';
-import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
+import { CliError, emit, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
+import { DEFAULT_TEMPLATE } from './basic.js';
 import { applyEdit, openProject, projectTemplate, readJsonFile, readTimeline, setStep, writeAtomic, writeTemplateOverride, type Project } from '../project.js';
 import { media, readTranscript } from './media.js';
 
@@ -45,10 +47,13 @@ function walk(dir: string, depth = 3): string[] {
 
 const safeId = (s: string) => s.normalize('NFKC').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^[^A-Za-z0-9]+/, '').slice(0, 60) || 'x';
 
+/** ~/.solocut/sfx/builtin: the synthesized, license-free set (@solocut/media ensureBuiltinSfx). */
+export const builtinSfxDir = () => join(solocutHome(), 'sfx', 'builtin');
+
 /**
  * Sound effects the rules can pick from: sfx already in the timeline (asset sources whose id / assetId looks like
  * `sfx_<category>_…`), the project's assets/sfx/<category>/ files and the downloaded library cache
- * (~/.solocut/library/cache/sfx/<category>/). A `<file>.json` sidecar (docs/16) gives id, category, duration and
+ * (~/.solocut/library/cache/sfx/<category>/), and the built-in set (~/.solocut/sfx/builtin/<category>/). A `<file>.json` sidecar (docs/16) gives id, category, duration and
  * license. Files outside the project are copied into assets/library/ when used.
  */
 async function sfxLibrary(p: Project, tl: Timeline, warnings: string[]): Promise<{ items: SfxLibraryItem[]; copies: Map<string, string> }> {
@@ -74,9 +79,17 @@ async function sfxLibrary(p: Project, tl: Timeline, warnings: string[]): Promise
     items.push({ id, kind: cat.toLowerCase(), durationMs: d });
     seen.add(resolve(f));
   }
+  // the built-in set (synthesized with ffmpeg on first use, CC0) means there is always something to place
+  const builtin = builtinSfxDir();
+  try {
+    await m.ensureBuiltinSfx(builtin);
+  } catch (e) {
+    warnings.push(`built-in sfx: ${(e as Error).message}`);
+  }
   const roots: { dir: string; inProject: boolean }[] = [
     { dir: join(p.dir, 'assets', 'sfx'), inProject: true },
     { dir: join(solocutHome(), 'library', 'cache', 'sfx'), inProject: false },
+    { dir: builtin, inProject: false },
   ];
   for (const root of roots) {
     for (const f of walk(root.dir)) {
@@ -332,38 +345,186 @@ async function cmdBenchProfile(ctx: Ctx, args: string[]): Promise<void> {
   const patch = profileToTemplatePatch(profile);
   emit(ctx, { path: out, profile, patch }, () => [
     t(ctx, `参考動画の傾向を保存しました: ${out}`, `saved the style profile: ${out}`),
-    t(ctx, `テンプレートに入れるには: solocut bench apply ${out} --template <id>`, `to use it: solocut bench apply ${out} --template <id>`),
+    t(ctx, `テンプレートに入れるには: solocut bench apply ${out}`, `to use it: solocut bench apply ${out}`),
   ]);
 }
 
-async function cmdBenchApply(ctx: Ctx, args: string[]): Promise<void> {
-  const { values, positionals } = opts(args, { template: { type: 'string' }, 'dry-run': { type: 'boolean' } }, { min: 1, max: 1, usage: 'solocut bench apply <profile.json> --template <id> [--dry-run]' });
-  const file = resolve(ctx.io.cwd, positionals[0]!);
-  const profile = readJsonFile<StyleProfile>(file);
-  if (!profile || typeof profile !== 'object' || typeof profile.durationSec !== 'number' || !profile.captions || typeof profile.captions !== 'object') {
-    throw new CliError('invalid-profile', `${positionals[0]} is not a style profile (solocut bench profile writes one)`);
-  }
+/**
+ * Merge a profile into a template override. Scope: inside a project its own template (project override, this video
+ * only); `global` (or outside a project) the user override in ~/.solocut/templates (every new video). The default
+ * template is `tech`. The CLI loads overrides by itself, so the finish flow uses the result without anything else.
+ */
+function applyProfile(ctx: Ctx, profile: StyleProfile, note: string, o: { template?: string; global?: boolean; dryRun?: boolean }) {
   let p: Project | null = null;
   try {
     p = openProject(ctx);
   } catch {
     p = null;
   }
-  const id = values.template ?? p?.file.template.id;
-  if (!id) throw new CliError('usage', '--template <id> is required outside a project');
+  const id = o.template ?? p?.file.template.id ?? DEFAULT_TEMPLATE;
   if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new CliError('usage', `invalid template id: ${id}`);
   const patch = profileToTemplatePatch(profile) as Record<string, unknown>;
-  // the project's own template → a project override; any other id → a user override in ~/.solocut/templates
-  const inProject = !!p && p.file.template.id === id;
+  const inProject = !o.global && !!p && p.file.template.id === id;
+  const scope = inProject ? 'project' as const : 'user' as const;
+  if (o.dryRun) return { template: id, scope, patch, dryRun: true as const };
   const root = inProject ? join(p!.dir, 'templates') : join(solocutHome(), 'templates');
-  if (values['dry-run']) {
-    emit(ctx, { template: id, scope: inProject ? 'project' : 'user', patch, dryRun: true }, () => JSON.stringify(patch, null, 2));
-    return;
+  // a profile applied before is taken out first, so profiles never pile up
+  const prev = readBenchRecord(root, id);
+  if (prev) removeBenchPatch(root, id, prev.patch, inProject ? { project: p!.dir } : {});
+  const r = writeTemplateOverride(root, id, patch, note, inProject ? { project: p!.dir } : {});
+  writeAtomic(benchRecordPath(root, id), JSON.stringify({ at: new Date().toISOString(), note, ...(profile.source ? { source: profile.source } : {}), patch }, null, 2) + '\n');
+  return { template: id, scope, patch, dryRun: false as const, file: r.file, captions: { style: r.template.captions.style, maxCharsPerLine: r.template.captions.maxCharsPerLine, maxLines: r.template.captions.maxLines } };
+}
+
+/** <root>/<id>/.benchmark.json: what `bench apply` merged into the override (for `bench unapply`). */
+const benchRecordPath = (root: string, id: string) => join(root, id, '.benchmark.json');
+
+function readBenchRecord(root: string, id: string): { patch: Record<string, unknown>; source?: unknown } | null {
+  const f = benchRecordPath(root, id);
+  if (!existsSync(f)) return null;
+  try {
+    const v = JSON.parse(readFileSync(f, 'utf8')) as { patch?: unknown };
+    return v && typeof v.patch === 'object' && v.patch && !Array.isArray(v.patch) ? (v as { patch: Record<string, unknown> }) : null;
+  } catch {
+    return null;
   }
-  const r = writeTemplateOverride(root, id, patch, `solocut bench apply ${basename(file)}`, inProject ? { project: p!.dir } : {});
-  emit(ctx, { template: id, scope: inProject ? 'project' : 'user', file: r.file, patch, dryRun: false }, () => [
-    t(ctx, `テンプレート ${id} に参考動画の傾向を入れました: ${r.file}`, `merged the style profile into template ${id}: ${r.file}`),
-    `  captions: ${r.template.captions.style}, ${r.template.captions.maxCharsPerLine} × ${r.template.captions.maxLines}`,
+}
+
+const isPlainObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Remove a patch from an override (pure): every leaf the patch set is deleted when the override still holds that same
+ * value (a later hand edit of the same key is kept); emptied objects go too.
+ */
+export function subtractPatch(current: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...current };
+  for (const [k, v] of Object.entries(patch)) {
+    if (!(k in out)) continue;
+    if (isPlainObj(v) && isPlainObj(out[k])) {
+      const sub = subtractPatch(out[k] as Record<string, unknown>, v);
+      if (Object.keys(sub).length) out[k] = sub;
+      else delete out[k];
+    } else if (JSON.stringify(out[k]) === JSON.stringify(v)) delete out[k];
+  }
+  return out;
+}
+
+/** Take a benchmark patch out of <root>/<id>/template.yaml; the folder goes when nothing of our own is left. */
+function removeBenchPatch(root: string, id: string, patch: Record<string, unknown>, o: { project?: string }): { removedFolder: boolean } {
+  const file = join(root, id, 'template.yaml');
+  rmSync(benchRecordPath(root, id), { force: true });
+  if (!existsSync(file)) return { removedFolder: false };
+  let current: Record<string, unknown>;
+  try {
+    current = JSON.parse(readFileSync(file, 'utf8').replace(/^#.*\n/gm, '')) as Record<string, unknown>;
+  } catch {
+    throw new CliError('template-override', `${file} is not machine-written; remove the benchmark settings by hand`);
+  }
+  const left = subtractPatch(current, patch);
+  const own = Object.keys(left).filter((k) => k !== 'id' && k !== 'extends');
+  if (!own.length) {
+    rmSync(join(root, id), { recursive: true, force: true });
+    return { removedFolder: true };
+  }
+  writeAtomic(file, `# template override (bench unapply). JSON is valid YAML.\n${JSON.stringify(left, null, 2)}\n`);
+  // the rest must still load
+  loadTemplate(id, { extraDirs: o.project ? [join(o.project, 'templates')] : [] });
+  return { removedFolder: false };
+}
+
+/** `bench unapply [--template id] [--global]`: remove what `bench apply` put into the override of that scope. */
+async function cmdBenchUnapply(ctx: Ctx, args: string[]): Promise<void> {
+  const { values } = opts(args, { template: { type: 'string' }, global: { type: 'boolean' } }, { max: 0, usage: 'solocut bench unapply [--template tech] [--global]' });
+  let p: Project | null = null;
+  try {
+    p = openProject(ctx);
+  } catch {
+    p = null;
+  }
+  const id = values.template ?? p?.file.template.id ?? DEFAULT_TEMPLATE;
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) throw new CliError('usage', `invalid template id: ${id}`);
+  const inProject = !values.global && !!p && p.file.template.id === id;
+  if (!values.global && !inProject && p) throw new CliError('usage', t(ctx, `このプロジェクトのテンプレートは ${p.file.template.id} です。すべての動画から外すなら --global`, `this project uses ${p.file.template.id}; use --global for every video`));
+  const root = inProject ? join(p!.dir, 'templates') : join(solocutHome(), 'templates');
+  const rec = readBenchRecord(root, id);
+  if (!rec) throw new CliError('not-applied', t(ctx, `お手本は適用されていません（${inProject ? 'この動画' : 'すべての動画'}・${id}）`, `no reference is applied (${inProject ? 'this video' : 'every video'}, ${id})`));
+  const r = removeBenchPatch(root, id, rec.patch, inProject ? { project: p!.dir } : {});
+  emit(ctx, { template: id, scope: inProject ? 'project' : 'user', removed: true, removedFolder: r.removedFolder }, () =>
+    t(ctx, `テンプレート ${id} からお手本の設定を外しました（${inProject ? 'この動画' : 'すべての動画'}）`, `removed the reference settings from template ${id} (${inProject ? 'this video' : 'every video'})`));
+}
+
+function appliedLines(ctx: Ctx, r: ReturnType<typeof applyProfile>): string[] {
+  if (r.dryRun) return [JSON.stringify(r.patch, null, 2)];
+  return [
+    t(ctx, `テンプレート ${r.template} に参考動画の傾向を入れました（${r.scope === 'project' ? 'この動画' : 'これからのすべての動画'}）: ${r.file}`,
+      `merged the style profile into template ${r.template} (${r.scope === 'project' ? 'this video' : 'every new video'}): ${r.file}`),
+    `  captions: ${r.captions!.style}, ${r.captions!.maxCharsPerLine} × ${r.captions!.maxLines}`,
+  ];
+}
+
+function readProfile(file: string, label: string): StyleProfile {
+  const profile = readJsonFile<StyleProfile>(file);
+  if (!profile || typeof profile !== 'object' || typeof profile.durationSec !== 'number' || !profile.captions || typeof profile.captions !== 'object') {
+    throw new CliError('invalid-profile', `${label} is not a style profile (solocut bench profile / bench analyze write one)`);
+  }
+  return profile;
+}
+
+async function cmdBenchApply(ctx: Ctx, args: string[]): Promise<void> {
+  const { values, positionals } = opts(args, { template: { type: 'string' }, global: { type: 'boolean' }, 'dry-run': { type: 'boolean' } }, { min: 1, max: 1, usage: 'solocut bench apply <profile.json> [--global] [--template tech] [--dry-run]' });
+  const file = resolve(ctx.io.cwd, positionals[0]!);
+  const profile = readProfile(file, positionals[0]!);
+  const r = applyProfile(ctx, profile, `solocut bench apply ${basename(file)}`, { ...(values.template ? { template: values.template } : {}), global: !!values.global, dryRun: !!values['dry-run'] });
+  emit(ctx, r, () => appliedLines(ctx, r));
+}
+
+/** `bench analyze <video>`: measure a local reference video with ffmpeg → samples + profile (+ apply). */
+async function cmdBenchAnalyze(ctx: Ctx, args: string[]): Promise<void> {
+  const { values, positionals } = opts(args, {
+    from: { type: 'string' }, to: { type: 'string' }, url: { type: 'string' }, platform: { type: 'string' }, out: { type: 'string' },
+    apply: { type: 'boolean' }, global: { type: 'boolean' }, template: { type: 'string' },
+  }, { min: 1, max: 1, usage: 'solocut bench analyze <video file> [--from s] [--to s] [--url <source url>] [--apply [--global]]' });
+  const num = (v: string | undefined, name: string) => {
+    if (v === undefined) return undefined;
+    const x = Number(v);
+    if (!Number.isFinite(x) || x < 0) throw new CliError('usage', `--${name} must be seconds ≥ 0`);
+    return x;
+  };
+  const from = num(values.from, 'from');
+  const to = num(values.to, 'to');
+  if (from !== undefined && to !== undefined && to - from < 1) throw new CliError('usage', t(ctx, '--to は --from より 1 秒以上あとにしてください', '--to must be at least 1 s after --from'));
+  if (values.url && !/^https?:\/\/\S+$/.test(values.url)) throw new CliError('usage', `invalid --url: ${values.url}`);
+  if (values.global && !values.apply) throw new CliError('usage', '--global goes with --apply');
+  const video = resolve(ctx.io.cwd, positionals[0]!);
+  if (!existsSync(video) || !statSync(video).isFile()) throw new CliError('not-found', t(ctx, `動画がありません: ${positionals[0]}`, `video not found: ${positionals[0]}`));
+  const m = await media();
+  let res: Awaited<ReturnType<typeof m.analyzeReference>>;
+  try {
+    const labels = { cuts: t(ctx, 'カットを測っています', 'measuring cuts'), loudness: t(ctx, '音量を測っています', 'measuring loudness'), sfx: t(ctx, '効果音を探しています', 'finding sound effects'), captions: t(ctx, '字幕を探しています', 'finding captions'), done: t(ctx, '完了', 'done') };
+    // --json: {"progress":{"task":"bench","fraction":…,"label":…,"stage":…}} lines on stderr (ctx.progress)
+    res = await m.analyzeReference(video, {
+      ...(from !== undefined ? { fromSec: from } : {}), ...(to !== undefined ? { toSec: to } : {}),
+      onProgress: (f, stage) => progress(ctx, 'bench', f, labels[stage], { stage }),
+    });
+  } catch (e) {
+    throw new CliError('analyze-failed', (e as Error).message);
+  } finally {
+    progressDone(ctx, 'bench');
+  }
+  const source = { ...(values.url ? { url: values.url } : {}), ...(values.platform ? { platform: values.platform } : {}), analyzed: new Date().toISOString() };
+  const profile = benchmarkProfile(res.samples, { source });
+  const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
+  const out = values.out ? resolve(ctx.io.cwd, values.out) : join(solocutHome(), 'benchmarks', `bench_${now}.json`);
+  writeAtomic(out, JSON.stringify(profile, null, 2) + '\n');
+  writeAtomic(out.replace(/\.json$/i, '') + '.samples.json', JSON.stringify({ source, samples: res.samples }, null, 2) + '\n');
+  const applied = values.apply
+    ? applyProfile(ctx, profile, `solocut bench analyze ${basename(video)}`, { ...(values.template ? { template: values.template } : {}), global: !!values.global })
+    : null;
+  emit(ctx, { path: out, profile, patch: profileToTemplatePatch(profile), applied, warnings: res.warnings }, () => [
+    t(ctx, `お手本の傾向を測りました（${Math.round(res.durationSec)} 秒）: ${out}`, `measured the reference (${Math.round(res.durationSec)} s): ${out}`),
+    t(ctx, `  1ショット ${profile.cuts.avgShotSec} 秒・効果音 ${profile.sfx.perMin} 回/分・字幕 ${profile.captions.present ? 'あり' : 'なし'}`, `  shot ${profile.cuts.avgShotSec} s · sfx ${profile.sfx.perMin}/min · captions ${profile.captions.present ? 'yes' : 'no'}`),
+    ...(applied ? appliedLines(ctx, applied) : [t(ctx, `テンプレートに入れるには: solocut bench apply ${out}`, `to use it: solocut bench apply ${out}`)]),
+    ...res.warnings.map((w) => `! ${w}`),
   ]);
 }
 
@@ -371,6 +532,8 @@ export async function cmdBench(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   if (sub === 'profile') return cmdBenchProfile(ctx, rest);
   if (sub === 'apply') return cmdBenchApply(ctx, rest);
-  throw new CliError('usage', 'usage: solocut bench profile <samples.json> | solocut bench apply <profile.json> --template <id>');
+  if (sub === 'analyze') return cmdBenchAnalyze(ctx, rest);
+  if (sub === 'unapply') return cmdBenchUnapply(ctx, rest);
+  throw new CliError('usage', 'usage: solocut bench analyze <video> [--apply [--global]] | bench profile <samples.json> | bench apply <profile.json> [--global] | bench unapply [--global]');
 }
 

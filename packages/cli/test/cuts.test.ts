@@ -135,3 +135,32 @@ describe('tl query parsing', () => {
     expect(() => parseQuery('a b c')).toThrow();
   });
 });
+
+describe('planKeeps keeps short fragments that hold words (regression: the real take lost 「定を行う。」)', () => {
+  const sil = (start: number, end: number): Removal => ({ start, end, kind: 'silence', by: 'rule', reason: 's' });
+  // speech 8.8–9.47, a 0.63 s pause, the last words squeezed into 9.95–9.99, then silence to the end
+  const removals = [sil(0, 8.8), sil(9.474, 9.8), sil(10.14, 40)];
+  const words = [{ start: 8.92, end: 9.32 }, { start: 9.95, end: 9.99 }];
+
+  it('without words the 0.34 s fragment is dropped (as before)', () => {
+    const { keeps } = planKeeps(40, removals, 400);
+    expect(keeps.map((k) => [k.start, k.end])).toEqual([[8.8, 9.474]]);
+  });
+
+  it('with words the pause before it is not cut: one keep up to the end of the fragment', () => {
+    const { keeps } = planKeeps(40, removals, 400, 'ja', { words });
+    expect(keeps.map((k) => [k.start, k.end])).toEqual([[8.8, 10.14]]);
+  });
+
+  it('after a long silence a short fragment is still dropped (whisper invents words there: 「ご視聴ありがとうございました」)', () => {
+    const { keeps } = planKeeps(40, [sil(0, 8.8), sil(9.474, 35.87), sil(36.2, 40)], 400, 'ja', { words: [{ start: 36.02, end: 36.05 }], maxBridgeSec: 1.5 });
+    expect(keeps.map((k) => [k.start, k.end])).toEqual([[8.8, 9.474]]);
+  });
+
+  it('a fragment without a word in it is still dropped; a short tail after a short pause joins the last keep', () => {
+    expect(planKeeps(40, removals, 400, 'ja', { words: [{ start: 9.0, end: 9.1 }] }).keeps).toHaveLength(1);
+    const tail = planKeeps(10, [sil(0, 5), sil(9.3, 9.8)], 400, 'ja', { words: [{ start: 9.85, end: 9.95 }] });
+    expect(tail.keeps.map((k) => [k.start, k.end])).toEqual([[5, 10]]);
+    expect(tail.trailing).toEqual([]);
+  });
+});

@@ -62,6 +62,8 @@ export interface PublishSpec {
     enabled: boolean;
     categoryId: string;
     privacy: YtPrivacy;
+    /** publish.json has no (valid) youtube.privacy: the settings default was used */
+    privacyDefaulted: boolean;
     publishAt?: string; // ISO, normalized
     madeForKids: boolean;
     containsSyntheticMedia: boolean;
@@ -72,6 +74,8 @@ export interface PublishSpec {
     enabled: boolean;
     caption: string;
     privacy: TikTokPrivacy;
+    /** publish.json has no (valid) tiktok.privacy: the settings default was used */
+    privacyDefaulted: boolean;
     allowComment: boolean;
     allowDuet: boolean;
     allowStitch: boolean;
@@ -87,6 +91,24 @@ export interface PublishIssue {
   code: string;
   /** extra detail (a limit, the bad value) */
   detail?: string;
+}
+
+/** Settings `publish.youtube.privacy` / `publish.tiktok.privacy`: used when publish.json does not say. */
+export interface PublishDefaults {
+  youtubePrivacy: YtPrivacy;
+  tiktokPrivacy: TikTokPrivacy;
+}
+export const BUILTIN_DEFAULTS: PublishDefaults = { youtubePrivacy: 'private', tiktokPrivacy: 'SELF_ONLY' };
+
+/** The defaults from a settings object (~/.solocut/settings.json); invalid values fall back to the safe ones. */
+export function publishDefaultsFrom(settings: unknown): PublishDefaults {
+  const pub = isObj(settings) && isObj(settings.publish) ? settings.publish : {};
+  const yt = isObj(pub.youtube) ? pub.youtube.privacy : undefined;
+  const tt = isObj(pub.tiktok) ? pub.tiktok.privacy : undefined;
+  return {
+    youtubePrivacy: typeof yt === 'string' && (YT_PRIVACY as readonly string[]).includes(yt) ? (yt as YtPrivacy) : BUILTIN_DEFAULTS.youtubePrivacy,
+    tiktokPrivacy: typeof tt === 'string' && (TIKTOK_PRIVACY as readonly string[]).includes(tt) ? (tt as TikTokPrivacy) : BUILTIN_DEFAULTS.tiktokPrivacy,
+  };
 }
 
 export interface ParsedPublish {
@@ -120,7 +142,7 @@ const KNOWN_TT = new Set(['enabled', 'caption', 'privacy', 'allowComment', 'allo
  * Reads publish.json (text or an already parsed value). Never throws: unusable values fall back to safe defaults
  * (private, not for kids, TikTok off) with a warning; values a platform would reject are errors.
  */
-export function parsePublishJson(input: unknown, now = new Date()): ParsedPublish {
+export function parsePublishJson(input: unknown, now = new Date(), defaults: PublishDefaults = BUILTIN_DEFAULTS): ParsedPublish {
   const issues: PublishIssue[] = [];
   const err = (field: string, code: string, detail?: string) => issues.push({ level: 'error', field, code, ...(detail !== undefined ? { detail } : {}) });
   const warn = (field: string, code: string, detail?: string) => issues.push({ level: 'warning', field, code, ...(detail !== undefined ? { detail } : {}) });
@@ -195,11 +217,14 @@ export function parsePublishJson(input: unknown, now = new Date()): ParsedPublis
     warn('youtube.categoryId', 'invalid', categoryId);
     categoryId = '28';
   }
-  let privacy: YtPrivacy = 'private';
-  if (yt.privacy === undefined) {
-    if (ytEnabled) warn('youtube.privacy', 'default', 'private');
-  } else if (typeof yt.privacy === 'string' && (YT_PRIVACY as readonly string[]).includes(yt.privacy.toLowerCase())) privacy = yt.privacy.toLowerCase() as YtPrivacy;
-  else warn('youtube.privacy', 'invalid', String(yt.privacy));
+  let privacy: YtPrivacy = defaults.youtubePrivacy;
+  let privacyDefaulted = true;
+  if (yt.privacy === undefined || yt.privacy === null) {
+    if (ytEnabled) warn('youtube.privacy', 'default', privacy);
+  } else if (typeof yt.privacy === 'string' && (YT_PRIVACY as readonly string[]).includes(yt.privacy.toLowerCase())) {
+    privacy = yt.privacy.toLowerCase() as YtPrivacy;
+    privacyDefaulted = false;
+  } else warn('youtube.privacy', 'invalid', String(yt.privacy));
   let publishAt: string | undefined;
   if (yt.publishAt !== undefined && yt.publishAt !== null && yt.publishAt !== '') {
     const t = typeof yt.publishAt === 'string' ? Date.parse(yt.publishAt) : NaN;
@@ -232,10 +257,13 @@ export function parsePublishJson(input: unknown, now = new Date()): ParsedPublis
     caption = [title, tags.map((t) => `#${t.replace(/\s+/g, '')}`).join(' ')].filter(Boolean).join('\n');
     warn('tiktok.caption', 'default');
   }
-  let ttPrivacy: TikTokPrivacy = 'SELF_ONLY';
-  if (tt.privacy !== undefined) {
-    if (typeof tt.privacy === 'string' && (TIKTOK_PRIVACY as readonly string[]).includes(tt.privacy.toUpperCase())) ttPrivacy = tt.privacy.toUpperCase() as TikTokPrivacy;
-    else warn('tiktok.privacy', 'invalid', String(tt.privacy));
+  let ttPrivacy: TikTokPrivacy = defaults.tiktokPrivacy;
+  let ttDefaulted = true;
+  if (tt.privacy !== undefined && tt.privacy !== null) {
+    if (typeof tt.privacy === 'string' && (TIKTOK_PRIVACY as readonly string[]).includes(tt.privacy.toUpperCase())) {
+      ttPrivacy = tt.privacy.toUpperCase() as TikTokPrivacy;
+      ttDefaulted = false;
+    } else warn('tiktok.privacy', 'invalid', String(tt.privacy));
   }
   if (ttEnabled && caption.length > TIKTOK_CAPTION_MAX) err('tiktok.caption', 'too-long', `${caption.length}/${TIKTOK_CAPTION_MAX}`);
   if (!ytEnabled && !ttEnabled) warn('$', 'no-target');
@@ -250,6 +278,7 @@ export function parsePublishJson(input: unknown, now = new Date()): ParsedPublis
       enabled: ytEnabled,
       categoryId,
       privacy,
+      privacyDefaulted,
       ...(publishAt ? { publishAt } : {}),
       madeForKids: bool(yt.madeForKids, 'youtube.madeForKids', false),
       containsSyntheticMedia: bool(yt.containsSyntheticMedia, 'youtube.containsSyntheticMedia', false),
@@ -260,6 +289,7 @@ export function parsePublishJson(input: unknown, now = new Date()): ParsedPublis
       enabled: ttEnabled,
       caption,
       privacy: ttPrivacy,
+      privacyDefaulted: ttDefaulted,
       allowComment: bool(tt.allowComment, 'tiktok.allowComment', false),
       allowDuet: bool(tt.allowDuet, 'tiktok.allowDuet', false),
       allowStitch: bool(tt.allowStitch, 'tiktok.allowStitch', false),
@@ -288,6 +318,15 @@ export function withThumbnail(original: unknown, rel: string | null): Dict {
   const base: Dict = isObj(original) ? { ...original } : {};
   if (rel) base.thumbnail = rel;
   else delete base.thumbnail;
+  return base;
+}
+
+/** publish.json with one target's privacy set (keeps unknown fields); null when the value is not valid. */
+export function withPrivacy(original: unknown, target: PublishTargetId, value: string): Dict | null {
+  const ok = target === 'youtube' ? (YT_PRIVACY as readonly string[]).includes(value) : (TIKTOK_PRIVACY as readonly string[]).includes(value);
+  if (!ok) return null;
+  const base: Dict = isObj(original) ? { ...original } : {};
+  base[target] = { ...(isObj(base[target]) ? (base[target] as Dict) : {}), privacy: value };
   return base;
 }
 

@@ -5,7 +5,7 @@
  * Windows / Linux … words joined with + (Ctrl+Shift+N)
  *
  * The app shortcuts follow Ferret where the action exists in both apps (⌘P quick open, ⌘, settings,
- * ⌘B sidebar, ⌘J terminal panel, ⌘⇧R record, ⌘1–4 modes).
+ * ⌘B sidebar, ⌘J terminal panel, ⌘⇧R record, ⌘1–3 modes 撮影 / 編集 / 投稿).
  */
 
 type Modifier = 'Mod' | 'Shift' | 'Alt' | 'Ctrl';
@@ -47,7 +47,6 @@ export type ShortcutId =
   | 'record'
   | 'modeRecord'
   | 'modeEdit'
-  | 'modeReview'
   | 'modePublish';
 
 /** Key spec: `Mod` = ⌘ on macOS / Ctrl elsewhere. The key is compared case-insensitively against KeyboardEvent.key. */
@@ -70,8 +69,7 @@ export const SHORTCUT_SPECS: Record<ShortcutId, ShortcutSpec> = {
   record: { mod: true, shift: true, key: 'r' },
   modeRecord: { mod: true, shift: false, key: '1' },
   modeEdit: { mod: true, shift: false, key: '2' },
-  modeReview: { mod: true, shift: false, key: '3' },
-  modePublish: { mod: true, shift: false, key: '4' },
+  modePublish: { mod: true, shift: false, key: '3' },
 };
 
 export function shortcutLabel(id: ShortcutId): string {

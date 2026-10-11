@@ -203,6 +203,8 @@ describe('centerPerson', () => {
     const f = w.cameraFocus as { x: number; y: number };
     const box = sourceRectToCanvas({ x: 0.73 * 1920, y: 0.35 * 1080, w: 1, h: 1 }, { width: 1920, height: 1080 }, rg.rect, 'cover', f, w.cameraScale);
     expect(Math.abs(box!.x - (rg.rect.x + rg.rect.w / 2))).toBeLessThan(rg.rect.w * 0.05);
+    // and vertically just below the middle of the circle (a higher face would lose the top of the head)
+    expect(Math.abs(box!.y - (rg.rect.y + rg.rect.h * 0.55))).toBeLessThan(rg.rect.h * 0.05);
     expect(validateTimeline({ ...t, segments }).ok).toBe(true);
   });
 

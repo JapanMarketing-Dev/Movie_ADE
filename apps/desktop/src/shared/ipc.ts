@@ -30,6 +30,8 @@ import type {
 import type { PublishAccounts, PublishTargetId, PublishView, ThumbFile } from './publish';
 import type { AccountsEventChannel, AccountsEventMap, AccountsInvokeChannel, AccountsInvokeMap } from './ipc-accounts';
 import { ACCOUNTS_EVENT_CHANNELS, ACCOUNTS_INVOKE_CHANNELS } from './ipc-accounts';
+import type { BenchEventChannel, BenchEventMap, BenchInvokeChannel, BenchInvokeMap } from './ipc-bench';
+import { BENCH_EVENT_CHANNELS, BENCH_INVOKE_CHANNELS } from './ipc-bench';
 import type {
   AgentSendRequest,
   AgentSendResult,
@@ -43,7 +45,7 @@ import type {
 } from './terminal';
 
 /** renderer -> main, request/response (ipcRenderer.invoke / ipcMain.handle) */
-export interface InvokeMap extends AccountsInvokeMap {
+export interface InvokeMap extends AccountsInvokeMap, BenchInvokeMap {
   'app:info': { args: []; result: AppInfo };
   'app:openExternal': { args: [url: string]; result: void };
   'app:showInFolder': { args: [path: string]; result: void };
@@ -126,6 +128,8 @@ export interface InvokeMap extends AccountsInvokeMap {
 
   'publish:load': { args: [dir: string]; result: PublishView };
   'publish:setThumbnail': { args: [dir: string, path: string | null]; result: { ok: boolean; error?: string } };
+  /** this video's youtube.privacy / tiktok.privacy in publish.json */
+  'publish:setPrivacy': { args: [dir: string, target: PublishTargetId, value: string]; result: { ok: boolean; error?: string } };
   'publish:accounts': { args: []; result: PublishAccounts };
   'publish:connect': { args: [target: PublishTargetId]; result: { ok: boolean; name?: string; error?: string } };
   'publish:disconnect': { args: [target: PublishTargetId]; result: void };
@@ -149,7 +153,7 @@ export interface SendMap {
 }
 
 /** main -> renderer events (webContents.send / ipcRenderer.on) */
-export interface EventMap extends AccountsEventMap {
+export interface EventMap extends AccountsEventMap, BenchEventMap {
   /** a terminal opened by main (failover handover, account login): the pane adds a tab and attaches to it */
   'terminal:adopt': [info: TerminalAttachInfo];
   'terminal:data': [id: string, data: string];
@@ -175,9 +179,12 @@ export type EventChannel = keyof EventMap;
 // Records keyed by the maps above: the compiler fails if a channel is declared but missing here (or vice versa).
 const accountsInvoke = Object.fromEntries(ACCOUNTS_INVOKE_CHANNELS.map((c) => [c, true])) as Record<AccountsInvokeChannel, true>;
 const accountsEvents = Object.fromEntries(ACCOUNTS_EVENT_CHANNELS.map((c) => [c, true])) as Record<AccountsEventChannel, true>;
+const benchInvoke = Object.fromEntries(BENCH_INVOKE_CHANNELS.map((c) => [c, true])) as Record<BenchInvokeChannel, true>;
+const benchEvents = Object.fromEntries(BENCH_EVENT_CHANNELS.map((c) => [c, true])) as Record<BenchEventChannel, true>;
 
 const invoke: Record<InvokeChannel, true> = {
   ...accountsInvoke,
+  ...benchInvoke,
   'app:info': true, 'app:openExternal': true, 'app:showInFolder': true, 'app:chooseFolder': true,
   'app:permissions': true, 'app:askMediaAccess': true, 'app:openScreenSettings': true,
   'project:recent': true, 'project:create': true, 'project:open': true, 'project:snapshot': true,
@@ -196,7 +203,7 @@ const invoke: Record<InvokeChannel, true> = {
   'update:state': true, 'update:check': true, 'update:restart': true,
   'feedback:begin': true, 'feedback:finish': true, 'feedback:update': true,
   'thumbs:list': true,
-  'publish:load': true, 'publish:setThumbnail': true, 'publish:accounts': true, 'publish:connect': true, 'publish:disconnect': true,
+  'publish:load': true, 'publish:setThumbnail': true, 'publish:setPrivacy': true, 'publish:accounts': true, 'publish:connect': true, 'publish:disconnect': true,
   'publish:openTikTokUpload': true,
 };
 const send: Record<SendChannel, true> = {
@@ -205,6 +212,7 @@ const send: Record<SendChannel, true> = {
 };
 const events: Record<EventChannel, true> = {
   ...accountsEvents,
+  ...benchEvents,
   'terminal:adopt': true,
   'terminal:data': true, 'terminal:exit': true, 'agent:state': true, 'project:changed': true, 'settings:changed': true,
   'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:changed': true, 'analysis:state': true,

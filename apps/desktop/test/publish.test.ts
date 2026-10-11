@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BUILTIN_DEFAULTS,
   DEFAULT_VIDEO,
+  publishDefaultsFrom,
+  withPrivacy,
   alreadyPublished,
   fixRequestText,
   issueBlocks,
@@ -449,5 +452,43 @@ describe('Google OAuth (installed app, PKCE)', () => {
     expect(channelTitle({ items: [{ snippet: { title: '' } }] })).toBeNull();
     expect(channelTitle(null)).toBeNull();
     expect(channelTitle({ items: 'x' })).toBeNull();
+  });
+});
+
+describe('default visibility from settings', () => {
+  const D = { youtubePrivacy: 'unlisted', tiktokPrivacy: 'FOLLOWER_OF_CREATOR' } as const;
+  it('publishDefaultsFrom reads settings defensively', () => {
+    expect(publishDefaultsFrom({ publish: { youtube: { privacy: 'public' }, tiktok: { privacy: 'PUBLIC_TO_EVERYONE' } } })).toEqual({ youtubePrivacy: 'public', tiktokPrivacy: 'PUBLIC_TO_EVERYONE' });
+    expect(publishDefaultsFrom({})).toEqual(BUILTIN_DEFAULTS);
+    expect(publishDefaultsFrom(null)).toEqual({ youtubePrivacy: 'private', tiktokPrivacy: 'SELF_ONLY' });
+    expect(publishDefaultsFrom({ publish: { youtube: { privacy: 'friends' }, tiktok: { privacy: 'self_only' } } })).toEqual(BUILTIN_DEFAULTS);
+    expect(publishDefaultsFrom({ publish: 'x' })).toEqual(BUILTIN_DEFAULTS);
+  });
+  it('missing privacy in publish.json → the setting, marked as defaulted', () => {
+    const r = parsePublishJson({ title: 't', tiktok: { enabled: true, caption: 'c' } }, NOW, D);
+    expect(r.spec?.youtube).toMatchObject({ privacy: 'unlisted', privacyDefaulted: true });
+    expect(r.spec?.tiktok).toMatchObject({ privacy: 'FOLLOWER_OF_CREATOR', privacyDefaulted: true });
+    expect(r.issues).toContainEqual({ level: 'warning', field: 'youtube.privacy', code: 'default', detail: 'unlisted' });
+  });
+  it('publish.json wins over the setting', () => {
+    const r = parsePublishJson({ title: 't', youtube: { privacy: 'public' }, tiktok: { privacy: 'SELF_ONLY' } }, NOW, D);
+    expect(r.spec?.youtube).toMatchObject({ privacy: 'public', privacyDefaulted: false });
+    expect(r.spec?.tiktok).toMatchObject({ privacy: 'SELF_ONLY', privacyDefaulted: false });
+  });
+  it('an invalid value in publish.json falls back to the setting (not to public)', () => {
+    const r = parsePublishJson({ title: 't', youtube: { privacy: 'everyone' }, tiktok: { privacy: 7 } }, NOW, D);
+    expect(r.spec?.youtube).toMatchObject({ privacy: 'unlisted', privacyDefaulted: true });
+    expect(r.spec?.tiktok).toMatchObject({ privacy: 'FOLLOWER_OF_CREATOR', privacyDefaulted: true });
+  });
+  it('a schedule still forces private whatever the setting says', () => {
+    const r = parsePublishJson({ title: 't', youtube: { publishAt: '2026-11-01T00:00:00Z' } }, NOW, { ...D, youtubePrivacy: 'public' });
+    expect(r.spec?.youtube.privacy).toBe('private');
+  });
+  it('withPrivacy writes one target and keeps the rest', () => {
+    expect(withPrivacy({ title: 'x', youtube: { categoryId: '27' }, extra: 1 }, 'youtube', 'public')).toEqual({ title: 'x', youtube: { categoryId: '27', privacy: 'public' }, extra: 1 });
+    expect(withPrivacy({ tiktok: 'bad' }, 'tiktok', 'MUTUAL_FOLLOW_FRIENDS')).toEqual({ tiktok: { privacy: 'MUTUAL_FOLLOW_FRIENDS' } });
+    expect(withPrivacy({}, 'youtube', 'SELF_ONLY')).toBeNull();
+    expect(withPrivacy({}, 'tiktok', 'public')).toBeNull();
+    expect(withPrivacy(null, 'youtube', 'private')).toEqual({ youtube: { privacy: 'private' } });
   });
 });

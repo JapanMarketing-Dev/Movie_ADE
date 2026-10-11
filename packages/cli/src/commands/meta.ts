@@ -4,7 +4,7 @@ import { frameToSeconds, type LicenseRef, type Output, type Target, type Timelin
 import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
 import { openProject, readTimeline, setStep, writeAtomic, type Project } from '../project.js';
 import {
-  PUBLISH_FILE, cleanTags, composeDescription, defaultPublish, mergePublish, projectFileExists, publishStatus, readPublish, safeRelPath,
+  PUBLISH_FILE, cleanTags, composeDescription, defaultPublish, fillPrivacy, mergePublish, privacyDefaults, projectFileExists, publishStatus, readPublish, safeRelPath,
   validatePublish, type PublishJson,
 } from '../publishJson.js';
 
@@ -119,7 +119,7 @@ function writePublish(p: Project, v: PublishJson): void {
 /** publish.json as it is now, or a fresh one (title from the timeline). A broken file is an error, not overwritten. */
 function currentPublish(ctx: Ctx, p: Project, tl: Timeline): PublishJson {
   const r = readPublish(p.dir);
-  if (!r) return defaultPublish(tl.meta.title);
+  if (!r) return defaultPublish(tl.meta.title, privacyDefaults());
   if (r.error || !r.raw || typeof r.raw !== 'object' || Array.isArray(r.raw)) {
     throw new CliError('invalid-publish', t(ctx, `publish.json が壊れています（${r.error ?? '{ … } ではありません'}）。直すか消してください`, `publish.json is broken (${r.error ?? 'not an object'}); fix or delete it`));
   }
@@ -176,7 +176,8 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
     };
     if (Array.isArray(patch.tags)) patch.tags = cleanTags(patch.tags);
     if (typeof patch.title === 'string') patch.title = patch.title.trim();
-    let next = mergePublish(currentPublish(ctx, p, tl), patch);
+    // visibility the post does not set comes from settings (publish.youtube.privacy / publish.tiktok.privacy)
+    let next = fillPrivacy(mergePublish(currentPublish(ctx, p, tl), patch), privacyDefaults());
     // the description as posted: chapters (YouTube) and credits are added by the CLI, once
     if (typeof next.description === 'string' && (description !== undefined || 'description' in patch || yt.chapters !== undefined)) {
       next = { ...next, description: composeDescription(next.description, chaptersOf(tl, next.youtube?.chapters !== false), creditLines(tl), p.file.language) };
@@ -198,7 +199,7 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
     const r = readPublish(p.dir);
     const pub = r && !r.error ? r.raw : null;
     const check = r ? (r.error ? { valid: false, thumbnailReady: false, problems: [{ level: 'error' as const, field: '$', message: r.error }] } : view(ctx, p, r.raw)) : null;
-    emit(ctx, { exists: !!r, publish: pub, ...(check ?? { valid: false, thumbnailReady: false, problems: [] }), chapters: youtubeChapters(tl), credits: creditLines(tl), assets: usedAssets(tl) }, () => {
+    emit(ctx, { exists: !!r, publish: pub, ...(check ?? { valid: false, thumbnailReady: false, problems: [] }), defaults: { privacy: privacyDefaults() }, chapters: youtubeChapters(tl), credits: creditLines(tl), assets: usedAssets(tl) }, () => {
       if (!r) return t(ctx, 'publish.json はまだありません（solocut meta set --title … で作る）', 'no publish.json yet (create it with solocut meta set --title …)');
       const x = pub as Partial<PublishJson> | null;
       return [

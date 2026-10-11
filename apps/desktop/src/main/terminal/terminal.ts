@@ -250,7 +250,12 @@ export class TerminalManager {
   /** 同梱の solocut CLI のフォルダ。rc を読んだあとに PATH の先頭へ戻す（shellStartup.ts）。null なら戻さない */
   cliBin: () => string | null = () => null
   /** Claude Code / Codex を起動する前に、そのプロジェクトのフォルダを信頼済みにする（agentWorkspaceTrust.ts） */
-  trustWorkspace: ((agentId: string, projectDir: string, env: Record<string, string>) => Promise<unknown>) | null = null
+  /**
+   * before an agent starts, with its final env: folder trust for a project folder and Claude Code's bypass-mode
+   * consent when it starts with --dangerously-skip-permissions (index.ts wires agentLaunchPrep.ts). Never blocks
+   * the launch: failures are reported and the agent asks itself.
+   */
+  prepareAgentLaunch: ((o: { agent: string; argv: readonly string[]; projectDir: string | null; env: Record<string, string> }) => Promise<unknown>) | null = null
   /** cwd が Solocut のプロジェクトのフォルダか（フォルダの信頼と、権限確認を省く決まりの projectId に使う） */
   isProjectDir: (dir: string) => boolean = () => false
   /** アカウントの切り替えなど、Agent ごとに環境変数を変える（accounts が設定する） */
@@ -294,18 +299,20 @@ export class TerminalManager {
     const startupShell = startupShellForPath(shell.file)
     let startupCommand: string | null = null
     let resumed = false
+    let launchArgv: string[] = []
+    /** the project folder to pre-trust for this agent, or null */
+    let projectId: string | null = null
     if (agent) {
-      const projectId = this.isProjectDir(cwd) ? cwd : null
+      projectId = this.isProjectDir(cwd) ? cwd : null
       const launch = agentLaunchLine(agent, prefs, { shell: startupShell, projectId, ...(options.resume ? { resume: true } : {}) })
       if (!launch.ok) throw new Error(t('terminal.errors.launch', { agent: labelOf(agent, prefs), error: launch.error }))
       resumed = launch.resumed === true
       startupCommand = launch.line
+      launchArgv = launch.argv
+      // folder trust only with skipPermissions on, inside a project folder itself (the launch policy decides)
+      if (!launch.trustFolder) projectId = null
       // パンくず：自作の Agent は名前を出さない（利用者が付けた名前を送らない）
       flow('agent launch', { agent: isBuiltinAgent(agent) ? agent : 'custom' })
-      // Claude Code / Codex の「このフォルダを信頼しますか」を、Solocut のプロジェクトのフォルダについて先に書いておく
-      if ((agent === 'claude' || agent === 'codex') && projectId && this.trustWorkspace) {
-        await this.trustWorkspace(agent, projectId, this.ptyEnv()).catch((err: unknown) => reportHandled(errorKind(err), { area: 'agent-launch', op: 'grant folder trust' }))
-      }
     } else if (options.command?.trim()) {
       const line = options.command.trim()
       startupCommand = options.exitWhenDone ? exitWhenDoneCommand(line, shell.file) : line
@@ -321,6 +328,10 @@ export class TerminalManager {
     // accounts: CLAUDE_CONFIG_DIR / CODEX_HOME of the tab's account (throws when that account's folder is unusable)
     if (agent && this.resolveAgentEnv) env = { ...env, ...this.resolveAgentEnv(agent, env, accountId) }
     if (options.env) env = { ...env, ...options.env }
+    // written with the tab's own env, so an added account's CLAUDE_CONFIG_DIR / CODEX_HOME gets them, not ~/.claude
+    if (agent && this.prepareAgentLaunch) {
+      await this.prepareAgentLaunch({ agent, argv: launchArgv, projectDir: projectId, env }).catch((err: unknown) => reportHandled(errorKind(err), { area: 'agent-launch', op: 'prepare agent launch' }))
+    }
     let pty: IPty
     try {
       pty = nodePty.spawn(shell.file, shell.args, {

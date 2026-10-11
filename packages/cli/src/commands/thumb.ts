@@ -17,7 +17,7 @@ import { captionsLib, freshPreview, glossaryOf, media } from './media.js';
 import { ensureFonts } from '../fonts.js';
 import { decisionSetup, isSkip } from '../decision.js';
 import { emptyOutput } from './meta.js';
-import { PUBLISH_FILE, defaultPublish, projectFileExists, readPublish, safeRelPath, type PublishJson } from '../publishJson.js';
+import { PUBLISH_FILE, defaultPublish, privacyDefaults, projectFileExists, readPublish, safeRelPath, type PublishJson } from '../publishJson.js';
 
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -70,7 +70,7 @@ export function updateThumbnailStep(p: Project): boolean {
 export function setPublishThumbnail(p: Project, title: string, rel: string): void {
   const r = readPublish(p.dir);
   if (r?.error) throw new CliError('invalid-publish', `publish.json: ${r.error}`);
-  const base = r && r.raw && typeof r.raw === 'object' && !Array.isArray(r.raw) ? (r.raw as PublishJson) : defaultPublish(title);
+  const base = r && r.raw && typeof r.raw === 'object' && !Array.isArray(r.raw) ? (r.raw as PublishJson) : defaultPublish(title, privacyDefaults());
   writeAtomic(join(p.dir, PUBLISH_FILE), JSON.stringify({ ...base, thumbnail: rel }, null, 2) + '\n');
 }
 

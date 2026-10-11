@@ -59,7 +59,7 @@ export const STEP_DEPS: Record<StepId, StepId[]> = {
   'rough-cut': ['transcribe', 'sync'],
   multicam: ['rough-cut', 'sync', 'analyze'],
   captions: ['transcribe'],
-  sfx: ['rough-cut', 'captions'],
+  sfx: ['rough-cut', 'captions', 'layout'],
   layout: ['rough-cut', 'analyze'],
   masks: ['rough-cut', 'analyze'],
   preview: ['rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'masks'],
@@ -120,7 +120,10 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
     commands: ['solocut captions build --json', 'solocut edit updateCaption --id <caption> --patch \'{"text":"…"}\''],
   },
   sfx: {
-    do: { ja: 'prompts/sfx.md に沿って効果音・BGM を入れる', en: 'Add sound effects and BGM following prompts/sfx.md' },
+    do: {
+      ja: 'prompts/sfx.md に沿って効果音・BGM を入れる。solocut sfx apply が組み込みの効果音（初回に自動で作る）をテンプレートの規則で置く。足りなければ効果音ラボ・OtoLogic などから使う分だけ取得して addSfx（クレジットを記録）',
+      en: 'Add sound effects and BGM following prompts/sfx.md. solocut sfx apply places the built-in effects (made on first use) by the template rules; for more, fetch just the sounds you use from free sites (効果音ラボ, OtoLogic) and addSfx with their credit',
+    },
     commands: ['solocut sfx apply --json', 'solocut edit addSfx --sfx \'{…}\' --reason "<why>"', 'solocut step sfx done'],
   },
   layout: {
@@ -214,7 +217,9 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
 
   const waitFor = (step: PipelineStep, why: string, blocking?: string[]): NextStep => {
     const m = meanwhile(step);
-    const base = ja ? '人の確認を待ってください。アプリの「確認」画面に表示されます。' : 'Wait for a human to decide; it is shown in the app\'s Review screen.';
+    const base = ja
+      ? '人の確認が必要です。編集画面の「要確認」に表示されます。自動操縦（--autopilot）なら待たずに、要確認（needsReview）として残して先へ進みます。'
+      : 'A human needs to decide; it is listed under 要確認 (Needs review) in the Edit screen. On autopilot (--autopilot) do not wait: leave it marked needsReview and continue.';
     const extra: Partial<NextStep> = { do: base, commands: [] };
     if (m) {
       extra.meanwhile = m;
@@ -262,8 +267,8 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
     if (st === 'done' || st === 'skipped' || notNeeded(step)) continue;
 
     if (st === 'needs-human') {
-      // autopilot proceeds with the most likely answer, except sync (a wrong sync breaks everything) and review
-      if (ctx.autopilot && step !== 'sync' && step !== 'review') continue;
+      // autopilot never waits: the step stays marked 要確認 (needs-human, listed in the Edit screen) and the run goes on
+      if (ctx.autopilot) continue;
       const why = note ?? (ja ? 'この手順は人の判断を待っています' : 'This step is waiting for a human');
       return waitFor(step, why, step === 'rough-cut' ? ctx.openItemRefs : undefined);
     }

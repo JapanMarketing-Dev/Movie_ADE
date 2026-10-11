@@ -129,6 +129,14 @@ const Autopilot = z.object({
   budget: z.object({ decisionUsd: z.number().min(0).default(2) }).prefault({}),
 });
 
+/** Default visibility of new posts; the agent copies them into publish.json unless the human said otherwise. */
+export const YOUTUBE_PRIVACY = ['private', 'unlisted', 'public'] as const;
+export const TIKTOK_PRIVACY = ['SELF_ONLY', 'MUTUAL_FOLLOW_FRIENDS', 'FOLLOWER_OF_CREATOR', 'PUBLIC_TO_EVERYONE'] as const;
+const Publish = z.object({
+  youtube: z.object({ privacy: z.enum(YOUTUBE_PRIVACY).default('private') }).prefault({}),
+  tiktok: z.object({ privacy: z.enum(TIKTOK_PRIVACY).default('SELF_ONLY') }).prefault({}),
+});
+
 /** The user's own text for the two prompts (absent or blank = the built-in default, see prompts.ts). */
 const Prompts = z.object({
   finish: z.string().max(50_000).optional(),
@@ -175,6 +183,7 @@ export const SettingsSchema = z.object({
   telemetry: Telemetry.prefault({}),
   autopilot: Autopilot.prefault({}),
   prompts: Prompts.prefault({}),
+  publish: Publish.prefault({}),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

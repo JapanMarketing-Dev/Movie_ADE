@@ -259,7 +259,7 @@ export const BgmSchema = z.strictObject({
 });
 export const SfxSchema = z.strictObject({
   id: idSchema('sfx'), asset: SourceIdSchema, at: FrameSchema, gainDb: z.number(),
-  trigger: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in', 'manual']), ruleRef: z.string().optional(), decided: DecidedSchema,
+  trigger: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in', 'zoom-in', 'manual']), ruleRef: z.string().optional(), decided: DecidedSchema,
 });
 export const VoiceSchema = z.strictObject({
   denoise: z.enum(['off', 'light', 'strong']),

@@ -2,7 +2,7 @@
 // and result, and the upload log. Picking a thumbnail writes publish.json (unknown fields are kept).
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { PUBLISH_FILE, PUBLISH_TARGETS, alreadyPublished, parsePublishJson, safeRelPath, withThumbnail, type PublishView } from '../../shared/publish';
+import { BUILTIN_DEFAULTS, PUBLISH_FILE, PUBLISH_TARGETS, alreadyPublished, parsePublishJson, safeRelPath, withPrivacy, withThumbnail, type PublishDefaults, type PublishTargetId, type PublishView } from '../../shared/publish';
 import { readLog, readRequest, readResult, readText, writeJsonAtomic } from './handoff';
 
 const isFile = (p: string) => {
@@ -13,9 +13,9 @@ const isFile = (p: string) => {
   }
 };
 
-export function loadView(dir: string, now = new Date()): PublishView {
+export function loadView(dir: string, now = new Date(), defaults: PublishDefaults = BUILTIN_DEFAULTS): PublishView {
   const text = readText(join(dir, PUBLISH_FILE));
-  const { spec, issues } = text === null ? { spec: null, issues: [] } : parsePublishJson(text, now);
+  const { spec, issues } = text === null ? { spec: null, issues: [] } : parsePublishJson(text, now, defaults);
   const view: PublishView = { exists: text !== null, spec, issues, request: readRequest(dir), result: readResult(dir), log: readLog(dir), published: {} };
   if (spec) {
     const v = resolve(dir, spec.video);
@@ -51,15 +51,29 @@ export function setThumbnail(dir: string, path: string | null): { ok: boolean; e
     if (!/\.(png|jpe?g)$/i.test(rel)) return { ok: false, error: 'use a PNG or JPEG' };
     if (!existsSync(resolve(dir, rel))) return { ok: false, error: `not found: ${rel}` };
   }
+  const original = readOriginal(dir);
+  if (!original.ok) return original;
+  writeJsonAtomic(join(dir, PUBLISH_FILE), withThumbnail(original.value, rel));
+  return { ok: true };
+}
+
+function readOriginal(dir: string): { ok: true; value: unknown } | { ok: false; error: string } {
   const file = join(dir, PUBLISH_FILE);
-  let original: unknown = {};
-  if (existsSync(file)) {
-    try {
-      original = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-    } catch {
-      return { ok: false, error: 'publish.json is not valid JSON; ask the agent to fix it first' };
-    }
+  if (!existsSync(file)) return { ok: true, value: {} };
+  try {
+    return { ok: true, value: JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) };
+  } catch {
+    return { ok: false, error: 'publish.json is not valid JSON; ask the agent to fix it first' };
   }
-  writeJsonAtomic(file, withThumbnail(original, rel));
+}
+
+/** Sets youtube.privacy or tiktok.privacy in publish.json for this video (other fields kept). */
+export function setPrivacy(dir: string, target: PublishTargetId, value: string): { ok: boolean; error?: string } {
+  if (!existsSync(join(dir, PUBLISH_FILE))) return { ok: false, error: 'publish.json not found' };
+  const original = readOriginal(dir);
+  if (!original.ok) return original;
+  const next = withPrivacy(original.value, target, value);
+  if (!next) return { ok: false, error: `invalid ${target} privacy: ${value}` };
+  writeJsonAtomic(join(dir, PUBLISH_FILE), next);
   return { ok: true };
 }

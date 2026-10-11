@@ -214,7 +214,7 @@ export function catalogCustomId(id: string): string {
 /**
  * Solocut settings.json `agents` (order / custom[{id,label,command}] / failover, plus the optional
  * `launch` overrides per agent and `skipPermissions`) → catalog AgentPreferences. Unknown or broken values fall
- * back to the defaults (skipPermissions off).
+ * back to the defaults (skipPermissions on; only an explicit false turns it off).
  */
 export function agentPrefsFromSettings(agents: unknown): AgentPreferences {
   const a = (agents && typeof agents === 'object' ? agents : {}) as Record<string, unknown>;
@@ -228,8 +228,10 @@ export function agentPrefsFromSettings(agents: unknown): AgentPreferences {
       })
     : [];
   const prefs = sanitizeAgentPreferences({ ...a, customAgents: [...(Array.isArray(a.customAgents) ? a.customAgents : []), ...custom] });
-  // Ferret turns this on by default after its onboarding consent; Solocut needs an explicit `skipPermissions: true`.
-  return { ...prefs, skipPermissions: a.skipPermissions === true };
+  // Solocut's agents work unattended (動画を完成させて after every take): Claude Code starts with
+  // --dangerously-skip-permissions and Codex with --dangerously-bypass-approvals-and-sandbox unless the user turns
+  // it off with an explicit `skipPermissions: false` (missing or malformed values count as on).
+  return { ...prefs, skipPermissions: a.skipPermissions !== false };
 }
 
 export type AgentLaunchLine =

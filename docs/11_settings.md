@@ -47,6 +47,7 @@
   "videos": { "root": "~/Movies/Solocut" },                // マスタフォルダ。動画ごとに <root>/<日付>-<名前>/ を作る
   "autopilot": { "autoStart": true },                      // 撮影後に起動プロンプトを自動で送る（docs/13）
   "prompts": { "finish": "…", "publish": "…" },            // 省略 = 組み込みの文（docs/13）
+  "publish": { "youtube": { "privacy": "private" }, "tiktok": { "privacy": "SELF_ONLY" } },  // 投稿の公開範囲の既定（publish.json に使う）
   "decision": { "provider": "off" },                       // 任意。既定はオフで、なくても全体が動く（画面には出さない）
   "library": { "catalog": "solocut-default", "download": "on-demand", "cacheLimitGB": 2, "autoCredits": true },
   "archive": { "autoRegister": ["export", "publish"], "keepPreview": true, "analytics": { "youtube": false } },

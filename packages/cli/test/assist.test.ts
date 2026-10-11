@@ -65,25 +65,31 @@ describe('sfx apply', () => {
     sound(join(dir, 'assets', 'sfx'), 'pop', 'p1.wav');
     const r = await run(['sfx', 'apply']);
     expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, removed: 0, changed: true });
-    expect(r.json.library).toBe(2);
+    // the two files plus the built-in set (made with ffmpeg on first use)
+    expect(r.json.library).toBeGreaterThanOrEqual(2);
     const section = r.json.sfx.filter((s: { trigger: string }) => s.trigger === 'section');
     expect(section.length).toBeGreaterThanOrEqual(1);
-    expect(section[0].asset).toBe('sfx_whoosh_kenney1');
-    // the cache file was copied in; the project file is used where it is
-    expect(existsSync(join(dir, 'assets', 'library', 'sfx_whoosh_kenney1.wav'))).toBe(true);
+    expect(section.every((s: { asset: string }) => s.asset.startsWith('sfx_whoosh'))).toBe(true);
+    // files from outside the project (cache, built-in set) were copied in; the project file is used where it is
     const tl = timeline();
-    expect(tl.sources.sfx_whoosh_kenney1).toMatchObject({ kind: 'asset', path: 'assets/library/sfx_whoosh_kenney1.wav', license: { id: 'CC0-1.0', credit: 'swish.wav — Kenney (CC0-1.0)' } });
+    for (const [id, src] of Object.entries(tl.sources) as [string, { kind: string; path: string }][]) {
+      if (src.kind === 'asset' && id.startsWith('sfx_')) expect(existsSync(join(dir, src.path)), id).toBe(true);
+    }
+    if (tl.sources.sfx_whoosh_kenney1) {
+      expect(tl.sources.sfx_whoosh_kenney1).toMatchObject({ kind: 'asset', path: 'assets/library/sfx_whoosh_kenney1.wav', license: { id: 'CC0-1.0', credit: 'swish.wav — Kenney (CC0-1.0)' } });
+    }
     expect(tl.audio.sfx.every((s: { decided: { by: string } }) => s.decided.by === 'template')).toBe(true);
     // a human sfx stays; re-running replaces only the template ones
-    const mine = await run(['edit', 'addSfx', '--sfx', JSON.stringify({ id: 'sfx_mine', asset: 'sfx_whoosh_kenney1', at: 450, gainDb: -10, trigger: 'manual', decided: { by: 'human', reason: 'ここで鳴らす' } })]);
+    const anyAsset = tl.audio.sfx[0].asset;
+    const mine = await run(['edit', 'addSfx', '--sfx', JSON.stringify({ id: 'sfx_mine', asset: anyAsset, at: 450, gainDb: -10, trigger: 'manual', decided: { by: 'human', reason: 'ここで鳴らす' } })]);
     expect(mine.json, mine.stdout + mine.stderr).toMatchObject({ ok: true });
     const again = await run(['sfx', 'apply']);
     expect(again.json.removed).toBe(r.json.added);
     const after = timeline().audio.sfx;
     expect(after.some((s: { id: string }) => s.id === 'sfx_mine')).toBe(true);
     expect(after.filter((s: { decided: { by: string } }) => s.decided.by === 'template').length).toBe(again.json.added);
-    // the cap counts the human one: never more than maxPerMin (3) in any minute of this 30 s video
-    expect(after.length).toBeLessThanOrEqual(3);
+    // the cap counts the human one: never more than maxPerMin (6) in any minute of this 30 s video
+    expect(after.length).toBeLessThanOrEqual(6);
   });
 
   it('dry run writes nothing; missing kinds are reported; --keep adds on top', async () => {
@@ -94,18 +100,21 @@ describe('sfx apply', () => {
     expect(d.json, d.stdout + d.stderr).toMatchObject({ ok: true, dryRun: true });
     expect(d.json.added).toBeGreaterThan(0);
     expect(JSON.stringify(timeline())).toBe(before);
-    expect(d.json.warnings.join(' ')).toContain('pop');
+    // the built-in set covers every kind the template uses: nothing is reported missing
+    expect(d.json.warnings.join(' ')).not.toMatch(/no library sound|ライブラリに無い/);
     const first = await run(['sfx', 'apply']);
     const kept = await run(['sfx', 'apply', '--keep']);
     expect(kept.json.removed).toBe(0);
     expect(timeline().audio.sfx.length).toBeGreaterThanOrEqual(first.json.added);
   });
 
-  it('nothing in the library → no sfx, a warning; same seed → same placement', async () => {
+  it('an empty library is filled by the built-in set (no download); same seed → same placement', async () => {
     await seed();
     const r = await run(['sfx', 'apply']);
-    expect(r.json).toMatchObject({ ok: true, added: 0, library: 0 });
-    expect(r.json.warnings.join(' ')).toMatch(/whoosh/);
+    expect(r.json).toMatchObject({ ok: true });
+    expect(r.json.library).toBeGreaterThanOrEqual(21);
+    expect(r.json.added).toBeGreaterThan(0);
+    expect(r.json.sfx.every((x: { asset: string }) => /_builtin_/.test(x.asset))).toBe(true);
     sound(join(dir, 'assets', 'sfx'), 'whoosh', 'a.wav');
     sound(join(dir, 'assets', 'sfx'), 'pop', 'b.wav');
     const a = await run(['sfx', 'apply', '--seed', 'x', '--dry-run']);
@@ -331,7 +340,8 @@ describe('bench', () => {
     await run(['bench', 'profile', join(sb.root, 's.json'), '--out', join(sb.root, 'p.json')]);
     const ap = await sb.run(['bench', 'apply', join(sb.root, 'p.json'), '--template', 'talk', '--json'], { cwd: sb.root });
     expect(ap.json, ap.stdout + ap.stderr).toMatchObject({ ok: true, scope: 'user', file: join(sb.home, 'templates', 'talk', 'template.yaml') });
-    expect((await sb.run(['bench', 'apply', join(sb.root, 'p.json'), '--json'], { cwd: sb.root })).code).toBe(2);
+    // outside a project without --template: the default template, for every new video
+    expect((await sb.run(['bench', 'apply', join(sb.root, 'p.json'), '--json'], { cwd: sb.root })).json).toMatchObject({ ok: true, template: 'tech', scope: 'user' });
     expect((await sb.run(['bench', 'apply', join(sb.root, 'p.json'), '--template', 'Bad_Id', '--json'], { cwd: sb.root })).code).toBe(2);
     writeFileSync(join(sb.root, 'bad.json'), JSON.stringify([{ t: 0 }]));
     expect((await run(['bench', 'profile', join(sb.root, 'bad.json')])).json.error.code).toBe('invalid-samples');

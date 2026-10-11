@@ -5,6 +5,8 @@ import { useCallback, useContext, useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, Link2, Send, Sparkles, Upload, XCircle } from 'lucide-react';
 import { Badge, Button, EmptyState, Progress } from '../ui';
 import {
+  TIKTOK_PRIVACY,
+  YT_PRIVACY,
   YT_DESCRIPTION_MAX_BYTES,
   YT_TITLE_MAX,
   charCount,
@@ -104,6 +106,12 @@ export function Publish({ project, toast, onOpenSettings }: { project: ProjectIn
     }
   };
 
+  const setPrivacy = async (target: PublishTargetId, value: string) => {
+    const r = await api.invoke('publish:setPrivacy', dir, target, value);
+    if (!r.ok) toast(r.error ?? t('common.error'));
+    void load();
+  };
+
   const state = okState(view, accounts, sentAt, now);
   const spec = view?.spec ?? null;
   const errors = view?.issues.filter((i) => i.level === 'error') ?? [];
@@ -167,8 +175,14 @@ export function Publish({ project, toast, onOpenSettings }: { project: ProjectIn
                   on={spec.youtube.enabled}
                   account={accounts?.youtube}
                   published={view.published.youtube?.url}
+                  privacy={{
+                    value: spec.youtube.privacy,
+                    options: YT_PRIVACY.map((v) => ({ value: v, label: t(`pub.privacy.${v}` as TKey) })),
+                    defaulted: spec.youtube.privacyDefaulted,
+                    locked: Boolean(spec.youtube.publishAt),
+                    onChange: (v) => void setPrivacy('youtube', v),
+                  }}
                   detail={[
-                    t(`pub.privacy.${spec.youtube.privacy}` as TKey),
                     spec.youtube.publishAt ? t('pub.scheduled', { at: new Date(spec.youtube.publishAt).toLocaleString() }) : '',
                     spec.youtube.madeForKids ? t('pub.forKids') : t('pub.notForKids'),
                     spec.youtube.containsSyntheticMedia ? t('pub.synthetic') : '',
@@ -182,7 +196,13 @@ export function Publish({ project, toast, onOpenSettings }: { project: ProjectIn
                   on={spec.tiktok.enabled}
                   account={accounts?.tiktok}
                   published={view.published.tiktok?.url}
-                  detail={[t(`pub.ttPrivacy.${spec.tiktok.privacy}` as TKey), spec.tiktok.isAigc ? t('pub.aigc') : '']}
+                  privacy={{
+                    value: spec.tiktok.privacy,
+                    options: TIKTOK_PRIVACY.map((v) => ({ value: v, label: t(`pub.ttPrivacy.${v}` as TKey) })),
+                    defaulted: spec.tiktok.privacyDefaulted,
+                    onChange: (v) => void setPrivacy('tiktok', v),
+                  }}
+                  detail={[spec.tiktok.isAigc ? t('pub.aigc') : '']}
                   caption={spec.tiktok.enabled ? spec.tiktok.caption : undefined}
                   onConnect={() => void connect('tiktok')}
                   onOpenSettings={onOpenSettings}
@@ -210,6 +230,18 @@ export function Publish({ project, toast, onOpenSettings }: { project: ProjectIn
               </div>
 
               <div className="pub__go">
+                {state.kind === 'ready' && (
+                  <ul className="pub__confirm" data-testid="publish-confirm">
+                    {state.targets.map((x) => (
+                      <li key={x}>
+                        {t('pub.confirmPrivacy', {
+                          target: TARGET_LABEL[x],
+                          privacy: x === 'youtube' ? t(`pub.privacy.${spec.youtube.privacy}` as TKey) : t(`pub.ttPrivacy.${spec.tiktok.privacy}` as TKey),
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <OkButton state={state} busy={busy === 'ok'} onOk={() => void postOk()} onConnect={(x) => void connect(x)} />
                 {errors.length > 0 && state.kind === 'ready' && <div className="dim pub__hint">{t('pub.okWithIssues')}</div>}
               </div>
@@ -238,6 +270,7 @@ function TargetRow({
   on,
   account,
   published,
+  privacy,
   detail,
   caption,
   onConnect,
@@ -249,6 +282,7 @@ function TargetRow({
   on: boolean;
   account?: PublishAccounts[PublishTargetId];
   published?: string;
+  privacy: { value: string; options: { value: string; label: string }[]; defaulted: boolean; locked?: boolean; onChange: (v: string) => void };
   detail: string[];
   caption?: string;
   onConnect: () => void;
@@ -279,7 +313,26 @@ function TargetRow({
           </Button>
         )}
       </div>
-      {on && <div className="dim pub__detail">{detail.filter(Boolean).join(' · ')}</div>}
+      {on && (
+        <label className="pub__privacy">
+          <span className="pub__label">{t('pub.privacyLabel')}</span>
+          <select
+            className="input"
+            value={privacy.value}
+            disabled={privacy.locked}
+            aria-label={`${TARGET_LABEL[target]} ${t('pub.privacyLabel')}`}
+            onChange={(e) => privacy.onChange(e.target.value)}
+          >
+            {privacy.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <span className="dim pub__hint">{privacy.locked ? t('pub.privacyScheduled') : privacy.defaulted ? t('pub.privacyFromSettings') : t('pub.privacyThisVideo')}</span>
+        </label>
+      )}
+      {on && detail.some(Boolean) && <div className="dim pub__detail">{detail.filter(Boolean).join(' · ')}</div>}
       {caption !== undefined && <div className="pub__caption">{caption}</div>}
       {published && (
         <a className="pub__link" href="#" onClick={(e) => (e.preventDefault(), void api.invoke('app:openExternal', published))}>

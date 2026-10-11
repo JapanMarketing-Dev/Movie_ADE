@@ -5,7 +5,7 @@ import { fpsValue } from './time.js';
 import { allIds, durationFrames, freshId } from './timeline.js';
 
 /** Where a template sfx rule fires (docs/09). */
-export type SfxEvent = 'emphasis' | 'section' | 'cut' | 'scene-in' | 'caption-in';
+export type SfxEvent = 'emphasis' | 'section' | 'cut' | 'scene-in' | 'caption-in' | 'zoom-in';
 
 export interface SfxRule {
   on: SfxEvent;
@@ -34,7 +34,7 @@ export interface SfxLibraryItem { id: string; kind: string; durationMs: number; 
 /** Speech onsets to keep clear: timeline frames. */
 export interface SpeechWord { start: Frame; end: Frame }
 
-const PRIORITY: Record<SfxEvent, number> = { section: 0, 'scene-in': 1, emphasis: 2, 'caption-in': 3, cut: 4 };
+const PRIORITY: Record<SfxEvent, number> = { section: 0, 'scene-in': 1, 'zoom-in': 2, emphasis: 3, 'caption-in': 4, cut: 5 };
 
 function unit(seed: string, key: string): number {
   return parseInt(sha256Hex(`${seed}\0${key}`).slice(0, 8), 16) / 0x100000000;
@@ -47,6 +47,16 @@ export function sfxEvents(t: Timeline): { on: SfxEvent; at: Frame; key: string }
   for (const c of t.outline) if (c.start > 0) out.push({ on: 'section', at: c.start, key: `section:${c.id}` });
   for (const m of t.markers) if (m.kind === 'chapter' && m.at > 0 && !t.outline.some((c) => c.start === m.at)) out.push({ on: 'section', at: m.at, key: `section:m${m.at}` });
   for (const s of t.scenes) out.push({ on: 'scene-in', at: s.range.start, key: `scene:${s.id}` });
+  // punch-ins: a zoom keyframe that scales up from the one before (or from 1 at the segment start), and jump-zooms
+  for (const s of t.segments) {
+    const keys = [...(s.zoom ?? [])].sort((a, b) => a.at - b.at);
+    let prev = 1;
+    for (const k of keys) {
+      if (k.value.scale > prev + 0.05 && s.range.start + k.at < s.range.end) out.push({ on: 'zoom-in', at: s.range.start + k.at, key: `zoom:${s.id}:${k.at}` });
+      prev = k.value.scale;
+    }
+    if (s.transitionIn?.kind === 'jump-zoom' && !keys.length) out.push({ on: 'zoom-in', at: s.range.start, key: `zoom:${s.id}:jump` });
+  }
   for (const c of t.captions) {
     out.push({ on: 'caption-in', at: c.range.start, key: `caption:${c.id}` });
     for (const e of c.emphasis) {

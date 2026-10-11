@@ -1,6 +1,6 @@
 {
   "name": "solocut",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "license": "MIT",
   "description": "The ADE for video editing. Shoot alone; your terminal agent edits by template.",

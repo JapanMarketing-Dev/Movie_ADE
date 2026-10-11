@@ -133,7 +133,6 @@ const SHORTCUT_NAME: Record<ShortcutId, SKey> = {
   record: 'shortcut.record',
   modeRecord: 'mode.record',
   modeEdit: 'mode.edit',
-  modeReview: 'mode.review',
   modePublish: 'mode.publish',
 };
 
@@ -492,6 +491,52 @@ function PromptField({ prompt, title, note }: { prompt: PromptButton; title: str
       </div>
     </div>
   );
+}
+
+// ---------- publishing ----------
+export function PublishingSection({ json }: { json: Json }) {
+  const t = useST();
+  const set = useSet();
+  return (
+    <>
+      <SettingRow label={t('settings.publishing.youtube')}>
+        <Select
+          ariaLabel={t('settings.publishing.youtube')}
+          value={str(json, 'publish.youtube.privacy', 'private')}
+          options={[
+            { value: 'public', label: t('settings.publishing.ytPublic') },
+            { value: 'unlisted', label: t('settings.publishing.ytUnlisted') },
+            { value: 'private', label: t('settings.publishing.ytPrivate') },
+          ]}
+          onChange={(v) => set('publish.youtube.privacy', v)}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.publishing.tiktok')}>
+        <Select
+          ariaLabel={t('settings.publishing.tiktok')}
+          value={str(json, 'publish.tiktok.privacy', 'SELF_ONLY')}
+          options={[
+            { value: 'PUBLIC_TO_EVERYONE', label: t('settings.publishing.ttEveryone') },
+            { value: 'MUTUAL_FOLLOW_FRIENDS', label: t('settings.publishing.ttFriends') },
+            { value: 'FOLLOWER_OF_CREATOR', label: t('settings.publishing.ttFollowers') },
+            { value: 'SELF_ONLY', label: t('settings.publishing.ttSelf') },
+          ]}
+          onChange={(v) => set('publish.tiktok.privacy', v)}
+        />
+      </SettingRow>
+      <Note>{t('settings.publishing.note')}</Note>
+    </>
+  );
+}
+
+// ---------- benchmark ----------
+// The reference-video panel (components/BenchmarkPanel.tsx, from the preview side). Picked up when the file exists.
+const benchmarkModules = import.meta.glob<{ BenchmarkPanel?: ComponentType }>('../components/BenchmarkPanel.tsx', { eager: true });
+const BenchmarkPanel = Object.values(benchmarkModules)[0]?.BenchmarkPanel ?? null;
+
+export function BenchmarkSection() {
+  const t = useST();
+  return BenchmarkPanel ? <BenchmarkPanel /> : <Note>{t('settings.benchmark.missing')}</Note>;
 }
 
 // ---------- updates ----------

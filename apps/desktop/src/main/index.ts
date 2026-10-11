@@ -14,13 +14,16 @@ import { TerminalManager } from './terminal/terminal';
 import { createAccountsStack } from './accounts';
 import type { FailoverHost } from './failover/service';
 import { registerAccountsIpc } from './ipc-accounts';
+import { registerBenchIpc } from './ipc-bench';
+import { takeReferenceCapture } from './services/benchWindow';
+import { discardAllCaptures } from './services/benchmark';
 import { argvToLine } from '@solocut/agents';
 import type { TerminalCreateOptions } from '../shared/terminal';
 import type { AccountsEventChannel, AccountsEventMap } from '../shared/ipc-accounts';
 import { setMessageLanguage } from './terminal/messages';
 import { AgentWatch } from './agent/watch';
 import { sendAgentRequest } from './agent/request';
-import { trustWorkspace } from './agentWorkspaceTrust';
+import { prepareAgentLaunch } from './agentLaunchPrep';
 import { agentPrefsFromSettings } from '@solocut/agents';
 import * as recorder from './services/recorder';
 import { initSentry, sentryEnabled } from './services/sentry';
@@ -37,7 +40,7 @@ import { warmLoginShellPath } from './shellPath';
 import { reportHandled } from '../shared/report';
 import { startCursorLog, stopAllCursorLogs, stopCursorLog } from './services/cursor';
 import * as regionPicker from './services/regionPicker';
-import { libNameFor, parseProgress, TIKTOK_UPLOAD_PAGE } from '../shared/publish';
+import { BUILTIN_DEFAULTS, libNameFor, parseProgress, publishDefaultsFrom, TIKTOK_UPLOAD_PAGE } from '../shared/publish';
 
 const log = (msg: string) => console.log(`[solocut] ${msg}`);
 
@@ -82,7 +85,7 @@ terminals.settings = () => agentPrefsFromSettings(platform.getPath(platform.sett
 terminals.appEnv = () => solocutEnv({});
 terminals.cliBin = () => cliBinDir();
 terminals.isProjectDir = (dir) => existsSync(join(dir, 'solocut.json'));
-terminals.trustWorkspace = (agentId, dir, env) => trustWorkspace(agentId, dir, env);
+terminals.prepareAgentLaunch = (o) => prepareAgentLaunch(o);
 setMessageLanguage(() => safe(() => platform.language(), 'ja'));
 // ---- accounts / usage / failover (ported from Ferret), glued to the TerminalManager ----
 /** Accounts events are a subset of EventMap; generic tuples do not narrow, so this forwards them untyped. */
@@ -156,9 +159,11 @@ const analysis = new AnalysisRunner({
   log,
 });
 const watcher = new project.ProjectWatcher((dir, what) => emit(mainWc(), 'project:changed', dir, what));
+const publishDefaults = () => safe(() => publishDefaultsFrom(platform.settingsObject()), BUILTIN_DEFAULTS);
 // `solocut publish upload` (agent) → the app uploads with its tokens and answers in publish-result.json (docs/14)
 const publishHandoff = new PublishHandoff({
   upload: { youtube: youtube.uploadToYouTube, tiktok: tiktok.uploadToTikTok },
+  defaults: () => publishDefaults(),
   record: async (dir, target, status, url) => {
     await runCli(['publish', 'record', '--target', target, '--status', status, ...(url ? ['--url', url] : [])], { cwd: dir }).catch(() => undefined);
   },
@@ -364,6 +369,14 @@ function registerIpc(): void {
     emit: (channel, ...args) => emitAccounts(channel, ...args),
     ...accountsStack,
   });
+  registerBenchIpc({
+    handle: (channel, fn) => handle(channel, (_e, ...args) => fn(...(args as Parameters<typeof fn>))),
+    emit: (channel, ...args) => (emit as (wc: WebContents | null, c: string, ...a: unknown[]) => void)(mainWc(), channel, ...args),
+    run: (args, o) => runCli(args, o),
+    window: () => mainWindow,
+    isProject: (dir) => project.isProjectDir(dir),
+    templateOf: (dir) => (dir ? project.readProject(dir).template?.id : undefined) ?? project.DEFAULT_TEMPLATE_ID,
+  });
   handle('terminal:close', (_e, id) => {
     agentWatch.forget(id);
     terminals.close(id);
@@ -497,7 +510,11 @@ function registerIpc(): void {
 
   handle('thumbs:list', (_e, dir) => thumbs.listThumbnails(dir));
 
-  handle('publish:load', (_e, dir) => publish.loadView(dir));
+  handle('publish:load', (_e, dir) => publish.loadView(dir, new Date(), publishDefaults()));
+  handle('publish:setPrivacy', (_e, dir, target, value) => {
+    if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
+    return publish.setPrivacy(dir, target, value);
+  });
   handle('publish:setThumbnail', (_e, dir, path) => {
     if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
     return publish.setThumbnail(dir, path);
@@ -550,6 +567,12 @@ function setupSession(): void {
   ses.setPermissionCheckHandler((wc, permission) => (wc ? isTrustedUrl(wc.getURL()) : false) && allowed.has(permission));
   ses.setDisplayMediaRequestHandler(
     async (_req, cb) => {
+      // the reference window (お手本動画) when the benchmark panel armed a capture
+      const reference = takeReferenceCapture();
+      if (reference) {
+        cb(reference);
+        return;
+      }
       const sources = await desktopCapturer.getSources({ types: ['screen', 'window'] });
       const src = sources.find((s) => s.id === pendingCapture.sourceId) ?? sources.find((s) => s.id.startsWith('screen:'));
       if (!src) {
@@ -647,6 +670,7 @@ app.on('will-quit', () => {
   settingsWatcher?.close();
   stopAllCursorLogs();
   recorder.endAll();
+  discardAllCaptures();
   analysis.cancel();
   accountsStack.dispose();
   updater.stop();

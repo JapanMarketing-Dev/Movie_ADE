@@ -44,12 +44,14 @@
 | title | 必須、100 文字（コードポイント）まで、`<` `>` 不可 | YouTube だけ止まる |
 | description | 5000 バイト（UTF-8）まで、`<` `>` 不可 | YouTube だけ止まる |
 | tags | 合計 500 文字まで（YouTube の数え方: 区切りと、空白を含むタグの引用符も数える）。`#` は外し、重複は除く | YouTube だけ止まる |
-| youtube.privacy | 不明な値・省略は private | お知らせ |
+| youtube.privacy | 省略・不明な値は設定の `publish.youtube.privacy`（既定 private） | お知らせ |
 | youtube.publishAt | 未来の日時。指定すると private で上げて指定日時に公開 | 過去・不正は YouTube が止まる |
 | tiktok.caption | 2200 文字（UTF-16）まで。空ならタイトル＋ハッシュタグ | TikTok だけ止まる |
-| tiktok.privacy | 不明な値は SELF_ONLY。アカウントが選べない値なら SELF_ONLY に下げる | お知らせ |
+| tiktok.privacy | 省略・不明な値は設定の `publish.tiktok.privacy`（既定 SELF_ONLY）。アカウントが選べない値なら SELF_ONLY に下げる | お知らせ |
 | video | ファイルがないと全部止まる | |
 | thumbnail | PNG / JPEG。ないときはサムネイルなしで上げる | お知らせ |
+
+投稿画面では投稿先ごとに公開範囲を選べる（選ぶとこの動画の publish.json に書く。書かれていなければ「設定の既定値」と表示）。投稿の直前には「YouTube に『非公開』で投稿します」「TikTok に『自分のみ』で投稿します」のように、公開範囲を必ず出す。
 
 画面の「OK・投稿する」は、直すところがあっても押せる（投稿プロンプトでエージェントが先に直す）。押せないのは、動画がない・投稿先がない・YouTube に未接続・アップロード中・この動画を投稿済みのとき。
 

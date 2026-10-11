@@ -77,7 +77,11 @@ export const TemplateFileSchema = z.object({
     safeArea: z.enum(['youtube', 'tiktok', 'none']).default('none'),
     burnIn: z.boolean(),
     srt: z.boolean().default(false),
-  }),
+    /** Each caption stays at least this long when the next one leaves room (ms). */
+    minDurationMs: z.number().int().min(100).max(5000).optional(),
+    /** A caption never spans more than this (ms); longer speech is split between words. */
+    maxDurationMs: z.number().int().min(500).max(15000).optional(),
+  }).refine((c) => c.minDurationMs === undefined || c.maxDurationMs === undefined || c.minDurationMs <= c.maxDurationMs, { message: 'captions.minDurationMs must be ≤ maxDurationMs' }),
   audio: z.object({
     loudness: z.number().min(-70).max(0),
     truePeak: z.number().min(-9).max(0),
@@ -96,7 +100,7 @@ export const TemplateFileSchema = z.object({
   /** docs/09 sfx rules: where effects fire (core sfxFromRules). The cap falls back to audio.sfx.maxPerMinute. */
   sfx: z.object({
     rules: z.array(z.object({
-      on: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in']),
+      on: z.enum(['emphasis', 'section', 'cut', 'scene-in', 'caption-in', 'zoom-in']),
       kind: z.string().min(1),
       probability: z.number().min(0).max(1).optional(),
       gainDb: z.number().optional(),

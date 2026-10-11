@@ -267,12 +267,18 @@ describe('benchmark profile', () => {
   });
   it('turns a profile into a template patch', () => {
     const patch = profileToTemplatePatch(benchmarkProfile(samples));
-    expect(patch.captions).toEqual({ style: 'tiktok-bold', highlight: 'word', maxCharsPerLine: 18, maxLines: 1, position: { anchor: 'bottom', y: 0.8 }, emphasis: 'auto' });
+    // one 16:9 video: the heavy tech style (never the vertical tiktok one)
+    expect(patch.captions).toEqual({ style: 'tech-bold', highlight: 'word', maxCharsPerLine: 18, maxLines: 1, position: { anchor: 'bottom', y: 0.8 }, emphasis: 'auto' });
     expect(patch.cut).toEqual({ jumpZoom: { every: 4, scale: 1.1 } });
-    expect(patch.audio).toEqual({ bgm: { gainDb: -20 }, sfx: { maxPerMinute: 32, gainDb: -8 } });
-    expect(patch.sfx!.maxPerMin).toBe(32);
+    // a busy reference (32 a minute) is capped to a tasteful 8
+    expect(patch.audio).toEqual({ bgm: { gainDb: -20 }, sfx: { maxPerMinute: 8, gainDb: -18 } });
+    expect(patch.sfx!.maxPerMin).toBe(8);
+    expect(patch.sfx!.rules).toContainEqual({ on: 'zoom-in', kind: 'swoosh-in', probability: 0.7 });
     expect(patch.sfx!.rules.map((r) => r.on)).toEqual(expect.arrayContaining(['section']));
-    expect(patch.sfx!.rules.every((r) => r.kind === 'whoosh' || r.on === 'section')).toBe(true);
+    expect(patch.sfx!.rules.every((r) => r.kind === 'whoosh' || r.on === 'section' || r.on === 'zoom-in')).toBe(true);
+    // characters per line unknown (no OCR): the template's value is kept
+    const noChars = profileToTemplatePatch(benchmarkProfile(samples.map((s) => ({ ...s, captionBoxes: s.captionBoxes.map(({ chars: _c, ...b }) => b) }))));
+    expect(noChars.captions!.maxCharsPerLine).toBeUndefined();
     expect(patch.captionLook).toMatchObject({ size: 0.05, fill: '#FFFFFF', emphasisColor: '#FFE14D' });
     const quiet = profileToTemplatePatch(benchmarkProfile(samples.map((s) => ({ ...s, captionBoxes: [], sfxOnsets: [], sfxKinds: [], bgmRelDb: undefined, punchIn: undefined }) as BenchmarkSample)));
     expect(quiet).toEqual({ captions: { highlight: 'none' } });

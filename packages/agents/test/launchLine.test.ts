@@ -8,10 +8,10 @@ const on = { ...DEFAULT_AGENT_PREFERENCES, skipPermissions: true };
 const off = { ...DEFAULT_AGENT_PREFERENCES, skipPermissions: false };
 
 describe('agentPrefsFromSettings (Solocut settings.json → catalog prefs)', () => {
-  it('empty or broken input gives the defaults with permissions kept', () => {
+  it('empty or broken input gives the defaults: permission prompts skipped (Solocut runs agents unattended)', () => {
     for (const input of [undefined, null, 42, 'x', [], {}]) {
       const p = agentPrefsFromSettings(input);
-      expect(p.skipPermissions).toBe(false);
+      expect(p.skipPermissions).toBe(true);
       expect(p.launch.claude).toEqual(DEFAULT_AGENT_PREFERENCES.launch.claude);
       expect(p.customAgents).toEqual([]);
     }
@@ -30,7 +30,10 @@ describe('agentPrefsFromSettings (Solocut settings.json → catalog prefs)', () 
     expect(p.skipPermissions).toBe(true);
     expect(p.launch.gemini).toEqual({ command: '/opt/gemini', args: '--model x' });
     expect(p.launch.codex).toEqual(DEFAULT_AGENT_PREFERENCES.launch.codex);
-    expect(agentPrefsFromSettings({ skipPermissions: 'yes' }).skipPermissions).toBe(false);
+    // only an explicit false turns it off
+    expect(agentPrefsFromSettings({ skipPermissions: false }).skipPermissions).toBe(false);
+    expect(agentPrefsFromSettings({ skipPermissions: 'yes' }).skipPermissions).toBe(true);
+    expect(agentPrefsFromSettings({ skipPermissions: 0 }).skipPermissions).toBe(true);
   });
 
   it('catalogCustomId folds Solocut ids into the catalog id form and leaves built-in ids alone', () => {
@@ -120,5 +123,74 @@ describe('AGENTS / catalogAgentDef', () => {
     expect(getAgent('claude')!.printMode).toBeTruthy();
     expect(getAgent('claude')!.homepage).toMatch(/^https:/);
     expect(AGENTS.filter((a) => a.popular).length).toBeGreaterThan(3);
+  });
+});
+
+// Every Solocut launch path (pane agent button, sendToAgent({ launch }) after a take, failover hand-off, restored
+// tab) starts the agent through agentLaunchLine with the prefs read from settings.json, so these cover all of them.
+describe('Solocut launch paths: Claude Code bypass, Codex yolo by default', () => {
+  const fromSettings = agentPrefsFromSettings({});
+  const CLAUDE = '--dangerously-skip-permissions';
+  const CODEX = '--dangerously-bypass-approvals-and-sandbox';
+  // the catalog's default Claude Code args (--chrome), kept after the bypass flag
+  const DEFAULT_ARGS = DEFAULT_AGENT_PREFERENCES.launch.claude.args.split(/\s+/).filter(Boolean);
+
+  it('agent button / auto-launch after recording, in the project folder', () => {
+    const claude = agentLaunchLine('claude', fromSettings, { shell: 'posix', projectId: '/v/2026-10-11-x' });
+    expect(claude.ok && claude.argv).toEqual(['claude', CLAUDE, ...DEFAULT_ARGS]);
+    expect(claude.ok && claude.trustFolder).toBe(true);
+    const codex = agentLaunchLine('codex', fromSettings, { shell: 'posix', projectId: '/v/2026-10-11-x' });
+    expect(codex.ok && codex.argv).toContain(CODEX);
+    expect(codex.ok && codex.argv[0]).toBe('codex');
+  });
+
+  it('failover hand-off / a tab opened outside a project folder: still bypass, no folder trust', () => {
+    for (const projectId of [null, undefined]) {
+      const claude = agentLaunchLine('claude', fromSettings, { shell: 'posix', projectId });
+      expect(claude.ok && claude.argv).toContain(CLAUDE);
+      expect(claude.ok && claude.trustFolder).toBe(false);
+      const codex = agentLaunchLine('codex', fromSettings, { shell: 'posix', projectId });
+      expect(codex.ok && codex.argv).toContain(CODEX);
+    }
+  });
+
+  it('restored tab (resume) keeps the bypass flags', () => {
+    const claude = agentLaunchLine('claude', fromSettings, { shell: 'posix', projectId: '/p', resume: true });
+    expect(claude.ok && claude.argv).toEqual(['claude', CLAUDE, ...DEFAULT_ARGS, '--continue']);
+    const codex = agentLaunchLine('codex', fromSettings, { shell: 'posix', projectId: '/p', resume: true });
+    expect(codex.ok && codex.argv.slice(0, 3)).toEqual(['codex', 'resume', '--last']);
+    expect(codex.ok && codex.argv).toContain(CODEX);
+  });
+
+  it('Windows shells get the same flags', () => {
+    for (const shell of ['powershell', 'cmd'] as const) {
+      const claude = agentLaunchLine('claude', fromSettings, { shell, projectId: null });
+      expect(claude.ok && claude.argv).toContain(CLAUDE);
+      const codex = agentLaunchLine('codex', fromSettings, { shell, projectId: null });
+      expect(codex.ok && codex.argv).toContain(CODEX);
+    }
+  });
+
+  it("the user's own args that pick a mode win (no bypass added)", () => {
+    const plan = agentPrefsFromSettings({ launch: { claude: { command: 'claude', args: '--permission-mode plan' } } });
+    const claude = agentLaunchLine('claude', plan, { shell: 'posix', projectId: null });
+    expect(claude.ok && claude.argv).toEqual(['claude', '--permission-mode', 'plan']);
+    const ask = agentPrefsFromSettings({ launch: { codex: { command: 'codex', args: '--ask-for-approval on-request' } } });
+    const codex = agentLaunchLine('codex', ask, { shell: 'posix', projectId: null });
+    expect(codex.ok && codex.argv).not.toContain(CODEX);
+  });
+
+  it('other args are kept next to the bypass flag', () => {
+    const model = agentPrefsFromSettings({ launch: { claude: { command: 'claude', args: '--model opus' } } });
+    const claude = agentLaunchLine('claude', model, { shell: 'posix', projectId: null });
+    expect(claude.ok && claude.argv).toEqual(['claude', CLAUDE, '--model', 'opus']);
+  });
+
+  it('skipPermissions: false in settings turns it off for both', () => {
+    const off2 = agentPrefsFromSettings({ skipPermissions: false });
+    const claude = agentLaunchLine('claude', off2, { shell: 'posix', projectId: '/p' });
+    expect(claude.ok && claude.argv).toEqual(['claude', ...DEFAULT_ARGS]);
+    const codex = agentLaunchLine('codex', off2, { shell: 'posix', projectId: '/p' });
+    expect(codex.ok && codex.argv).toEqual(['codex']);
   });
 });

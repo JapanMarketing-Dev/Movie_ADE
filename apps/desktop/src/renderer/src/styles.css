@@ -1088,3 +1088,138 @@ textarea.input {
   align-items: center;
   gap: 8px;
 }
+
+/* ---------- reference video (お手本動画) ---------- */
+.bench {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bench__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bench__title {
+  margin: 0;
+  font-size: 14px;
+}
+.bench__subtitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+.bench__active,
+.bench__dim {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.bench__desc {
+  margin: 0;
+  font-size: 12px;
+}
+.bench__add,
+.bench__result,
+.bench__saved {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.bench__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bench__label {
+  font-size: 12px;
+}
+.bench__url {
+  flex: 1;
+  min-width: 220px;
+}
+.bench__clock {
+  width: 84px;
+}
+.bench__file {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+.bench__error {
+  margin: 0;
+  color: #ff6b5e;
+  font-size: 12px;
+}
+.bench__capture {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.bench__summary {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+.bench__summary-row {
+  display: contents;
+}
+.bench__summary dt {
+  color: var(--text-3);
+}
+.bench__summary dd {
+  margin: 0;
+}
+.bench__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.bench__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bench__list li.is-on .bench__name {
+  font-weight: 600;
+}
+.bench__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bench-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.bench-badge__text {
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bench-modal {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 16px;
+}
+.bench-modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}

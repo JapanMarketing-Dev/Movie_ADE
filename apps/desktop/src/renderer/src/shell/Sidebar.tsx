@@ -4,15 +4,11 @@ import {
   Clapperboard,
   Film,
   FolderOpen,
-  Home,
-  ListChecks,
   MessageSquareText,
-  Package,
   Plus,
   RefreshCw,
   Search,
   Send,
-  Settings,
   Video,
   X,
   type LucideIcon,
@@ -22,7 +18,7 @@ import { api } from '../lib/api';
 import { IconButton, TextField, Tooltip } from '../ui';
 import { dayBucket, initialOf } from './format';
 import { useST, type SKey } from './i18n';
-import { sidebarActive, sidebarPages, type Screen } from './modes';
+import { activeMode, sidebarPages, type Mode, type Screen } from './modes';
 import { matchesAll } from './search';
 import { shortcutLabel } from './shortcut';
 import { parseFeedbackList, parseTakes, type FeedbackEntry, type TakeEntry } from './projectItems';
@@ -31,7 +27,7 @@ import { parseFeedbackList, parseTakes, type FeedbackEntry, type TakeEntry } fro
  * Left sidebar (ported from Ferret src/renderer/components/Sidebar.tsx; Orca由来の寸法: 見出し 32px・行 28px・
  * 子の行は 18px 字下げ、MIT、Ferret 経由).
  *
- *   pages     … ホーム / 撮影 / 編集 / 確認 / 投稿 / ライブラリ / 設定
+ *   modes     … 撮影 / 編集 / 投稿 (the same three as the title bar; Home is 新しい動画 / the logo, settings the footer gear)
  *   projects  … recent videos with search; the open one expands into its finished video, takes and feedback sessions.
  * Sections collapse; the state is kept per section in localStorage.
  */
@@ -39,15 +35,7 @@ type SectionKey = 'takes' | 'renders' | 'feedback';
 
 const COLLAPSE_KEY = 'solocut.sidebar.collapsed';
 
-const PAGE_ICON: Partial<Record<Screen, LucideIcon>> = {
-  home: Home,
-  record: Video,
-  workspace: Clapperboard,
-  review: ListChecks,
-  publish: Send,
-  library: Package,
-  settings: Settings,
-};
+const MODE_ICON: Record<Mode, LucideIcon> = { record: Video, edit: Clapperboard, publish: Send };
 
 function loadCollapsed(): Record<string, boolean> {
   try {
@@ -64,6 +52,7 @@ export function Sidebar({
   recent,
   snapshot,
   onNavigate,
+  onMode,
   onOpenProject,
   onNewProject,
   onOpenFolder,
@@ -75,6 +64,8 @@ export function Sidebar({
   /** snapshot of the open project (its finished video) */
   snapshot: ProjectSnapshot | null;
   onNavigate: (s: Screen) => void;
+  /** 撮影 / 編集 / 投稿 (App picks the screen: Home for 撮影 without a video, the last 投稿 tab) */
+  onMode: (m: Mode) => void;
   onOpenProject: (dir: string) => void;
   onNewProject: () => void;
   onOpenFolder: () => void;
@@ -113,16 +104,17 @@ export function Sidebar({
   }, [projects, project?.dir]);
 
   const pages = sidebarPages(!!project);
+  const current = activeMode(screen, !!project);
 
   return (
     <aside className="sidebar" data-testid="sidebar" aria-label={t('sidebar.label')}>
       <div className="sidebar__list">
         <nav className="sb-pages" aria-label={t('sidebar.pages')}>
-          {pages.map(({ screen: id, key, disabled }) => {
-            const Icon = PAGE_ICON[id] ?? Home;
-            const active = sidebarActive(id, screen);
+          {pages.map(({ mode, key, disabled }) => {
+            const Icon = MODE_ICON[mode];
+            const active = current === mode;
             return (
-              <button key={id} type="button" className={`sb-page${active ? ' is-active' : ''}`} aria-current={active || undefined} disabled={disabled} onClick={() => onNavigate(id)} data-testid={`sb-page-${id}`}>
+              <button key={mode} type="button" className={`sb-page${active ? ' is-active' : ''}`} aria-current={active || undefined} disabled={disabled} onClick={() => onMode(mode)} data-testid={`sb-mode-${mode}`}>
                 <Icon size={14} />
                 <span>{t(key)}</span>
               </button>
@@ -283,7 +275,7 @@ function ProjectChildren({
         (() => {
           const rendered = !!snapshot?.preview;
           const stale = !!snapshot?.stale;
-          const sel = screen === 'workspace' || screen === 'review';
+          const sel = screen === 'workspace';
           return (
             <button type="button" className={`sb-item${sel ? ' is-selected' : ''}`} onClick={() => onNavigate('workspace')} title={snapshot?.preview?.path ?? t('sidebar.render.video')}>
               <Film size={13} aria-hidden="true" />
@@ -329,7 +321,7 @@ function ProjectChildren({
           <p className="sb-project__empty">{t('sidebar.noFeedback')}</p>
         ) : (
           feedback.map((f) => (
-            <button key={f.id} type="button" className="sb-item" onClick={() => onNavigate('review')} title={f.path}>
+            <button key={f.id} type="button" className="sb-item" onClick={() => onNavigate('workspace')} title={f.path}>
               <MessageSquareText size={13} aria-hidden="true" />
               <span className="sb-item__label sb-item__label--mono">{f.id}</span>
               <span className="sb-item__meta">{t('sidebar.items', { n: String(f.items) })}</span>

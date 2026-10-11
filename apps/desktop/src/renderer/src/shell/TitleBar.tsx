@@ -1,24 +1,24 @@
-import { Clapperboard, ListChecks, Send, Settings, Video } from 'lucide-react';
+import { Clapperboard, Send, Video } from 'lucide-react';
 import type { ProjectInfo, RecentProject } from '@shared/types';
 import iconUrl from '../assets/icon.svg';
-import { IconButton, RecordButton, Segmented, Tooltip, type SegmentedOption } from '../ui';
+import { RecordButton, Segmented, type SegmentedOption } from '../ui';
 import { useST } from './i18n';
 import { LayoutToggles } from './LayoutToggles';
-import { MODES, type Mode } from './modes';
+import { MODES, modeNeedsProject, type Mode } from './modes';
 import { ProjectMenu } from './ProjectMenu';
 import { shortcutLabel, type ShortcutId } from './shortcut';
 
 /**
  * Title bar (36px), the window's drag strip (ported from Ferret src/renderer/components/TitleBar.tsx).
  *
- *   left   … logo / project switcher (recent projects)
- *   center … the four modes 撮影 / 編集 / 確認 / 投稿 (one 16:9 video per project: no output switcher)
- *   right  … panel toggles / ● Record / settings
+ *   left   … logo (→ Home: new video and the video list) / project switcher (recent projects)
+ *   center … the three modes 撮影 / 編集 / 投稿 (確認 is inside 編集; one 16:9 video per project)
+ *   right  … panel toggles / ● Record (settings open from the footer gear and ⌘,)
  *
  * The macOS traffic lights take the left inset (--titlebar-inset in shell.css).
  */
-const MODE_ICON: Record<Mode, typeof Video> = { record: Video, edit: Clapperboard, review: ListChecks, publish: Send };
-const MODE_SHORTCUT: Record<Mode, ShortcutId> = { record: 'modeRecord', edit: 'modeEdit', review: 'modeReview', publish: 'modePublish' };
+const MODE_ICON: Record<Mode, typeof Video> = { record: Video, edit: Clapperboard, publish: Send };
+const MODE_SHORTCUT: Record<Mode, ShortcutId> = { record: 'modeRecord', edit: 'modeEdit', publish: 'modePublish' };
 
 export function TitleBar({
   project,
@@ -33,7 +33,7 @@ export function TitleBar({
   onRefreshRecent,
   onMode,
   onRecord,
-  onSettings,
+  onHome,
 }: {
   project: ProjectInfo | null;
   recent: RecentProject[];
@@ -47,7 +47,8 @@ export function TitleBar({
   onRefreshRecent: () => void;
   onMode: (mode: Mode) => void;
   onRecord: () => void;
-  onSettings: () => void;
+  /** the logo: Home (new video form and the video list) */
+  onHome: () => void;
 }) {
   const t = useST();
   const modeOptions: SegmentedOption<Mode>[] = MODES.map((m) => {
@@ -57,7 +58,7 @@ export function TitleBar({
       label: t(`mode.${m}`),
       icon: <Icon size={13} />,
       title: `${t(`mode.${m}.title`)} (${shortcutLabel(MODE_SHORTCUT[m])})`,
-      disabled: !project && m !== 'record',
+      disabled: !project && modeNeedsProject(m),
       testId: `mode-${m}`,
     };
   });
@@ -65,9 +66,9 @@ export function TitleBar({
   return (
     <header className="app-titlebar" data-testid="titlebar">
       <div className="app-titlebar__left">
-        <span className="app-titlebar__logo">
-          <img src={iconUrl} width={18} height={18} alt="Solocut" />
-        </span>
+        <button type="button" className="app-titlebar__logo app-titlebar__home" onClick={onHome} title={t('nav.home')} aria-label={t('nav.home')} data-testid="titlebar-home">
+          <img src={iconUrl} width={18} height={18} alt="" />
+        </button>
         <span className="app-titlebar__sep" aria-hidden="true" />
         <ProjectMenu
           project={project}
@@ -92,9 +93,6 @@ export function TitleBar({
           title={`${recording ? t('record.stop') : t('record.start')} (${shortcutLabel('record')})`}
           onClick={onRecord}
         />
-        <Tooltip label={t('common.settings')} shortcut={shortcutLabel('settings')} align="end">
-          <IconButton label={t('common.settings')} icon={<Settings size={14} />} onClick={onSettings} data-testid="settings-button" />
-        </Tooltip>
       </div>
     </header>
   );

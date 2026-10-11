@@ -30,13 +30,19 @@ cut:
   ngMarkers: cut
   minKeepMs: 400
 
+# 字幕: 日本の技術系 YouTube でよく見る形。極太ゴシック・白文字に太い縁・下中央（下から約8%）・1行 18 字まで・2行まで。
+# 1字幕に 1〜2 語のキーワードを黄色に（emphasis: auto。用語集・数字・注意の言葉を優先）。表示は 0.8〜4 秒
 captions:
-  maxCharsPerLine: 26
+  style: tech-bold
+  maxCharsPerLine: 18
   maxLines: 2
-  position: { anchor: bottom, y: 0.93 }
+  emphasis: auto
+  position: { anchor: bottom, y: 0.92 }
+  minDurationMs: 800
+  maxDurationMs: 4000
 
 audio:
-  sfx: { maxPerMinute: 3, gainDb: -16 }
+  sfx: { maxPerMinute: 6, gainDb: -18 }
 
 decisions:
   # 画面の操作を切ると手順が抜けるので、自動で切るしきい値を語りより厳しくする
@@ -45,12 +51,17 @@ decisions:
 # 画面とカメラの切り替え（全画面・ワイプ・カメラのみ）の長さ
 multicam: { maxShotSec: 90, minShotSec: 3 }
 
-# 効果音のルール（solocut sfx apply）。章の頭と場面の切り替わりだけに控えめに入れる
+# 効果音のルール（solocut sfx apply）。組み込みの効果音（~/.solocut/sfx/builtin、初回に自動で作る）を使う。
+# 1分に 4〜8 回の控えめな密度。章の頭・ズームイン・強調語・場面の切り替わりに入れ、話し声の頭とは重ねない
 sfx:
   rules:
     - { on: section, kind: whoosh }
-    - { on: scene-in, kind: pop, probability: 0.5 }
-  maxPerMin: 3
+    - { on: zoom-in, kind: swoosh-in, probability: 0.7, gainDb: -20 }
+    - { on: scene-in, kind: pop, probability: 0.6 }
+    - { on: emphasis, kind: pop, probability: 0.5, gainDb: -22 }
+  maxPerMin: 6
+  gainDb: -18
+  minSpacingMs: 2500
 
 # クリックした場所へ寄るズーム（solocut tracks apply）
 zoom: { followClicks: true }
@@ -70,4 +81,5 @@ outputs:
   youtube: { }
 
 # 人の確認はアプリの投稿画面で、完成した動画を見て行う（OK なら投稿）。そのため review の手順は置かず、final まで進める。
-pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, masks, preview, check, final, thumbnail, metadata]
+# sfx は layout（tracks apply のズーム）の後: ズームインに効果音を合わせる
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, layout, sfx, masks, preview, check, final, thumbnail, metadata]

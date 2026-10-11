@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
 import { PublishHandoff, PublishWatcher, readLog, readResult, type HandoffDeps, type UploadContext, type UploadOutcome } from '../src/main/publish/handoff';
-import { loadView, projectRel, setThumbnail } from '../src/main/publish/publish';
+import { loadView, projectRel, setPrivacy, setThumbnail } from '../src/main/publish/publish';
 import { listThumbnails } from '../src/main/services/thumbs';
 import { mergeEnv, tiktokClientFrom, youtubeClientFrom } from '../src/main/publish/config';
 import { dotenvValue, googleClientFromJson, publishDefines, tiktokEnvFileName } from '../src/main/publish/buildEnv';
@@ -630,5 +630,45 @@ describe('TikTok client key from the release env file', () => {
     expect(d).toEqual({ 'import.meta.env.MAIN_VITE_SOLOCUT_TIKTOK_CLIENT_KEY': '"sandbox-key"' });
     expect(JSON.stringify(d)).not.toMatch(/secret/);
     expect(publishDefines({ SOLOCUT_TIKTOK_CLIENT_KEY: 'env-key' }, null, file)).toEqual({ 'import.meta.env.MAIN_VITE_SOLOCUT_TIKTOK_CLIENT_KEY': '"env-key"' });
+  });
+});
+
+describe('default visibility in the hand-off and the screen', () => {
+  it('the upload uses the settings default when publish.json has no privacy', async () => {
+    writeSpec({ ...spec, youtube: {}, tiktok: { enabled: true, caption: 'c' } });
+    writeReq();
+    const { d, calls } = deps();
+    d.defaults = () => ({ youtubePrivacy: 'unlisted', tiktokPrivacy: 'MUTUAL_FOLLOW_FRIENDS' });
+    await new PublishHandoff(d).check(dir);
+    expect(calls.map((c) => [c.target, c.target === 'youtube' ? c.ctx.spec.youtube.privacy : c.ctx.spec.tiktok.privacy])).toEqual([
+      ['youtube', 'unlisted'],
+      ['tiktok', 'MUTUAL_FOLLOW_FRIENDS'],
+    ]);
+  });
+  it('without defaults the safe built-ins are used', async () => {
+    writeSpec({ ...spec, youtube: {} });
+    writeReq();
+    const { d, calls } = deps();
+    await new PublishHandoff(d).check(dir);
+    expect(calls[0]!.ctx.spec.youtube.privacy).toBe('private');
+  });
+  it('loadView shows the effective value; setPrivacy writes this video only', () => {
+    writeSpec({ ...spec, youtube: {}, custom: true });
+    const v = loadView(dir, new Date(NOW), { youtubePrivacy: 'public', tiktokPrivacy: 'SELF_ONLY' });
+    expect(v.spec?.youtube).toMatchObject({ privacy: 'public', privacyDefaulted: true });
+    expect(setPrivacy(dir, 'youtube', 'unlisted')).toEqual({ ok: true });
+    expect(setPrivacy(dir, 'tiktok', 'FOLLOWER_OF_CREATOR')).toEqual({ ok: true });
+    const j = JSON.parse(readFileSync(join(dir, 'publish.json'), 'utf8'));
+    expect(j).toMatchObject({ custom: true, youtube: { privacy: 'unlisted' }, tiktok: { privacy: 'FOLLOWER_OF_CREATOR' } });
+    expect(loadView(dir, new Date(NOW), { youtubePrivacy: 'public', tiktokPrivacy: 'SELF_ONLY' }).spec?.youtube).toMatchObject({ privacy: 'unlisted', privacyDefaulted: false });
+  });
+  it('setPrivacy refuses bad values, a missing file and broken JSON (file untouched)', () => {
+    expect(setPrivacy(dir, 'youtube', 'private').ok).toBe(false); // no publish.json yet
+    writeSpec(spec);
+    expect(setPrivacy(dir, 'youtube', 'PUBLIC_TO_EVERYONE').ok).toBe(false);
+    expect(setPrivacy(dir, 'tiktok', 'public').ok).toBe(false);
+    writeSpec('{broken');
+    expect(setPrivacy(dir, 'youtube', 'private')).toMatchObject({ ok: false, error: expect.stringContaining('JSON') });
+    expect(readFileSync(join(dir, 'publish.json'), 'utf8')).toBe('{broken');
   });
 });

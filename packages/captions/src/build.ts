@@ -1,6 +1,7 @@
 import type { Caption, Decided, Frame, Rational } from '@solocut/core';
 import { secondsToFrame } from '@solocut/core';
 import { glossaryRanges, layoutLines, phrases } from './lines.js';
+import { pickEmphasis } from './emphasis.js';
 import { CAPTION_STYLES } from './styles.js';
 import type { Word } from './whisper.js';
 
@@ -21,6 +22,12 @@ export interface BuildOptions {
   decided?: Decided;
   /** Terms never split across captions or lines ("Claude Code", "CLAUDE.md"); matched case-insensitively. */
   glossary?: string[];
+  /** A caption never spans more than this from its first to its last word (ms); longer ones are split between words. */
+  maxDurationMs?: number;
+  /** Timeline length: captions never run past it (the minimum duration is cut short at the end). */
+  endFrame?: Frame;
+  /** Color 1–2 key terms per caption (pickEmphasis). */
+  emphasis?: { auto: boolean; max?: number };
 }
 
 interface MWord { w: string; start: number; end: number; s: Frame; e: Frame; i: number }
@@ -41,6 +48,8 @@ export function endsSentence(prev: string, next: string | undefined, language: '
   return !(language === 'ja' ? /^[A-Za-z0-9]/ : /^[a-z0-9]/).test(next);
 }
 
+const JA_END = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]$/u;
+const JA_START = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]/u;
 const LATIN_END = /[A-Za-z0-9]$/;
 const LATIN_START = /^[A-Za-z0-9]/;
 
@@ -121,7 +130,9 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
   let cur: MWord[] = [];
   for (const w of mapped) {
     const prev = cur[cur.length - 1];
-    if (prev && !glued[prev.i] && (w.start - prev.end > gap || w.s < prev.s || endsSentence(prev.w, w.w, o.language))) {
+    // whisper can split a word ("設|定") around a pause; a pause inside one phrase does not start a new caption
+    const inPhrase = !!prev && o.language === 'ja' && JA_END.test(prev.w) && JA_START.test(w.w) && phrases(prev.w + w.w).length === 1;
+    if (prev && !glued[prev.i] && ((w.start - prev.end > gap && !inPhrase) || w.s < prev.s || endsSentence(prev.w, w.w, o.language))) {
       groups.push(cur);
       cur = [];
     }
@@ -131,7 +142,9 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
 
   // 3. pack units into captions
   const glossary = o.glossary ?? [];
-  const fits = (ws: MWord[]) => layoutLines(joinWords(ws, o.language), o.maxCharsPerLine, o.language, glossary).length <= o.maxLines;
+  const maxSpan = o.maxDurationMs ? Math.max(1, Math.round((o.maxDurationMs / 1000) * fpsN)) : Number.POSITIVE_INFINITY;
+  const fits = (ws: MWord[]) => (ws.length <= 1 || ws[ws.length - 1]!.e - ws[0]!.s <= maxSpan)
+    && layoutLines(joinWords(ws, o.language), o.maxCharsPerLine, o.language, glossary).length <= o.maxLines;
   // units never end inside a glossary term
   const atomic = (us: MWord[][]): MWord[][] => {
     const out: MWord[][] = [];
@@ -179,7 +192,9 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
       spoken: text,
       words: ws.map((w) => ({ text: w.w, start: w.s, end: w.e })),
       lines: layoutLines(text, o.maxCharsPerLine, o.language, glossary),
-      emphasis: [],
+      emphasis: o.emphasis?.auto
+        ? pickEmphasis(text, { language: o.language, glossary, ...(o.emphasis.max !== undefined ? { max: o.emphasis.max } : {}) }).map((word) => ({ word, style: 'color' as const }))
+        : [],
       style: o.style,
       position: { ...position },
       decided: { ...decided },
@@ -202,11 +217,12 @@ export function buildCaptions(words: Word[], o: BuildOptions): Caption[] {
         next.range.end = Math.max(next.range.end, next.range.start + 1);
       }
     }
+    if (o.endFrame !== undefined && c.range.end > o.endFrame) c.range.end = o.endFrame;
     for (const w of c.words) {
       w.start = Math.min(Math.max(w.start, c.range.start), c.range.end);
       w.end = Math.min(Math.max(w.end, w.start), c.range.end);
     }
   }
-  return caps;
+  return o.endFrame === undefined ? caps : caps.filter((c) => c.range.start < o.endFrame! && c.range.end > c.range.start);
 }
 

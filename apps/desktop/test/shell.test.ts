@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatShortcut, matchesShortcut, setShortcutPlatform, shortcutFor, shortcutLabel, SHORTCUT_SPECS, type KeyLike } from '../src/renderer/src/shell/shortcut';
-import { modeOf, needsProject, parseNavigateDetail, parseScreen, screenForMode, sidebarActive, sidebarPages, MODES, SCREENS } from '../src/renderer/src/shell/modes';
+import { activeMode, modeNeedsProject, modeOf, needsProject, parseNavigateDetail, parseScreen, screenForMode, sidebarPages, MODES, SCREENS } from '../src/renderer/src/shell/modes';
 import { clampSidebarWidth, DEFAULT_LAYOUT, parseLayout, setPanel, SIDEBAR_MAX, SIDEBAR_MIN, togglePanel } from '../src/renderer/src/shell/layout';
 import { analysisProgress, dayBucket, formatBytes, formatElapsed, initialOf, shortPath, summarizePipeline, summarizeTools, updatePill } from '../src/renderer/src/shell/format';
 import { fuzzyScore, matchesAll, normalize, rankItems } from '../src/renderer/src/shell/search';
@@ -44,6 +44,9 @@ describe('shortcut matching', () => {
     expect(shortcutFor(key('R', { metaKey: true, shiftKey: true }), true)).toBe('record');
     expect(shortcutFor(key('r', { metaKey: true }), true)).toBeNull(); // ⌘R stays the menu's reload
     expect(shortcutFor(key('2', { ctrlKey: true }), false)).toBe('modeEdit');
+    // three modes: ⌘1 撮影, ⌘2 編集, ⌘3 投稿; ⌘4 is free
+    expect(shortcutFor(key('3', { ctrlKey: true }), false)).toBe('modePublish');
+    expect(shortcutFor(key('4', { ctrlKey: true }), false)).toBeNull();
   });
   it('ignores plain keys (typing in fields and terminals)', () => {
     expect(shortcutFor(key('p'), true)).toBeNull();
@@ -63,14 +66,28 @@ describe('modes', () => {
   it('maps every screen to at most one mode', () => {
     expect(modeOf('record')).toBe('record');
     expect(modeOf('workspace')).toBe('edit');
-    expect(modeOf('review')).toBe('review');
     expect(modeOf('publish')).toBe('publish');
     expect(modeOf('thumbnails')).toBe('publish');
     for (const s of ['home', 'library', 'settings'] as const) expect(modeOf(s)).toBeNull();
   });
-  it('round-trips mode → screen → mode', () => {
+  it('three modes: 撮影 / 編集 / 投稿 (確認 is inside 編集)', () => {
+    expect(MODES).toEqual(['record', 'edit', 'publish']);
+    expect(SCREENS).not.toContain('review');
+  });
+  it('round-trips mode → screen → mode with a video open', () => {
     for (const m of MODES) expect(modeOf(screenForMode(m))).toBe(m);
     expect(screenForMode('publish', 'thumbnails')).toBe('thumbnails');
+  });
+  it('without a video 撮影 goes to Home and Home shows as 撮影', () => {
+    expect(screenForMode('record', 'publish', false)).toBe('home');
+    expect(screenForMode('record', 'publish', true)).toBe('record');
+    expect(activeMode('home', false)).toBe('record');
+    expect(activeMode('home', true)).toBeNull();
+    expect(activeMode('thumbnails', true)).toBe('publish');
+    for (const s of ['settings', 'library'] as const) expect(activeMode(s, false)).toBeNull();
+  });
+  it('編集 / 投稿 need a video, 撮影 does not', () => {
+    expect(MODES.filter(modeNeedsProject)).toEqual(['edit', 'publish']);
   });
   it('knows which screens need a project', () => {
     expect(needsProject('home')).toBe(false);
@@ -91,18 +108,20 @@ describe('modes', () => {
     expect(parseNavigateDetail({ screen: 'publish' })).toBe('publish');
     for (const bad of [undefined, null, 42, '', 'nope', {}, { screen: 3 }, ['record'], { screen: '__proto__' }]) expect(parseNavigateDetail(bad)).toBeNull();
   });
-  it('sidebar: ホーム, the four modes, ライブラリ, 設定; modes other than 撮影 need a video', () => {
+  it('sidebar: only 撮影 / 編集 / 投稿 (no ホーム, 確認, ライブラリ, 設定)', () => {
     const none = sidebarPages(false);
-    expect(none.map((p) => p.screen)).toEqual(['home', 'record', 'workspace', 'review', 'publish', 'library', 'settings']);
-    expect(none.filter((p) => p.disabled).map((p) => p.screen)).toEqual(['workspace', 'review', 'publish']);
-    expect(sidebarPages(true).some((p) => p.disabled)).toBe(false);
-    for (const p of none) expect(SCREENS).toContain(p.screen);
+    expect(none.map((p) => p.mode)).toEqual(['record', 'edit', 'publish']);
+    expect(none.map((p) => p.key)).toEqual(['mode.record', 'mode.edit', 'mode.publish']);
+    expect(none.map((p) => p.screen)).toEqual(['home', 'workspace', 'publish']);
+    expect(none.filter((p) => p.disabled).map((p) => p.mode)).toEqual(['edit', 'publish']);
+    const open = sidebarPages(true, 'thumbnails');
+    expect(open.map((p) => p.screen)).toEqual(['record', 'workspace', 'thumbnails']);
+    expect(open.some((p) => p.disabled)).toBe(false);
+    for (const p of [...none, ...open]) expect(SCREENS).toContain(p.screen);
   });
-  it('sidebar highlights 投稿 on the thumbnails tab too', () => {
-    expect(sidebarActive('publish', 'thumbnails')).toBe(true);
-    expect(sidebarActive('publish', 'publish')).toBe(true);
-    expect(sidebarActive('workspace', 'review')).toBe(false);
-    expect(sidebarActive('home', 'home')).toBe(true);
+  it('review stays a navigation alias of the workspace', () => {
+    expect(parseScreen('review')).toBe('workspace');
+    expect(parseNavigateDetail({ screen: 'review' })).toBe('workspace');
   });
   it('parses navigation requests, rejecting unknown screens', () => {
     for (const s of SCREENS) expect(parseScreen(s)).toBe(s);

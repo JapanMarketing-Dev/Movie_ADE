@@ -20,7 +20,7 @@ import { PaneTabs } from './shell/PaneTabs';
 import { QuickOpen, type PaletteItem } from './shell/QuickOpen';
 import { layoutStore, layoutToSettings, useLayout } from './shell/layout';
 import { setSetting, settingsStore, useStore } from './shell/stores';
-import { modeOf, needsProject, parseNavigateDetail, parseScreen, screenForMode, type Mode, type Screen } from './shell/modes';
+import { activeMode, needsProject, parseNavigateDetail, parseScreen, screenForMode, type Mode, type Screen } from './shell/modes';
 import { AccountLoginDialog } from './components/AgentAccounts';
 import { setShortcutPlatform, shortcutFor, shortcutLabel } from './shell/shortcut';
 import { formatElapsed } from './shell/format';
@@ -243,7 +243,9 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
     setScreen('record');
   }, [recording, screen, setScreen]);
 
-  const onMode = useCallback((m: Mode) => setScreen(screenForMode(m, publishTab)), [setScreen, publishTab]);
+  // 撮影 without an open video shows Home (make or open one first)
+  const hasProject = project !== null;
+  const onMode = useCallback((m: Mode) => setScreen(screenForMode(m, publishTab, hasProject)), [setScreen, publishTab, hasProject]);
 
   // same flow as the prompt bar under the terminal: main picks the project's agent terminal, or one is opened
   const sendPrompt = useCallback(
@@ -292,8 +294,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
           return onMode('record');
         case 'modeEdit':
           return project && onMode('edit');
-        case 'modeReview':
-          return project && onMode('review');
         case 'modePublish':
           return project && onMode('publish');
       }
@@ -314,7 +314,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       { s: 'home', key: 'nav.home' },
       { s: 'record', key: 'mode.record' },
       { s: 'workspace', key: 'mode.edit' },
-      { s: 'review', key: 'mode.review' },
       { s: 'publish', key: 'mode.publish' },
       { s: 'thumbnails', key: 'nav.thumbnails' },
       { s: 'library', key: 'nav.library' },
@@ -333,8 +332,8 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
     return items;
   }, [recent, prompts, project, openProject, sendPrompt, setScreen, openSettings, newProject, openFolder, t]);
 
-  const mode = modeOf(screen);
-  const wsVisible = screen === 'workspace' || screen === 'review';
+  const mode = activeMode(screen, hasProject);
+  const wsVisible = screen === 'workspace';
   const recordLabel = rec.state === 'recording' ? `${t('record.buttonStop')} ${formatElapsed(performance.now() - (rec.startedAtMs ?? performance.now()))}` : rec.state === 'stopping' ? t('record.stopping') : t('record.button');
   const shellStyle = { '--sidebar-w': `${layout.sidebarWidth}px` } as CSSProperties;
   const ebText = { title: t('error.title'), description: t('error.description'), retry: t('error.retry'), reload: t('error.reload') };
@@ -354,7 +353,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
         onRefreshRecent={() => void loadRecent()}
         onMode={onMode}
         onRecord={onRecord}
-        onSettings={() => openSettings()}
+        onHome={() => setScreen('home')}
       />
       <div className={`app-body${layout.sidebar ? '' : ' no-sidebar'}`}>
         {layout.sidebar && (
@@ -365,6 +364,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
               recent={recent}
               snapshot={snapshot}
               onNavigate={setScreen}
+              onMode={onMode}
               onOpenProject={(d) => void openProject(d)}
               onNewProject={newProject}
               onOpenFolder={() => void openFolder()}
@@ -396,7 +396,6 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
                   visible={wsVisible}
                   toast={toast}
                   onRecord={() => setScreen('record')}
-                  focus={screen === 'review' ? 'review' : 'edit'}
                   showTerminal={layout.terminal}
                   showCenter={layout.center}
                   embedded

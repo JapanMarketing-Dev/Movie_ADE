@@ -167,9 +167,12 @@ export function profileToTemplatePatch(p: StyleProfile): TemplatePatch {
   const patch: TemplatePatch = {};
   if (p.captions.present) {
     patch.captions = {
-      style: p.captions.heightRatio >= 0.045 ? 'tiktok-bold' : 'youtube-clean',
+      // 16:9 styles only (one YouTube-style video): big text → the heavy tech style, small → the clean one
+      style: p.captions.heightRatio >= 0.045 ? 'tech-bold' : 'youtube-clean',
       highlight: p.captions.reveal === 'block' ? 'line' : 'word',
-      maxCharsPerLine: clamp(Math.round(p.captions.charsPerLine.p90 || p.captions.charsPerLine.p50 || 16), 4, 60),
+      // characters per line are only known when the measurement read the text (OCR); otherwise keep the template's
+      ...(p.captions.charsPerLine.p90 || p.captions.charsPerLine.p50
+        ? { maxCharsPerLine: clamp(Math.round(p.captions.charsPerLine.p90 || p.captions.charsPerLine.p50), 8, 30) } : {}),
       maxLines: clamp(p.captions.lines, 1, 3),
       position: { anchor: 'bottom', y: clamp(r3(p.captions.anchorY), 0.5, 0.95) },
       emphasis: p.captions.emphasis.rate >= 0.05 ? 'auto' : 'off',
@@ -189,7 +192,8 @@ export function profileToTemplatePatch(p: StyleProfile): TemplatePatch {
   }
   const audio: NonNullable<TemplatePatch['audio']> = {};
   if (p.audio.bgm.present) audio.bgm = { gainDb: clamp(Math.round(p.audio.bgm.relDb), -40, 0) };
-  if (p.sfx.perMin > 0) audio.sfx = { maxPerMinute: Math.ceil(p.sfx.perMin), gainDb: -8 };
+  // a tasteful cap even when the reference is busier (4–8 a minute)
+  if (p.sfx.perMin > 0) audio.sfx = { maxPerMinute: clamp(Math.ceil(p.sfx.perMin), 1, 8), gainDb: -18 };
   if (Object.keys(audio).length) patch.audio = audio;
   if (p.sfx.perMin > 0) {
     const kind = Object.entries(p.sfx.kinds).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'pop';
@@ -200,8 +204,9 @@ export function profileToTemplatePatch(p: StyleProfile): TemplatePatch {
     add('emphasis', p.sfx.on.emphasis);
     add('caption-in', p.sfx.on.captionIn);
     add('cut', p.sfx.on.cut);
+    if (p.cuts.punchIn.perMin > 0) rules.push({ on: 'zoom-in', kind: 'swoosh-in', probability: 0.7 });
     rules.push({ on: 'section', kind: p.sfx.kinds.whoosh !== undefined ? 'whoosh' : kind, probability: p.sfx.on.section > 0 ? r2(p.sfx.on.section) : 1 });
-    patch.sfx = { rules, maxPerMin: Math.ceil(p.sfx.perMin) };
+    patch.sfx = { rules, maxPerMin: clamp(Math.ceil(p.sfx.perMin), 1, 8) };
   }
   return patch;
 }

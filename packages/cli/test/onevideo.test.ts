@@ -36,7 +36,7 @@ describe('init: the one template', () => {
     expect(p.template.id).toBe('tech');
     expect(timeline().meta.targets).toEqual(['youtube']);
     const st = (await run(['status'])).json.steps.map((s: { step: string }) => s.step);
-    expect(st).toEqual(['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'masks', 'preview', 'check', 'final', 'thumbnail', 'metadata']);
+    expect(st).toEqual(['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'multicam', 'captions', 'layout', 'sfx', 'masks', 'preview', 'check', 'final', 'thumbnail', 'metadata']);
     const md = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
     expect(md).toContain('publish.json');
     expect(md).not.toMatch(/solocut derive|--variant/);
@@ -74,7 +74,7 @@ describe('no decision model: `next --autopilot` reaches done with one video', ()
       }
     }
     // one camera → multicam passes by itself; nothing derived, nothing published
-    expect(seen).toEqual(['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'captions', 'sfx', 'layout', 'masks', 'preview', 'check', 'final', 'thumbnail', 'metadata']);
+    expect(seen).toEqual(['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'captions', 'layout', 'sfx', 'masks', 'preview', 'check', 'final', 'thumbnail', 'metadata']);
     const last = (await run(['next', '--autopilot'])).json;
     expect(last).toMatchObject({ step: 'done', state: 'done' });
     expect(last.do).toContain('投稿はしないでください');
@@ -86,7 +86,7 @@ describe('no decision model: `next --autopilot` reaches done with one video', ()
     await run(['edit', '--ops', JSON.stringify([{ op: 'addSource', id: 'cam', source: cam('media/c.mp4') }, { op: 'setReview', patch: { lastCheck: { run: 'chk_1', passed: 5, failed: 1, needsHuman: 0, at: '2026-10-11T00:00:00Z' } } }])]);
     mkdirSync(join(dir, 'derived', 'transcripts'), { recursive: true });
     writeFileSync(join(dir, 'derived', 'transcripts', 'main.json'), '{"take":"take_1","words":[]}');
-    for (const s of ['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'captions', 'sfx', 'layout', 'masks', 'preview', 'check']) await run(['step', s, 'done']);
+    for (const s of ['ingest', 'sync', 'analyze', 'transcribe', 'rough-cut', 'captions', 'layout', 'sfx', 'masks', 'preview', 'check']) await run(['step', s, 'done']);
     const n = (await run(['next', '--autopilot'])).json;
     expect(n).toMatchObject({ step: 'check', state: 'ready' });
     expect(n.do).toContain('needs-human');

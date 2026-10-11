@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   PUBLISH_FILE,
   PUBLISH_LOG_FILE,
+  BUILTIN_DEFAULTS,
   REQUEST_FILE,
   RESULT_FILE,
   alreadyPublished,
@@ -19,6 +20,7 @@ import {
   parsePublishResult,
   requestIsStale,
   targetsToUpload,
+  type PublishDefaults,
   type PublishLogEntry,
   type PublishRequest,
   type PublishResult,
@@ -48,6 +50,8 @@ export interface HandoffDeps {
   /** `solocut publish record` (best effort; must not throw). */
   record?: (dir: string, target: PublishTargetId, status: RecordStatus, url?: string) => Promise<void>;
   now?: () => number;
+  /** settings publish.youtube.privacy / publish.tiktok.privacy (used when publish.json does not say) */
+  defaults?: () => PublishDefaults;
   /** request / result files changed (the screen reloads) */
   onChange?: (dir: string) => void;
 }
@@ -146,7 +150,7 @@ export class PublishHandoff {
 
     const text = readText(join(dir, PUBLISH_FILE));
     if (text === null) return done('publish.json がありません / publish.json not found');
-    const { spec, issues } = parsePublishJson(text, new Date(this.now()));
+    const { spec, issues } = parsePublishJson(text, new Date(this.now()), this.deps.defaults?.() ?? BUILTIN_DEFAULTS);
     if (!spec) return done(issues.map((i) => issueText(i)).join('; '));
     const targets = targetsToUpload(spec, req.targets);
     if (!targets.length) return done('publish.json で投稿先がオフです / no target is turned on in publish.json');

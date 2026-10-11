@@ -6,7 +6,7 @@ import {
   DEFAULT_PROMPTS, PROMPT_IDS, SettingsError, SettingsSchema, applySetting, defaultPromptText, defaultSettings, diffSettings, getSetting,
   isPromptId, loadPrompts, loadPromptsWithErrors, loadSettings, loadSettingsWithErrors, parseCliValue, parseSettings, promptOverride,
   promptsFromSettings, renderPrompt, renderPromptById, saveSettings, setSetting, settingsHistoryPath, settingsJsonSchema, settingsPath,
-  stripJsonComments,
+  stripJsonComments, TIKTOK_PRIVACY, YOUTUBE_PRIVACY,
 } from '../src/index.js';
 
 let home: string;
@@ -243,6 +243,31 @@ describe('settings for the simplified app', () => {
     expect(r.errors[0]!.path).toBe('prompts.finish');
   });
 
+  it('publish privacy defaults: YouTube private, TikTok only me; only the platform values are accepted', () => {
+    const d = defaultSettings();
+    expect(d.publish).toEqual({ youtube: { privacy: 'private' }, tiktok: { privacy: 'SELF_ONLY' } });
+    for (const v of YOUTUBE_PRIVACY) expect(setSetting('publish.youtube.privacy', v).publish.youtube.privacy).toBe(v);
+    for (const v of TIKTOK_PRIVACY) expect(setSetting('publish.tiktok.privacy', v).publish.tiktok.privacy).toBe(v);
+    for (const bad of ['PUBLIC', 'friends', '', null, 1]) {
+      expect(() => setSetting('publish.youtube.privacy', bad)).toThrow(SettingsError);
+      expect(() => setSetting('publish.tiktok.privacy', bad)).toThrow(SettingsError);
+    }
+    expect(() => setSetting('publish.youtube.privacy', 'SELF_ONLY')).toThrow(SettingsError);
+    expect(() => setSetting('publish.tiktok.privacy', 'public')).toThrow(SettingsError);
+    expect(() => setSetting('publish.instagram.privacy', 'public')).toThrow(/unknown setting/);
+    expect(loadSettings().publish).toEqual({ youtube: { privacy: 'public' }, tiktok: { privacy: 'PUBLIC_TO_EVERYONE' } });
+  });
+
+  it('a broken publish section falls back to the defaults and keeps the rest', () => {
+    writeFileSync(settingsPath(), JSON.stringify({ language: 'en', publish: { youtube: { privacy: 'everyone' } } }));
+    const r = loadSettingsWithErrors();
+    expect(r.settings.language).toBe('en');
+    expect(r.settings.publish.youtube.privacy).toBe('private');
+    expect(r.errors[0]!.path).toBe('publish.youtube.privacy');
+    writeFileSync(settingsPath(), JSON.stringify({ publish: { tiktok: {} } }));
+    expect(loadSettings().publish).toEqual({ youtube: { privacy: 'private' }, tiktok: { privacy: 'SELF_ONLY' } });
+  });
+
   it('the decision model is off by default and still configurable', () => {
     expect(defaultSettings().decision.provider).toBe('off');
     expect(setSetting('decision.provider', 'auto').decision.provider).toBe('auto');
@@ -311,6 +336,13 @@ describe('prompts', () => {
       const json = ja.slice(ja.indexOf('{\n  "video"'), ja.indexOf('\n}', ja.indexOf('{\n  "video"')) + 2);
       expect(JSON.parse(json)).toMatchObject({ video: 'renders/final.mp4', youtube: { privacy: 'private' }, tiktok: { enabled: false } });
     });
+    it('uses the privacy defaults from settings unless the human said otherwise', () => {
+      for (const s of [ja, en]) {
+        expect(s).toContain('solocut meta --json');
+        expect(s).toContain('publish.youtube.privacy');
+        expect(s).toContain('publish.tiktok.privacy');
+      }
+    });
     it('ends with a 3-line report', () => {
       expect(ja).toContain('3行で報告');
       expect(en).toContain('3 lines');
@@ -330,6 +362,7 @@ describe('prompts', () => {
       }
       expect(ja).toContain('URL');
       expect(en).toContain('URL');
+      for (const s of [ja, en]) expect(s).toContain('solocut meta --json');
     });
   });
 

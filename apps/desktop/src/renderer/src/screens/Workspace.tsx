@@ -7,6 +7,7 @@ import { TerminalPane } from '../components/TerminalPane';
 import { sendToAgent } from '../terminal/agentSend';
 import { FeedbackLayer } from '../components/Feedback';
 import { AnalysisBar } from '../components/AnalysisBar';
+import { BenchmarkBadge } from '../components/BenchmarkPanel';
 import { TimelineView } from './parts/Timeline';
 import { FindingsPanel } from './parts/Findings';
 import { ReviewQueue, StepBar } from './parts/WorkspaceParts';
@@ -22,7 +23,6 @@ export function Workspace({
   visible,
   toast,
   onRecord,
-  focus = 'edit',
   showTerminal = true,
   showCenter = true,
   embedded = false,
@@ -34,8 +34,6 @@ export function Workspace({
   /** ignored: one video per project (kept so older callers still type-check) */
   variant?: Variant;
   onVariantChange?: (v: Variant) => void;
-  /** 編集 (preview + timeline + terminal) or 確認 (preview + review list first, no terminal) */
-  focus?: 'edit' | 'review';
   showTerminal?: boolean;
   showCenter?: boolean;
   /** inside the shell: the title bar already has the record button */
@@ -76,7 +74,7 @@ export function Workspace({
   }, [dir, refresh, loadPrompts]);
 
   // xterm refits itself when the terminal column is shown again (terminalClient's ResizeObserver)
-  const termShown = showTerminal && focus === 'edit';
+  const termShown = showTerminal;
 
   useEffect(() => {
     const off1 = api.on('project:changed', (d) => {
@@ -154,7 +152,7 @@ export function Workspace({
   const shown = playerSource(snap);
   const finish = finishPrompt(prompts, t('prompts.finish'));
   const style = rightW ? ({ '--right-w': `${rightW}px` } as React.CSSProperties) : undefined;
-  const wsClass = ['ws', `focus-${focus}`, termShown ? '' : 'no-terminal', showCenter || !termShown ? '' : 'no-center', embedded ? 'embedded' : ''].filter(Boolean).join(' ');
+  const wsClass = ['ws', 'focus-edit', termShown ? '' : 'no-terminal', showCenter || !termShown ? '' : 'no-center', embedded ? 'embedded' : ''].filter(Boolean).join(' ');
 
   return (
     <div className={wsClass}>
@@ -217,6 +215,7 @@ export function Workspace({
             </div>
           )}
           <StepBar snap={snap} />
+          <BenchmarkBadge projectDir={project.dir} toast={toast} />
           <AnalysisBar dir={project.dir} toast={toast} />
           <div className="section section--timeline">
             {ov ? (
@@ -234,11 +233,10 @@ export function Workspace({
           <div className="section review-sec">
             <ReviewQueue ov={ov} selected={selected} onSelect={(r) => (setSelected(r.id), r.start !== undefined && seek(r.start))} onDecide={(r, d) => void decide(r, d)} />
           </div>
-          {focus === 'review' && (
-            <div className="section findings-sec">
-              <FindingsPanel dir={project.dir} variant={VARIANT} onSeek={seek} />
-            </div>
-          )}
+          {/* 確認 is part of 編集: the review list above and the findings here are always shown */}
+          <div className="section findings-sec">
+            <FindingsPanel dir={project.dir} variant={VARIANT} onSeek={seek} />
+          </div>
         </div>
         <div className="splitter" onMouseDown={startDrag} />
         <div className="ws-right">

@@ -71,7 +71,7 @@ const FINISH_JA = `このプロジェクト（{{project}}）の素材から、�
 投稿の情報
 - プロジェクトの直下に publish.json を書きます。形式:
 ${PUBLISH_JSON}
-- title は100字以内、description は5000バイト以内（< と > は使わない）、tags は合計500字以内で10個前後。説明文の最初の2行で内容が分かるようにし、チャプター（00:00 から始まる）と素材のクレジットを入れます。privacy は人の指示がなければ private のままにします。
+- title は100字以内、description は5000バイト以内（< と > は使わない）、tags は合計500字以内で10個前後。説明文の最初の2行で内容が分かるようにし、チャプター（00:00 から始まる）と素材のクレジットを入れます。公開範囲（youtube.privacy・tiktok.privacy）は、人の指示がなければ設定の既定を使います（\`solocut meta --json\` に出ます。設定の publish.youtube.privacy / publish.tiktok.privacy で、\`solocut config get publish\` でも確かめられます）。
 - 投稿はしないでください。人が完成した動画を見て OK してから行います。
 
 最後に .solocut/handoff.md を更新し、3行で報告してください（1行目: できたもの、2行目: 要確認の点、3行目: 人に見てほしいところ）。`;
@@ -109,7 +109,7 @@ Thumbnail
 Publishing info
 - Write publish.json at the top of the project. Format:
 ${PUBLISH_JSON}
-- title at most 100 characters, description at most 5000 bytes (no < or >), tags about 10 and at most 500 characters in total. The first 2 lines of the description say what the video delivers; include chapters (starting at 00:00) and the asset credits. Keep privacy private unless a human said otherwise.
+- title at most 100 characters, description at most 5000 bytes (no < or >), tags about 10 and at most 500 characters in total. The first 2 lines of the description say what the video delivers; include chapters (starting at 00:00) and the asset credits. For youtube.privacy and tiktok.privacy use the defaults from settings unless a human said otherwise (shown by \`solocut meta --json\`; settings publish.youtube.privacy / publish.tiktok.privacy, also \`solocut config get publish\`).
 - Do not publish. Publishing happens after a human watched the finished video and approved it.
 
 Finally update .solocut/handoff.md and report in 3 lines (1: what was made, 2: what to review, 3: what a human should look at).`;
@@ -120,9 +120,9 @@ const PUBLISH_JA = `人が完成した動画を確認し、投稿を承認しま
    - video のファイルがあり、最新の書き出しであること
    - title が1〜100字、description が5000バイト以内で < と > を含まないこと、tags が合計500字以内であること
    - thumbnail を指定しているなら、そのファイルがあり 1280x720・2MB 以下であること
-   - youtube.privacy が private / unlisted / public のどれかであること（人の指示がなければ書いてある値のまま）。publishAt を使うときは private にすること
+   - youtube.privacy が private / unlisted / public のどれかであること。人の指示がなければ設定の既定（\`solocut meta --json\`、または \`solocut config get publish\`）に合わせる。publishAt を使うときは private にすること
    - 説明文のチャプターが動画の長さと合っていること（00:00 から始まり、3つ以上、それぞれ10秒以上）
-   - tiktok.enabled が true なら、caption と privacy があること
+   - tiktok.enabled が true なら、caption と privacy があること（privacy は人の指示がなければ設定の既定）
 2. 問題があれば publish.json を直します。
 3. \`solocut publish upload --json\` を実行します。アプリが publish.json の内容で YouTube（と、有効なら TikTok）にアップロードし、結果を返します。
    - メタデータの不備などで失敗したら、直してもう一度だけ実行します。連携が切れているなど人の操作が要るものは、直さずにそのまま報告します。
@@ -134,9 +134,9 @@ const PUBLISH_EN = `A human checked the finished video and approved publishing. 
    - the video file exists and is the latest render
    - title is 1–100 characters, description at most 5000 bytes without < or >, tags at most 500 characters in total
    - if thumbnail is set, the file exists and is 1280x720, under 2 MB
-   - youtube.privacy is private / unlisted / public (keep the written value unless a human said otherwise); with publishAt it must be private
+   - youtube.privacy is private / unlisted / public; unless a human said otherwise it matches the settings default (\`solocut meta --json\` or \`solocut config get publish\`); with publishAt it must be private
    - the chapters in the description match the video length (start at 00:00, at least 3, each at least 10 seconds)
-   - if tiktok.enabled is true, caption and privacy are set
+   - if tiktok.enabled is true, caption and privacy are set (privacy from the settings default unless a human said otherwise)
 2. Fix publish.json if anything is wrong.
 3. Run \`solocut publish upload --json\`. The app uploads to YouTube (and TikTok if enabled) with publish.json and returns the result.
    - If it fails because of the metadata, fix it and run it once more. If a human is needed (an account is disconnected…), do not work around it; report it.

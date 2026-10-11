@@ -17,8 +17,10 @@ export interface CenterOptions {
   maxScale?: number;
   /** Largest extra magnification inside the wipe (default 1.6: the wipe is small, so a tighter crop stays sharp). */
   maxWipeScale?: number;
-  /** Where the face centre should sit in the frame (default x 0.5, y 0.45: a little above the middle). */
+  /** Where the face centre should sit in a full-screen camera (default x 0.5, y 0.45: a little above the middle). */
   target?: { x: number; y: number };
+  /** … and in the round wipe (default x 0.5, y 0.55: a circle crops its top, and the face box starts at the brows). */
+  wipeTarget?: { x: number; y: number };
   /** Faces below this detector score are ignored (default 0.3). */
   minScore?: number;
   /** Smoothing of the moving crop (one-euro; defaults of focusPath). */
@@ -173,7 +175,8 @@ export function centerPerson(t: Timeline, tracks: Pick<Tracks, 'faces'>, o: Cent
     const crop = faceCrop(samples, {
       fromSec, toSec, fps: F, visible: coverVisible(src.size, region),
       maxScale: v.layout === 'camera-full' ? o.maxScale ?? 1.35 : o.maxWipeScale ?? 1.6,
-      ...(o.target ? { target: o.target } : {}), ...(o.smoothing ? { smoothing: o.smoothing } : {}),
+      target: v.layout === 'camera-full' ? o.target ?? { x: 0.5, y: 0.45 } : o.wipeTarget ?? { x: 0.5, y: 0.55 },
+      ...(o.smoothing ? { smoothing: o.smoothing } : {}),
     });
     if (!crop) {
       report.noFace.push(seg.id);

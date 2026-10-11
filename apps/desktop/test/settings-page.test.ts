@@ -20,14 +20,22 @@ describe('settings sections', () => {
     expect(filterSettingsSections('起動', title)).toEqual(['prompts']);
     expect(filterSettingsSections('投稿 プロンプト', title)).toEqual(['prompts']);
     expect(filterSettingsSections('既定', title)).toEqual(['prompts']);
-    expect(filterSettingsSections('youtube', title)).toEqual(['accounts']);
-    expect(filterSettingsSections('tiktok', title)).toEqual(['accounts']);
+    expect(filterSettingsSections('youtube', title)).toEqual(['accounts', 'publishing']);
+    expect(filterSettingsSections('tiktok', title)).toEqual(['accounts', 'publishing']);
+    expect(filterSettingsSections('公開範囲', title)).toEqual(['publishing']);
+    expect(filterSettingsSections('限定公開', title)).toEqual(['publishing']);
+    expect(filterSettingsSections('自分のみ', title)).toEqual(['publishing']);
+    expect(filterSettingsSections('privacy', title)).toEqual(['publishing', 'crashReports']);
+    expect(filterSettingsSections('youtube 接続', title)).toEqual(['accounts']);
+    expect(filterSettingsSections('お手本', title)).toEqual(['benchmark']);
+    expect(filterSettingsSections('ベンチマーク', title)).toEqual(['benchmark']);
+    expect(filterSettingsSections('reference', title)).toEqual(['benchmark']);
     expect(filterSettingsSections('アカウント 切り替え', title)).toEqual(['accounts']);
     expect(filterSettingsSections('自動 更新', title)).toEqual(['updates']);
     expect(filterSettingsSections('クラッシュ', title)).toEqual(['crashReports']);
   });
   it('has the Ferret-like plain sections only: no JSON file, decision model, image generation, API keys or library', () => {
-    expect([...SETTINGS_SECTIONS]).toEqual(['general', 'prompts', 'agents', 'accounts', 'recording', 'transcription', 'appearance', 'language', 'layout', 'updates', 'crashReports', 'about']);
+    expect([...SETTINGS_SECTIONS]).toEqual(['general', 'prompts', 'agents', 'accounts', 'publishing', 'benchmark', 'recording', 'transcription', 'appearance', 'language', 'layout', 'updates', 'crashReports', 'about']);
     for (const q of ['settings.json', 'prompts.json', 'json', '判定モデル', 'decision', '画像生成', 'gpt-image', 'api key', 'APIキー', 'ollama', 'typesafe', 'ライブラリ', 'instagram', 'shorts']) {
       expect(filterSettingsSections(q, title), q).toEqual([]);
     }
