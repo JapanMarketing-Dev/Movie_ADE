@@ -47,7 +47,7 @@ Solocut の目的は、**Claude Code などのエージェントが、毎回同�
 
 ## 体験の流れ
 
-目指すのは「**10〜20分撮って、プロンプト1つで、投稿できる動画が完成している**」状態（[13](./13_prompts_and_autopilot.md)）。
+目指すのは「**10〜20分撮って、プロンプト1つで、投稿できる動画が完成している**」状態（[13](./13_prompts_and_autopilot.md)）。しかも**1本の素材から YouTube（横長の本編）・TikTok（縦）・YouTube Shorts（縦）の3本が自動で作られ、3本とも投稿される**（[18](./18_one_take_three_videos.md)）。
 
 ```
 ① テンプレートを選んでプロジェクトを作る（例: TikTok 縦型トーク）
@@ -174,6 +174,7 @@ Solocut の目的は、**Claude Code などのエージェントが、毎回同�
 
 | ID | 要件 |
 |---|---|
+| PUB-0 | **1本の素材から、YouTube・TikTok・YouTube Shorts の3本を自動で作り、3本とも投稿する**（[18](./18_one_take_three_videos.md)） |
 | PUB-1 | エディタから YouTube と TikTok に動画を投稿できる（タイトル、説明文、タグ、チャプター、サムネイル、字幕、公開範囲、予約投稿） |
 | PUB-2 | X / Instagram / Threads / Facebook に「動画を投稿しました」の告知を投稿できる（文面、リンク、画像や縦型動画） |
 | PUB-3 | 投稿は必ず人が内容を確認・承認してから行う。投稿の履歴を残す |

@@ -198,7 +198,7 @@ function demo(t) {
         <span class="fb-say">${esc(d.say)}</span><span class="fb-tc">00:00:41:07</span></div>
       <div class="fb-card"><b>${esc(d.card[0])}</b><span>${esc(d.card[1])}</span><em>→ claude</em></div>
     </div>`;
-  const pubs = ['YouTube', 'TikTok', 'X', 'Instagram', 'Threads', 'Facebook'];
+  const pubs = ['YouTube', 'TikTok', 'YouTube Shorts', 'X', 'Threads', 'Instagram · Facebook'];
   const publish = `<div class="sc sc-publish" data-scene="4">
       <div class="pub-video"><div class="pv-thumb">${person}<b>${esc(d.cap)}</b></div><span class="pub-ok">✓ ${esc(d.approve)}</span></div>
       <ul class="pubs">${pubs.map((p, i) => `<li style="--i:${i}"><span>${p}</span><em>✓</em></li>`).join('')}</ul>

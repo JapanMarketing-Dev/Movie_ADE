@@ -6,7 +6,7 @@
 </picture>
 
 **動画編集のための ADE。**<br>
-1人で撮って、編集はテンプレどおりに Claude Code や Codex などのエージェントが。<br>
+1本撮れば YouTube・TikTok・Shorts の3本に。編集はテンプレどおりに Claude Code や Codex などのエージェントが。<br>
 判定モデルがフレーム単位でチェックし、直してほしいところはプレビューに喋るだけ。（ADE = Agentic Development Environment）
 
 [![GitHub stars](https://img.shields.io/github/stars/JapanMarketing-Dev/solocut?style=flat&color=ff4a3d&label=stars)](https://github.com/JapanMarketing-Dev/solocut/stargazers)
@@ -42,9 +42,9 @@
 
 プレビューを再生して、喋る・止める・囲む。端末内で文字起こしし、指摘ごとに「タイムコード、ペン入りのフレーム、あなたの言葉、指した字幕やクリップ」にまとめて、ワンクリックでエージェントへ送ります。
 
-## 投稿と告知まで
+## 1本の素材から3本、3本とも投稿
 
-エディタから YouTube と TikTok に投稿し、X・Instagram・Threads・Facebook に「動画を投稿しました」を告知します。あなたが確認・承認するまで、何も投稿されません。
+1回の撮影から、YouTube の本編（16:9）、縦型の TikTok、YouTube Shorts（9:16）の3本を作ります。見どころを選び、顔や操作している箇所を追って縦に組み替え、縦型用の字幕を作り直します。1回承認すれば3本を投稿し、X・Instagram・Threads・Facebook で告知します。承認するまで何も投稿されません。
 
 ## そのほか
 

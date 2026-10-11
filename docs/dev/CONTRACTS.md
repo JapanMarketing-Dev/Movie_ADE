@@ -62,7 +62,7 @@ Schema details fixed by the implementation (docs/15 left them open):
 export type Op =   // contract ops + extensions (marked *) so every op has an exact inverse
   | { op: 'addSource'; id: string; source: Source } | { op: 'removeSource'; id: string }*
   | { op: 'updateSource'; id: string; patch: Record<string, unknown> }*   // merge (undefined deletes); kind fixed; re-packs
-  | { op: 'setTranscript'; transcript: TranscriptRef | null }*            // null clears
+  | { op: 'setTranscript'; transcript?: TranscriptRef | null }*           // null / undefined / omitted clears
   | { op: 'setDecided'; target: string; decided: Decided }*   // any element with `decided` (seg/scn/cap/ov/mask/bgm/sfx); review accept/reject
   | { op: 'addSegment'; segment: Segment; index?: number } | { op: 'removeSegment'; id: string; decided: Decided }
   | { op: 'trimSegment'; id: string; from?: SourceFrame; to?: SourceFrame; decided: Decided }
@@ -132,6 +132,18 @@ export const PRESETS: Record<Target | 'preview', ExportPreset>;   // docs/06: si
   // bframes 2, closed GOP fps/2, bitrates (YT 8/12/40 Mbps, vertical 10 Mbps), AAC 384/256 kbps, -14 LUFS / -1 dBTP,
   // captions srt|burn, safe areas, max durations (TikTok 600 s, Shorts/Reels 180 s); preview = 540p short side, CRF 28
 export function presetBitrate(p: ExportPreset, height: number, fps: number): number | undefined;
+export function compileFrame(t: Timeline, frame: Frame, opts: Omit<CompileOptions, 'quality'|'maxChunkFrames'> & { quality?: 'preview'|'final' /* default final */ }):
+  { frame: Frame; canvas: Canvas; args: string[] /* ends in {out}: an image, format from extension */; writes; warnings };
+  // exactly one timeline frame through the same chunk graph (layout, masks, zoom, scenes, overlays, captions); RangeError outside [0, duration)
+// Geometry for feedback (pen strokes → elements), pure:
+export interface LayoutItem { kind: 'caption'|'overlay'|'scene-slot'|'scene'|'mask'|'wipe'|'video'; id: string; slot?: string;
+  source?: string; segment?: string; rect: Rect }
+export function layoutAt(t: Timeline, frame: Frame, o?: { canvas?: { width; height } /* rects in this size */;
+  captionSize?: number /* × short side, default 0.06 */; patterns?: Record<string, PatternDef> }): LayoutItem[];
+  // topmost first: captions, overlays (later on top), scene slots (media + text regions such as bubbles), scenes, masks
+  // (source box → canvas via cover/fit + zoom), wipe, video regions. Caption/telop/logo rects are estimates.
+export function hitTest(items: LayoutItem[], x: number, y: number): LayoutItem[];
+// also: videoRegions(segment, canvas), sourceRectToCanvas(box, sourceSize, region, 'cover'|'fit'), maskBoxAt(mask, sourceFrame)
 // Scene patterns (pure, rendered with ASS vector drawing + ffmpeg overlays for image/video slots; needs libass):
 export interface SlotDef { kind: SlotValue['kind']; required?: boolean; maxChars?: number; maxItems?: number; hint?: string;
   default?: string /* text default; video "camera:<role>" = synced camera */ }
@@ -143,7 +155,7 @@ export const PATTERNS: Record<string, PatternDef>;   // explain-illust-bubbles, 
 export function resolvePattern(id: string, custom?: Record<string, PatternDef>): { def; renderer; theme } | null;
 export function validateSceneSlots(scene: Scene, t, path: string, custom?): Issue[];  // missing required / wrong kind /
   // unknown slot / bad refs / highlight out of range = error; maxChars / maxItems / unknown pattern / version = warning
-export function renderScene(scene: Scene, t, custom?): { back: string[]; front: string[]; media: MediaPlacement[] } | null;
+export function renderScene(scene: Scene, t, custom?): { back: string[]; front: string[]; media: MediaPlacement[]; regions: { slot: string; rect: Rect }[] } | null;
 export function renderScenes(t, custom?): { back: string | null; front: string | null; media: MediaPlacement[]; unknown: string[] };
   // Scenes are a full-frame layer over the timeline during scene.range (cta-subscribe has no background). Text slots
   // wrap by character width (no BudouX in core); put "\n" in a slot to force a break.
@@ -186,6 +198,8 @@ export function executeRenderPlan(plan: RenderPlan, o: { projectDir: string; cac
   Promise<{ output: string; reused: number; rendered: number }>;
   // cacheDir/output may be relative to projectDir. Chunk cache key = plan hash + (size, mtime) of each input + content of
   // the burned ASS files. Outputs are written to a temp file and renamed (never half-written).
+export function renderFrame(plan: FramePlan /* from compileFrame */, o: { projectDir: string; output: string; signal?: AbortSignal }): Promise<{ output: string }>;
+  // writes plan.writes, checks inputs exist (MediaError), atomic output
 export function runMachineChecks(rendered: string, o?: { target?: Target }): Promise<CheckFinding[]>;
   // black-frames (≥0.5 s) and freeze (≥2 s): needs-human when found; loudness: fail outside ±1 LU or true peak > target+0.5;
   // spec: h264 / yuv420p / CFR / aac 48 kHz stereo / preset size / max duration
@@ -416,3 +430,25 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
 { "schema": 1, "id": "prj_…", "title": "…", "template": { "id": "talk-youtube", "version": "1" }, "language": "ja",
   "created": "ISO", "tools": { "ffmpeg": "9.0.2" } }
 ```
+
+## One take → three videos (docs/18) — added 2026-10-11, applies to everyone
+
+- A project has a main timeline (`timeline.json`, YouTube 16:9) and derived variants in
+  `variants/<target>/timeline.json` for `tiktok` and `youtube-shorts` (9:16). Same Timeline type.
+  `meta.derivedFrom = { variantOf: 'main', at: ISO, mainHash: string, selection: { segment: id, from?: SourceFrame, to?: SourceFrame }[], rules: string }`.
+- core (engine): `deriveVariant(main: Timeline, target: 'tiktok'|'youtube-shorts', opts: { selection: string[] /* main segment ids in order */,
+  maxFrames?: number; captionStyle?: string; layoutMap?: Partial<Record<VideoChoice['layout'], VideoChoice['layout']>>;
+  reframe?: 'face'|'center'; hookSegment?: string }) → Timeline` (pure): canvas 1080x1920 at main fps, selected segments copied with new ids,
+  layouts converted (camera-full → camera-full with vertical crop focus 'face'; screen-with-wipe → split-v screen top / camera bottom;
+  scene → same pattern in 9:16), captions rebuilt-able (keep words, re-wrap later via captions package), sfx/bgm re-timed,
+  masks kept (source coords), outputs = [that target]. Plus `pickHighlights(main, { maxFrames, scores?: Record<segId, number> }) → string[]`
+  (hook first, then highest-scoring core/summary segments, keep chronological order after the hook, fit maxFrames).
+  `variantStale(main, variant) → boolean` (mainHash differs).
+- cli (platform): `solocut derive --target tiktok|youtube-shorts [--max-sec N] [--selection id,id] [--json]`; global `--variant <target>`
+  on every timeline command (edit/undo/redo/history per variant: `.solocut/history.<variant>.jsonl`); `render --all`, `check --all`,
+  `thumb ... --variant`, `meta --variant`; `status`/`next` include per-variant steps
+  (`derive:tiktok`, `check:tiktok`, `derive:youtube-shorts`, `check:youtube-shorts`, `final:*`, `publish`). Templates: replace the five
+  templates with two families `tech` and `talk` whose `outputs` map lists youtube/tiktok/youtube-shorts with derive settings
+  (keep the old ids as aliases that extend them). Add `prompts/vertical.md`. Default prompt `finish` must produce all three.
+- desktop: workspace shows a variant switcher (YouTube / TikTok / Shorts) for preview, status and review; Publish screen lists the
+  three posts in one approval screen, then announcements once URLs exist.

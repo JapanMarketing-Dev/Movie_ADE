@@ -10,7 +10,7 @@
 </picture>
 
 **The ADE for video editing.**<br>
-Shoot alone. Claude Code, Codex or any terminal agent edits your YouTube and TikTok videos by template,<br>
+Shoot once; get a YouTube video, a TikTok and a YouTube Short. Claude Code, Codex or any terminal agent edits by template,<br>
 a decision model checks every frame, and you fix things by talking over the preview. (ADE = Agentic Development Environment.)
 
 [![GitHub stars](https://img.shields.io/github/stars/JapanMarketing-Dev/solocut?style=flat&color=ff4a3d&label=stars)](https://github.com/JapanMarketing-Dev/solocut/stargazers)
@@ -54,9 +54,9 @@ Play the preview, talk, pause and circle. Solocut transcribes on your machine an
 
 <img src="docs/images/scenes/feedback.png" width="100%" alt="A pen circles a caption on the preview while you say it covers your face; a feedback card with the timecode goes to Claude.">
 
-## Publish and announce
+## One take, three videos, three posts
 
-Upload to YouTube and TikTok from the editor, then announce the new video on X, Instagram, Threads and Facebook. Nothing goes out until you check and approve it.
+From one recording Solocut makes the YouTube video (16:9), a vertical TikTok cut and a YouTube Short (9:16): highlights picked, re-framed around your face or your cursor, captions rebuilt for vertical. Approve once and all three are posted, then announced on X, Instagram, Threads and Facebook. Nothing goes out until you check and approve it.
 
 <img src="docs/images/scenes/publish.png" width="100%" alt="The finished video with its thumbnail, approved by you, published to YouTube and TikTok and announced on X, Instagram, Threads and Facebook.">
 
