@@ -1,0 +1,46 @@
+# 語り動画の縦型（TikTok / Shorts / Reels）。16:9 で撮ったカメラを、顔を追って 9:16 に切り出す。大きな強調字幕と効果音。
+id: talk-tiktok
+version: 1
+extends: base-vertical
+name: { ja: 語り動画（縦型ショート）, en: Talking head (vertical short) }
+description:
+  ja: カメラに向かって話す縦型動画。16:9 の素材から顔を追ってリフレームし、単語ハイライトの大きな字幕と効果音でテンポを作る
+  en: Vertical talking head. Face-following reframe from 16:9, big word-highlight captions and frequent sound effects
+kind: talk
+targets: [tiktok, youtube-shorts, instagram-reels]
+canvas: { width: 1080, height: 1920, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full, scene]
+
+cut:
+  silence: { minMs: 220, padMs: 50 }
+  maxDurationSec: 60
+  # ジャンプカットのたびに寄り・引きを交互に（1.0 ↔ 1.15）
+  jumpZoom: { every: 1, scale: 1.15 }
+
+captions:
+  style: tiktok-bold
+  highlight: word
+  maxCharsPerLine: 10
+  maxLines: 2
+  emphasis: auto
+  position: { anchor: center, y: 0.68 }
+
+audio:
+  bgm: { gainDb: -20, duckDb: -12 }
+  sfx: { maxPerMinute: 14, gainDb: -12 }
+
+multicam: { maxShotSec: 5, minShotSec: 1 }
+
+features:
+  faceReframe: true
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, caption-face-overlap, camera-switch]
+
+pipeline: [ingest, sync, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, review, final, thumbnail, metadata]

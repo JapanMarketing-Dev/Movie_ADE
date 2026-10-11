@@ -15,5 +15,8 @@
     "@solocut/archive": "workspace:*",
     "@solocut/agents": "workspace:*",
     "@solocut/decide": "workspace:*"
+  },
+  "bin": {
+    "solocut": "src/bin.ts"
   }
 }

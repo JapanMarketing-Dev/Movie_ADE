@@ -7,6 +7,8 @@
   "types": "src/index.ts",
   "dependencies": {
     "yaml": "^2.8.0",
-    "@solocut/core": "workspace:*"
+    "zod": "^4.1.0",
+    "@solocut/core": "workspace:*",
+    "@solocut/toolchain": "workspace:*"
   }
 }

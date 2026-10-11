@@ -181,9 +181,15 @@ importers:
       '@solocut/core':
         specifier: workspace:*
         version: link:../core
+      '@solocut/toolchain':
+        specifier: workspace:*
+        version: link:../toolchain
       yaml:
         specifier: ^2.8.0
         version: 2.9.1
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.5
 
   packages/toolchain: {}
 

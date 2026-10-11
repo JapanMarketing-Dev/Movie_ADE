@@ -1,0 +1,131 @@
+import { z } from 'zod';
+
+// settings.json (docs/11_settings.md). Every field has a default, so `SettingsSchema.parse({})` is a full settings
+// object. Sections use `.prefault({})` so missing sections are filled from their inner defaults.
+
+const Lang = z.enum(['ja', 'en']);
+
+export const AgentIdSchema = z.string().regex(/^(claude|codex|gemini|opencode|cursor|copilot|custom:[A-Za-z0-9_.-]+)$/, 'unknown agent id');
+
+const Appearance = z.object({
+  // Theme is dark only (no choice).
+  uiScale: z.number().min(0.75).max(2).default(1),
+  accent: z.enum(['red', 'orange', 'blue', 'green', 'purple']).default('red'),
+});
+
+const Agents = z.object({
+  order: z.array(AgentIdSchema).default(['claude', 'codex', 'gemini']),
+  failover: z.object({ enabled: z.boolean().default(true) }).prefault({}),
+  custom: z
+    .array(z.object({ id: z.string().regex(/^custom:[A-Za-z0-9_.-]+$/), label: z.string().min(1), command: z.string().min(1), printMode: z.array(z.string()).optional() }))
+    .default([]),
+  checkUpdates: z.boolean().default(true),
+});
+
+const Recording = z.object({
+  screen: z.object({ fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(50), z.literal(60)]).default(30) }).prefault({}),
+  camera: z
+    .object({
+      deviceId: z.string().default('default'),
+      width: z.number().int().positive().default(1920),
+      height: z.number().int().positive().default(1080),
+      fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(50), z.literal(60)]).default(30),
+    })
+    .prefault({}),
+  mic: z.object({ deviceId: z.string().default('default') }).prefault({}),
+  systemAudio: z.boolean().default(true),
+  syncMarker: z.boolean().default(false),
+  hotkeys: z
+    .object({ markNg: z.string().default('CmdOrCtrl+Shift+N'), markImportant: z.string().default('CmdOrCtrl+Shift+M') })
+    .prefault({}),
+  keystrokeOverlay: z.boolean().default(true),
+});
+
+const Transcription = z.object({
+  engine: z.enum(['whisper.cpp']).default('whisper.cpp'),
+  model: z.enum(['large-v3-turbo-q5', 'small']).default('large-v3-turbo-q5'),
+  language: z.enum(['ja', 'en', 'auto']).default('ja'),
+});
+
+const Decision = z.object({
+  provider: z.enum(['off', 'ollama', 'openai', 'typesafe', 'custom']).default('off'),
+  model: z.string().default('qwen3-vl'),
+  endpoint: z.string().url().optional(),
+  apiKeyRef: z.string().optional(),
+  limits: z
+    .object({ perProjectUsd: z.number().min(0).default(2), perDayUsd: z.number().min(0).default(5) })
+    .prefault({}),
+  cloudConsent: z.boolean().default(false),
+});
+
+const ImageProvider = z.object({
+  via: z.enum(['subscription', 'api']),
+  apiKeyRef: z.string().optional(),
+  model: z.string().optional(),
+});
+
+const ImageGen = z.object({
+  order: z.array(z.string()).default(['codex', 'gemini', 'openai']),
+  providers: z.record(z.string(), ImageProvider).default({
+    codex: { via: 'subscription' },
+    gemini: { via: 'api', apiKeyRef: 'gemini' },
+    openai: { via: 'api', apiKeyRef: 'openai', model: 'gpt-image-2' },
+  }),
+});
+
+const Library = z.object({
+  catalog: z.string().default('solocut-default'),
+  download: z.enum(['on-demand']).default('on-demand'),
+  cacheLimitGB: z.number().min(0).max(1000).default(2),
+  autoCredits: z.boolean().default(true),
+});
+
+const Archive = z.object({
+  autoRegister: z.array(z.enum(['export', 'publish'])).default(['export', 'publish']),
+  keepPreview: z.boolean().default(true),
+  analytics: z.object({ youtube: z.boolean().default(false) }).prefault({}),
+});
+
+const Benchmark = z.object({
+  keepThumbnails: z.boolean().default(false),
+  maxMinutes: z.number().positive().max(60).default(3),
+});
+
+const Target = z.enum(['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels']);
+
+const Export = z.object({
+  defaultTargets: z.array(Target).default(['youtube']),
+  hwEncodePreview: z.boolean().default(true),
+});
+
+const Updates = z.object({ channel: z.enum(['stable', 'beta']).default('stable'), auto: z.boolean().default(true) });
+const Telemetry = z.object({ crashReports: z.boolean().default(true) });
+
+const Autopilot = z.object({
+  stopBefore: z.array(z.string()).default(['publish']),
+  maxFixLoops: z.number().int().min(0).max(20).default(3),
+  notify: z.array(z.enum(['done', 'needs-human', 'error'])).default(['done', 'needs-human']),
+  budget: z.object({ decisionUsd: z.number().min(0).default(2) }).prefault({}),
+});
+
+export const SettingsSchema = z.object({
+  $schema: z.string().optional(),
+  language: Lang.default('ja'),
+  appearance: Appearance.prefault({}),
+  agents: Agents.prefault({}),
+  recording: Recording.prefault({}),
+  transcription: Transcription.prefault({}),
+  decision: Decision.prefault({}),
+  imageGen: ImageGen.prefault({}),
+  library: Library.prefault({}),
+  archive: Archive.prefault({}),
+  benchmark: Benchmark.prefault({}),
+  export: Export.prefault({}),
+  updates: Updates.prefault({}),
+  telemetry: Telemetry.prefault({}),
+  autopilot: Autopilot.prefault({}),
+});
+
+export type Settings = z.infer<typeof SettingsSchema>;
+export type SettingsInput = z.input<typeof SettingsSchema>;
+export const SETTINGS_SECTIONS = Object.keys(SettingsSchema.shape).filter((k) => k !== '$schema') as (keyof Settings)[];

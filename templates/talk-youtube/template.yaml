@@ -1,0 +1,29 @@
+# 語り動画（YouTube 横型）。カメラに向かって話す解説。
+id: talk-youtube
+version: 1
+extends: base-horizontal
+name: { ja: 語り動画（YouTube）, en: Talking head (YouTube) }
+description:
+  ja: カメラに向かって話す解説動画。ジャンプカットごとに軽いズームで変化をつけ、図解や画像を挟む
+  en: Talking-head explainer. Light punch-ins on jump cuts, with diagrams and images inserted
+kind: talk
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full, scene]
+
+cut:
+  silence: { minMs: 400, padMs: 100 }
+  jumpZoom: { every: 2, scale: 1.12 }
+
+multicam: { maxShotSec: 12, minShotSec: 2 }
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, camera-switch]
+
+pipeline: [ingest, sync, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, review, final, thumbnail, metadata]

@@ -30,9 +30,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:cli
-      - run: pnpm --filter @solocut/desktop dist:${{ matrix.target }}
+      - run: pnpm --filter @solocut/desktop ${{ matrix.target == 'mac' && 'dist:mac:all' || format('dist:{0}', matrix.target) }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          SOLOCUT_REBUILD_NATIVE: ${{ matrix.target == 'linux' && '1' || '' }}
       - uses: actions/upload-artifact@v4
         with:
           name: solocut-${{ matrix.target }}

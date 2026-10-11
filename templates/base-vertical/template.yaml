@@ -1,0 +1,51 @@
+# 縦型（9:16）テンプレートの共通設定。直接は使わず、extends で継承する。
+id: base-vertical
+version: 1
+abstract: true
+name: { ja: 縦型の共通設定, en: Vertical base }
+kind: talk
+targets: [tiktok, youtube-shorts, instagram-reels]
+canvas: { width: 1080, height: 1920, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full]
+
+cut:
+  silence: { minMs: 250, padMs: 60, noiseDb: -35 }
+  fillers: [えー, えーと, えっと, あのー, あの, まあ, うーん, なんか, その, ちょっと]
+  retakes: keep-last
+  ngMarkers: cut
+  minKeepMs: 200
+  maxDurationSec: 60
+
+captions:
+  style: tiktok-bold
+  highlight: word
+  maxCharsPerLine: 12
+  maxLines: 2
+  emphasis: auto
+  position: { anchor: center, y: 0.70 }
+  safeArea: tiktok
+  burnIn: true
+  srt: false
+
+audio:
+  loudness: -14
+  truePeak: -1
+  denoise: light
+  bgm: { gainDb: -20, duckDb: -12 }
+  sfx: { maxPerMinute: 10, gainDb: -12 }
+
+decisions:
+  cutKeep: { autoAbove: 0.7, autoBelow: 0.3 }
+  frameCheck: { passAbove: 0.8 }
+  retakeChoice: { autoAbove: 0.65, autoBelow: 0.35 }
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, caption-face-overlap]
+
+pipeline: [ingest, sync, transcribe, rough-cut, captions, sfx, layout, preview, check, review, final, thumbnail, metadata]

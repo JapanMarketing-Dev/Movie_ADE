@@ -1,0 +1,48 @@
+# 長尺の動画（編集済みのプロジェクト）から、縦型のショートを切り出す。
+# 見どころの候補（30〜60秒）を判定モデルが採点し、人が選ぶ。技術動画・語り動画のどちらの長尺にも使う。
+id: shorts-from-long
+version: 1
+extends: base-vertical
+name: { ja: 長尺からショート, en: Shorts from a long video }
+description:
+  ja: 編集済みの長尺から、単体で成り立つ 30〜60 秒の見どころを選んで縦型にする。候補を判定モデルが採点し、人が選ぶ
+  en: Pick self-contained 30–60 s highlights from an edited long video and reframe them vertically. Candidates are scored, a human picks
+kind: talk
+targets: [tiktok, youtube-shorts, instagram-reels]
+canvas: { width: 1080, height: 1920, fps: 30 }
+
+# 素材は長尺のプロジェクトのもの（新しく撮らない）。画面収録を含む長尺なら screen も取り込まれる
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full, split-v, screen-full, scene]
+
+cut:
+  # 長尺で一度詰めてあるので、さらに縦型のテンポまで詰める
+  silence: { minMs: 250, padMs: 60 }
+  retakes: keep-last
+  ngMarkers: cut
+  maxDurationSec: 60
+
+captions:
+  maxCharsPerLine: 12
+  maxLines: 2
+
+audio:
+  sfx: { maxPerMinute: 8, gainDb: -13 }
+
+decisions:
+  # 見どころの採否は人が選ぶので、自動で確定する範囲を狭くする
+  cutKeep: { autoAbove: 0.8, autoBelow: 0.2 }
+
+features:
+  faceReframe: true
+  highlightPicker: true
+
+# 長尺のモザイクは元素材の座標で持っているので引き継がれる。縦への切り出しで外れていないかを確かめる
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, caption-face-overlap, pii-on-screen, mosaic-tracking]
+
+pipeline: [ingest, transcribe, rough-cut, captions, sfx, layout, preview, check, review, final, thumbnail, metadata]

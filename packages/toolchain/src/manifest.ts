@@ -1,0 +1,133 @@
+// Pinned download sources for the external tools (docs/06_libraries.md).
+// Every sha256 below was verified on 2026-10-11 by downloading the file and hashing it, and cross-checked
+// against the publisher's own checksum (GitHub asset digest, BtbN checksums.sha256, martin-riedl .sha256,
+// Hugging Face lfs.oid). Exception, hash taken from the publisher only: ggml-large-v3-turbo-q5_0.bin (HF API).
+// whisper-cli zips (Solocut CI, R2) were hashed after download on 2026-10-11.
+
+export type ToolName = 'ffmpeg' | 'ffprobe' | 'whisper-cli' | 'whisper-model' | 'whisper-model-small';
+export const TOOL_NAMES: readonly ToolName[] = ['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small'];
+
+export type ToolOs = 'mac' | 'win' | 'linux';
+export type ToolArch = 'x64' | 'arm64';
+
+export interface ToolAsset {
+  os: ToolOs;
+  arch: ToolArch;
+  url: string;
+  sha256: string;
+  kind: 'zip' | 'tar.xz' | 'tar.gz' | 'file';
+  /** Tool name → path inside the extracted archive (for `file`, the file name it is saved as). */
+  bin: Record<string, string>;
+  size?: number;
+}
+
+export interface ToolManifest {
+  schema: 1;
+  tools: Record<string, { version: string; license?: string; source?: string; assets: ToolAsset[] }>;
+}
+
+const BTBN = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08';
+const BTBN_VER = 'n9.0.2-17-g2a571b6068';
+const MR = 'https://ffmpeg.martin-riedl.de/download/macos';
+const WHISPER = 'https://downloads.solocut.app/tools/whisper/v1.9.5';
+
+const HF = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1';
+
+function btbn(os: ToolOs, arch: ToolArch, plat: string, kind: 'zip' | 'tar.xz', sha256: string, size: number): ToolAsset {
+  const dir = `ffmpeg-${BTBN_VER}-${plat}-gpl-9.0`;
+  const exe = os === 'win' ? '.exe' : '';
+  return {
+    os, arch, url: `${BTBN}/${dir}.${kind}`, sha256, kind, size,
+    bin: { ffmpeg: `${dir}/bin/ffmpeg${exe}`, ffprobe: `${dir}/bin/ffprobe${exe}` },
+  };
+}
+
+function whisper(os: ToolOs, arch: ToolArch, plat: string, sha256: string): ToolAsset {
+  return {
+    os, arch, url: `${WHISPER}/whisper-cli-v1.9.5-${plat}.zip`, sha256, kind: 'zip',
+    bin: { 'whisper-cli': `whisper/whisper-cli${os === 'win' ? '.exe' : ''}` },
+  };
+}
+
+/** The same file for every platform (models). */
+function everywhere(a: Omit<ToolAsset, 'os' | 'arch'>): ToolAsset[] {
+  const out: ToolAsset[] = [];
+  for (const os of ['mac', 'win', 'linux'] as const) for (const arch of ['x64', 'arm64'] as const) out.push({ ...a, os, arch });
+  return out;
+}
+
+export const DEFAULT_MANIFEST: ToolManifest = {
+  schema: 1,
+  tools: {
+    // win/linux archives contain both ffmpeg and ffprobe; on macOS they are separate zips (see `ffprobe`).
+    ffmpeg: {
+      version: '9.0.2',
+      license: 'GPL-3.0',
+      source: 'https://ffmpeg.org/download.html#get-sources',
+      assets: [
+        btbn('win', 'x64', 'win64', 'zip', 'a0e45723c72141975f51d8666302e614711745f3102b704ca3f82c897a58d278', 194034585),
+        btbn('win', 'arm64', 'winarm64', 'zip', '6dcd0626f9f6d6c7323565e57410e9f37ed14a85946ec9ea9caff294ca32f5c0', 135510041),
+        btbn('linux', 'x64', 'linux64', 'tar.xz', '68ee646831adaae2495618346f3bba94ff207ff83bbd34d643e7004730d66269', 151017172),
+        btbn('linux', 'arm64', 'linuxarm64', 'tar.xz', '91afcd7695d4bbbb9e0057aa10baaf9875ec4e1a97303f9059ec971336a2ab46', 127445692),
+        {
+          os: 'mac', arch: 'arm64', url: `${MR}/arm64/1789931890_9.0.2/ffmpeg.zip`, kind: 'zip', size: 28395699,
+          sha256: 'c8ed4c4e6978a03c485edbfe4e0a5dc2380f8a30bba5150531b31b094492d924', bin: { ffmpeg: 'ffmpeg' },
+        },
+        {
+          os: 'mac', arch: 'x64', url: `${MR}/amd64/1789931006_9.0.2/ffmpeg.zip`, kind: 'zip', size: 33816391,
+          sha256: '7c6b4125b191cbf773832dc51f424cf2b6bb7da43007d1e066f95909e47cacd4', bin: { ffmpeg: 'ffmpeg' },
+        },
+      ],
+    },
+    ffprobe: {
+      version: '9.0.2',
+      license: 'GPL-3.0',
+      source: 'https://ffmpeg.org/download.html#get-sources',
+      assets: [
+        {
+          os: 'mac', arch: 'arm64', url: `${MR}/arm64/1789931890_9.0.2/ffprobe.zip`, kind: 'zip', size: 28317701,
+          sha256: 'fcbe839537485eaee7a7a8bc5cbc0f90d53617e80943e8a5b2e31cb851197ea6', bin: { ffprobe: 'ffprobe' },
+        },
+        {
+          os: 'mac', arch: 'x64', url: `${MR}/amd64/1789931006_9.0.2/ffprobe.zip`, kind: 'zip', size: 33719233,
+          sha256: '2322438ed2f6319a691291b247d09c69dcaa3a982460d1f269a7e1af335cfdfd', bin: { ffprobe: 'ffprobe' },
+        },
+      ],
+    },
+    // whisper.cpp v1.9.5 built by the Solocut CI (workflow tools.yml), self-contained; macOS arm64 has Metal embedded.
+    // Windows arm64 uses the x64 build (runs under emulation). PATH stays a fallback (brew install whisper-cpp).
+    'whisper-cli': {
+      version: '1.9.5',
+      license: 'MIT',
+      source: 'https://github.com/ggml-org/whisper.cpp/tree/v1.9.5',
+      assets: [
+        whisper('mac', 'arm64', 'mac-arm64', '9e2a402b17ff881425dd524a7facc0359b482cb689ad8a48fd4239ec79bd72d8'),
+        whisper('mac', 'x64', 'mac-x64', 'b153abab26dae2b35df3f72b7050308cdbcd1bdbbe42dcdb56ec7dcadd846de6'),
+        whisper('linux', 'x64', 'linux-x64', '1072cca8f8560bd935e80835b08bb18f72f0e37bdce21f13781bcb8ee2e59070'),
+        whisper('linux', 'arm64', 'linux-arm64', 'cd0c9d9a4c830246b9b34c6bb7a0ced15e735c3d174964d62339907baece9937'),
+        whisper('win', 'x64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
+        whisper('win', 'arm64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
+      ],
+    },
+    'whisper-model': {
+      version: 'large-v3-turbo-q5_0',
+      license: 'MIT',
+      source: 'https://huggingface.co/ggerganov/whisper.cpp',
+      assets: everywhere({
+        url: `${HF}/ggml-large-v3-turbo-q5_0.bin`, kind: 'file', size: 574041195,
+        sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2',
+        bin: { 'whisper-model': 'ggml-large-v3-turbo-q5_0.bin' },
+      }),
+    },
+    'whisper-model-small': {
+      version: 'small',
+      license: 'MIT',
+      source: 'https://huggingface.co/ggerganov/whisper.cpp',
+      assets: everywhere({
+        url: `${HF}/ggml-small.bin`, kind: 'file', size: 487601967,
+        sha256: '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b',
+        bin: { 'whisper-model-small': 'ggml-small.bin' },
+      }),
+    },
+  },
+};
