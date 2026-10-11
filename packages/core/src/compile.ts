@@ -2,7 +2,7 @@ import { overlaysToAss } from './ass.js';
 import { sha256Hex } from './hash.js';
 import type { ExportPreset } from './presets.js';
 import { PRESETS, presetBitrate } from './presets.js';
-import type { Canvas, Focus, Frame, Mask, Overlay, Segment, Source, Target, Timeline, ZoomKeyframe } from './schema.js';
+import type { Canvas, FocusValue, Frame, Mask, Overlay, Segment, Source, Target, Timeline, ZoomKeyframe } from './schema.js';
 import { fpsValue, frameToSeconds } from './time.js';
 import { durationFrames, sourceLocalSeconds, sourceRate, takeFrameToSeconds, videoSources } from './timeline.js';
 import type { PatternDef } from './patterns/defs.js';
@@ -167,8 +167,15 @@ function maskFilters(g: Graph, inLabel: string, masks: Mask[], src: Source & { k
 }
 
 type Fit = 'cover' | 'fit';
-function sizeFilter(w: number, h: number, fit: Fit, focus?: Focus): string {
-  if (fit === 'cover' && focus && (focus.x !== 0.5 || focus.y !== 0.5)) {
+function sizeFilter(w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0): string {
+  if (fit === 'cover' && focus && Array.isArray(focus)) {
+    // moving focus: crop x/y are evaluated per frame; n = frame index in this piece
+    const keys = [...focus].sort((a, b) => a.at - b.at);
+    const fx = piecewise(`(n+${pieceOffset})`, keys.map((k) => ({ x: k.at, v: k.x })));
+    const fy = piecewise(`(n+${pieceOffset})`, keys.map((k) => ({ x: k.at, v: k.y })));
+    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=w=${w}:h=${h}:x='(iw-ow)*(${fx})':y='(ih-oh)*(${fy})',setsar=1`;
+  }
+  if (fit === 'cover' && focus && !Array.isArray(focus) && (focus.x !== 0.5 || focus.y !== 0.5)) {
     return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)*${num(focus.x)}:(ih-oh)*${num(focus.y)},setsar=1`;
   }
   return fit === 'cover'
@@ -177,7 +184,7 @@ function sizeFilter(w: number, h: number, fit: Fit, focus?: Focus): string {
 }
 
 /** Add one video source stream covering the piece; returns the label of an exactly n-frame stream of w x h. */
-function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: number, w: number, h: number, fit: Fit, focus?: Focus): string {
+function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: number, w: number, h: number, fit: Fit, focus?: FocusValue, pieceOffset = 0): string {
   const { t, rc } = ctx;
   const src = t.sources[srcId];
   if (!src || (src.kind !== 'screen' && src.kind !== 'camera')) throw new Error(`video source not found: ${srcId}`);
@@ -199,7 +206,7 @@ function sourceStream(g: Graph, ctx: Ctx, srcId: string, takeSec: number, n: num
   }
   if (drift !== 1) chain.push(`setpts=(PTS-STARTPTS)/${num(drift)}`);
   if (lead > 0) chain.push(`tpad=start_mode=add:start_duration=${num(lead)}:color=black`);
-  chain.push(`fps=${rc.fps.num}/${rc.fps.den}`, sizeFilter(w, h, fit, focus), `tpad=stop_mode=clone:stop_duration=${num(durSec + 1)}`,
+  chain.push(`fps=${rc.fps.num}/${rc.fps.den}`, sizeFilter(w, h, fit, focus, pieceOffset), `tpad=stop_mode=clone:stop_duration=${num(durSec + 1)}`,
     `trim=end_frame=${n}`, 'setpts=PTS-STARTPTS');
   const out = g.label('s');
   g.filters.push(`[${cur}]${chain.join(',')}[${out}]`);
@@ -272,7 +279,7 @@ function pieceVideo(g: Graph, ctx: Ctx, seg: Segment, o: number, n: number): str
   let base: string;
   switch (v.layout) {
     case 'camera-full':
-      base = sourceStream(g, ctx, v.camera, takeSec, n, W, H, 'cover', v.focus);
+      base = sourceStream(g, ctx, v.camera, takeSec, n, W, H, 'cover', v.focus, o);
       break;
     case 'screen-full':
       base = sourceStream(g, ctx, v.screen, takeSec, n, W, H, 'fit');
@@ -302,8 +309,8 @@ function pieceVideo(g: Graph, ctx: Ctx, seg: Segment, o: number, n: number): str
     }
     case 'split-v': {
       const th = even(H / 2);
-      const top = sourceStream(g, ctx, v.top, takeSec, n, W, th, 'cover', v.topFocus);
-      const bottom = sourceStream(g, ctx, v.bottom, takeSec, n, W, H - th, 'cover', v.bottomFocus);
+      const top = sourceStream(g, ctx, v.top, takeSec, n, W, th, 'cover', v.topFocus, o);
+      const bottom = sourceStream(g, ctx, v.bottom, takeSec, n, W, H - th, 'cover', v.bottomFocus, o);
       base = g.label('c');
       g.filters.push(`[${top}][${bottom}]vstack=inputs=2[${base}]`);
       break;

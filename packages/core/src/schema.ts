@@ -131,14 +131,17 @@ export const WipeSchema = z.strictObject({
 
 /** Where a cover crop sits in the source: fractions 0..1 of the cropped-away margin (0.5, 0.5 = centre). */
 export const FocusSchema = z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+/** A moving focus: keyframes at segment-relative frames (from tracksets: face / cursor paths). */
+export const FocusKeySchema = z.strictObject({ at: nonNegInt(), x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+export const FocusValueSchema = z.union([FocusSchema, z.array(FocusKeySchema).min(1)]);
 
 export const VideoChoiceSchema = z.discriminatedUnion('layout', [
-  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema, focus: FocusSchema.optional() }),
+  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema, focus: FocusValueSchema.optional() }),
   z.strictObject({ layout: z.literal('screen-full'), screen: SourceIdSchema }),
   z.strictObject({ layout: z.literal('screen-with-wipe'), screen: SourceIdSchema, camera: SourceIdSchema, wipe: WipeSchema }),
   z.strictObject({
     layout: z.literal('split-v'), top: SourceIdSchema, bottom: SourceIdSchema,
-    topFocus: FocusSchema.optional(), bottomFocus: FocusSchema.optional(),
+    topFocus: FocusValueSchema.optional(), bottomFocus: FocusValueSchema.optional(),
   }),
   z.strictObject({ layout: z.literal('scene'), scene: idSchema('scn') }),
 ]);
@@ -327,6 +330,7 @@ export type Rational = z.infer<typeof RationalSchema>;
 export type Size = z.infer<typeof SizeSchema>;
 export type Point = z.infer<typeof PointSchema>;
 export type Focus = z.infer<typeof FocusSchema>;
+export type FocusValue = z.infer<typeof FocusValueSchema>;
 export type Rect = z.infer<typeof RectSchema>;
 export type Range = z.infer<typeof RangeSchema>;
 export type Corner = z.infer<typeof CornerSchema>;

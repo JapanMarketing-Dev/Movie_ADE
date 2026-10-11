@@ -1,7 +1,7 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { applyOps, validateTimeline, type Issue, type Op, type Timeline } from '@solocut/core';
-import { initialStatus, loadTemplate, type StepId, type StepState, type Template } from '@solocut/templates';
+import { initialStatus, loadTemplate, type PipelineStep, type StepState, type Template } from '@solocut/templates';
 import { CliError, type Ctx } from './ctx.js';
 
 export interface ProjectFile {
@@ -154,7 +154,7 @@ export function writeStatus(p: Project, list: StepState[]): void {
   writeAtomic(paths(p.dir).status, JSON.stringify(list, null, 2) + '\n');
 }
 
-export function setStep(p: Project, step: StepId, state: StepState['state'], note?: string): StepState[] {
+export function setStep(p: Project, step: PipelineStep, state: StepState['state'], note?: string): StepState[] {
   let tpl: Template | undefined;
   try {
     tpl = projectTemplate(p);

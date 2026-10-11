@@ -6,7 +6,7 @@ import type { Issue } from '../validate.js';
 import type { PatternDef, PatternTheme } from './defs.js';
 import { resolvePattern } from './defs.js';
 import {
-  circlePath, drawing, drawingAt, fillTags, fitText, mixColor, polygonPath, rectPath, roundedRectPath, strokeTags, textAt,
+  balanceLines, circlePath, drawing, drawingAt, fillTags, fitText, mixColor, polygonPath, rectPath, roundedRectPath, strokeTags, textAt,
   textWidthEm, waveBandPath, wrapText,
 } from './draw.js';
 
@@ -186,17 +186,44 @@ function gradientFrame(c: Ctx, r: Rect, delay = 0, thickness = 0.011): void {
 }
 
 /** Speech bubble (rounded rect + tail) centred at (cx, cy) with text, popping in. */
-function bubble(c: Ctx, slot: string, cx: number, cy: number, w: number, h: number, tail: 'down-left' | 'down-right', label: string, delay: number, pill = false): void {
+export interface BubbleFit { size: number; lines: string[]; w: number; h: number }
+
+/**
+ * Fit bubble text: the largest size up to `maxSize` (≈ frame height / 14 in the reference) with at most `maxLines`
+ * BudouX lines; the bubble grows from its base size to fit, up to maxW × maxH. Falls back to the smallest size.
+ */
+export function fitBubble(label: string, base: { w: number; h: number }, max: { w: number; h: number }, maxSize: number, minSize: number, maxLines = 3): BubbleFit {
+  const padX = 0.16; // share of the bubble width kept free left + right
+  const padY = 0.3; // share of the height kept free top + bottom
+  const step = (sz: number) => Math.max(1, Math.round(sz * 0.05));
+  let last: BubbleFit | null = null;
+  for (let size = Math.round(maxSize); size >= Math.round(minSize); size -= step(size)) {
+    const innerMax = (max.w * (1 - padX)) / size;
+    const lines = balanceLines(label, wrapText(label, innerMax), innerMax);
+    const textW = Math.max(0, ...lines.map(textWidthEm)) * size;
+    const textH = lines.length * size * 1.25;
+    const w = Math.max(base.w, textW / (1 - padX));
+    const h = Math.max(base.h, textH / (1 - padY));
+    last = { size, lines, w, h };
+    if (lines.length <= maxLines && w <= max.w + 0.5 && h <= max.h + 0.5) return last;
+  }
+  return last ?? { size: Math.round(minSize), lines: [label], w: base.w, h: base.h };
+}
+
+/** Speech bubble (rounded rect / pill + tail) centred at (cx, cy) with auto-fitted text, popping in. */
+function bubble(c: Ctx, slot: string, cx: number, cy: number, bw: number, bh: number, tail: 'down-left' | 'down-right', label: string, delay: number,
+  pill = false, max?: { w: number; h: number }, maxSize?: number): void {
+  const fit = fitBubble(label, { w: bw, h: bh }, max ?? { w: bw, h: bh }, maxSize ?? c.u * 0.06, c.u * 0.026);
+  const { w, h } = fit;
   region(c, slot, { x: cx - w / 2, y: cy - h / 2, w, h: h * 1.32 });
-  const r = pill ? h / 2 : Math.min(w, h) * 0.3;
-  const tailH = h * 0.32;
+  const r = pill && fit.lines.length === 1 ? h / 2 : Math.min(w, h) * (pill ? 0.4 : 0.3);
+  const tailH = Math.min(h, bh * 1.2) * 0.32;
   // libass anchors drawings from their origin, so the path uses non-negative local coordinates (bbox w × (h + tailH)).
   const tx = tail === 'down-right' ? w * 0.68 : w * 0.32;
   const tip = tail === 'down-right' ? tx + w * 0.12 : tx - w * 0.12;
   const path = `${roundedRectPath(0, 0, w, h, r)} ${polygonPath([[tx - w * 0.07, h - 2], [tx + w * 0.07, h - 2], [tip, h + tailH]])}`;
   const pop = c.animIn === 'fade' ? '' : '\\fscx25\\fscy25\\t(0,170,\\fscx108\\fscy108)\\t(170,250,\\fscx100\\fscy100)';
   ev(c, 'front', 5, delay, drawingAt(cx, cy + tailH / 2, `${fillTags(c.theme.bubbleFill)}${pop}`, path), 120);
-  const fit = fitText(label, w * 0.84, h * 0.78, c.u * 0.06, c.u * 0.026);
   ev(c, 'front', 6, delay, textAt(cx, cy, 5, { font: c.theme.font, size: fit.size, color: c.theme.bubbleText, weight: 900, extra: pop }, fit.lines), 120);
 }
 
@@ -276,11 +303,14 @@ const RENDERERS: Record<string, Renderer> = {
     const right = text(c, 'bubbleRight');
     const d = portrait ? 0.4 * W : 0.34 * H;
     if (portrait) {
-      if (left) bubble(c, 'bubbleLeft', 0.33 * W, 0.17 * H, 0.52 * W, 0.075 * H, 'down-right', left, 0.25, true);
-      if (right) bubble(c, 'bubbleRight', 0.67 * W, 0.27 * H, 0.52 * W, 0.075 * H, 'down-left', right, 0.55, true);
+      const max = { w: 0.6 * W, h: 0.13 * H };
+      if (left) bubble(c, 'bubbleLeft', 0.36 * W, 0.17 * H, 0.52 * W, 0.075 * H, 'down-right', left, 0.25, true, max, frame.h / 22);
+      if (right) bubble(c, 'bubbleRight', 0.64 * W, 0.3 * H, 0.52 * W, 0.075 * H, 'down-left', right, 0.55, true, max, frame.h / 22);
     } else {
-      if (left) bubble(c, 'bubbleLeft', 0.25 * W, 0.27 * H, 0.27 * W, 0.14 * H, 'down-right', left, 0.25, true);
-      if (right) bubble(c, 'bubbleRight', 0.75 * W, 0.27 * H, 0.27 * W, 0.14 * H, 'down-left', right, 0.55, true);
+      // reference: large text (≈ frame height / 14), up to 3 lines, bubble grows to fit
+      const max = { w: 0.34 * W, h: 0.3 * H };
+      if (left) bubble(c, 'bubbleLeft', 0.25 * W, 0.27 * H, 0.27 * W, 0.14 * H, 'down-right', left, 0.25, true, max, frame.h / 14);
+      if (right) bubble(c, 'bubbleRight', 0.75 * W, 0.27 * H, 0.27 * W, 0.14 * H, 'down-left', right, 0.55, true, max, frame.h / 14);
     }
     const m = c.u * 0.036; // keep the ring (≈0.016 u) on screen
     const cx = Math.max(d / 2 + m, frame.x + d * 0.25);

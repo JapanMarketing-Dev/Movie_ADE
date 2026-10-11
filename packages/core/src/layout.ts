@@ -2,7 +2,8 @@ import { wipeGeometry } from './compile.js';
 import type { PatternDef } from './patterns/defs.js';
 import { textWidthEm } from './patterns/draw.js';
 import { renderScene } from './patterns/render.js';
-import type { Canvas, Focus, Frame, Mask, Rect, Segment, Source, Timeline } from './schema.js';
+import { focusAt } from './tracks.js';
+import type { Canvas, Focus, FocusValue, Frame, Mask, Rect, Segment, Source, Timeline } from './schema.js';
 import { fpsValue } from './time.js';
 import { sourceLocalSeconds, takeFrameToSeconds, timelineFrameToTake } from './timeline.js';
 
@@ -39,7 +40,7 @@ function clip(r: Rect, to: Rect): Rect | null {
 }
 
 type Fit = 'cover' | 'fit';
-interface Region { source: string; rect: Rect; fit: Fit; kind: 'video' | 'wipe'; focus?: Focus }
+interface Region { source: string; rect: Rect; fit: Fit; kind: 'video' | 'wipe'; focus?: FocusValue }
 
 /** Regions of the canvas filled by each source for a segment's layout (same geometry as compile). */
 export function videoRegions(seg: Segment, canvas: { width: number; height: number }): Region[] {
@@ -210,7 +211,7 @@ export function layoutAt(t: Timeline, frame: Frame, o: LayoutOptions = {}): Layo
         for (const m of t.masks) {
           if (m.source !== rg.source) continue;
           const box = maskBoxAt(m, localFrame);
-          const onCanvas = box && sourceRectToCanvas(box, src.size, rg.rect, rg.fit, rg.focus);
+          const onCanvas = box && sourceRectToCanvas(box, src.size, rg.rect, rg.fit, rg.focus === undefined ? undefined : Array.isArray(rg.focus) ? focusAt(rg.focus, frame - seg.range.start) : rg.focus);
           const zr = onCanvas && zoomRect(onCanvas, z, W, H);
           if (zr) masks.push({ kind: 'mask', id: m.id, source: rg.source, segment: seg.id, rect: zr });
         }

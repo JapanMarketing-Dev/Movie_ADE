@@ -14,6 +14,7 @@ import {
   type GenContext, type ThumbFormat, type ThumbProvider,
 } from '../thumb.js';
 import { captionsLib, freshPreview, media } from './media.js';
+import { apiKeyFor } from '../keys.js';
 import { emptyOutput } from './meta.js';
 
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
@@ -118,7 +119,7 @@ async function cmdCandidates(ctx: Ctx, args: string[]): Promise<void> {
           images: [{ id: 'frame', path: c.image }],
         }, {
           provider: s.decision.provider, model: s.decision.model, ...(s.decision.endpoint ? { endpoint: s.decision.endpoint } : {}),
-          ...(ctx.io.env.SOLOCUT_DECIDE_API_KEY ? { apiKey: ctx.io.env.SOLOCUT_DECIDE_API_KEY } : {}), cacheDir: join(paths(p.dir).cache, 'decisions'),
+          ...(apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider) ? { apiKey: apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider)! } : {}), cacheDir: join(paths(p.dir).cache, 'decisions'),
         });
         if (a?.p !== undefined) {
           c.model = a.p;
@@ -233,7 +234,13 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
   const order = (values.provider ?? settings.imageGen.order) as ThumbProvider[];
   for (const pr of order) if (!['codex', 'openai', 'gemini', 'frame'].includes(pr)) throw new CliError('usage', `unknown provider: ${pr}`);
   const formats = formatsFor(tl, values.formats);
-  const gctx: GenContext = { env: ctx.io.env };
+  // image providers read SOLOCUT_OPENAI_API_KEY / SOLOCUT_GEMINI_API_KEY; an apiKeyRef in settings maps to its own env
+  const keyEnv: NodeJS.ProcessEnv = { ...ctx.io.env };
+  for (const prov of ['openai', 'gemini'] as const) {
+    const k = apiKeyFor(ctx.io.env, settings.imageGen.providers[prov]?.apiKeyRef, prov, { decision: false });
+    if (k) keyEnv[`SOLOCUT_${prov.toUpperCase()}_API_KEY`] = k;
+  }
+  const gctx: GenContext = { env: keyEnv };
   const model = (prov: string) => settings.imageGen.providers[prov]?.model;
   const results: { format: ThumbFormat; file: string; base: string; provider: ThumbProvider }[] = [];
   const errors: string[] = [];

@@ -13,9 +13,10 @@ import { resolveTool } from '@solocut/toolchain';
 import { registerProject } from '@solocut/archive';
 import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
+import { apiKeyFor } from '../keys.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
 import {
-  applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, vpaths, writeAtomic, type Project,
+  VARIANTS, applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, variantExists, vpaths, writeAtomic, type Project,
 } from '../project.js';
 
 type Media = typeof import('@solocut/media');
@@ -481,9 +482,6 @@ function decisionBudget(p: Project): number {
   return Math.max(0, Math.min(s.decision.limits.perProjectUsd - projectSpent, s.decision.limits.perDayUsd - todaySpent, s.autopilot.budget.decisionUsd - projectSpent));
 }
 
-function decisionApiKey(env: NodeJS.ProcessEnv, provider: string): string | undefined {
-  return env.SOLOCUT_DECIDE_API_KEY ?? (provider === 'openai' ? env.OPENAI_API_KEY : provider === 'typesafe' ? env.TYPESAFE_API_KEY : undefined);
-}
 
 /** Ask the decision model about filler/retake candidates. Returns them judged; failures fall back to the rule. */
 async function judge(ctx: Ctx, p: Project, tpl: Template, cands: Removal[], words: TranscriptFile['words'], warnings: string[]): Promise<{ cut: Removal[]; review: Removal[] }> {
@@ -510,7 +508,7 @@ async function judge(ctx: Ctx, p: Project, tpl: Template, cands: Removal[], word
     try {
       const [a] = await decide({ state, questions: q }, {
         provider: s.decision.provider, model: s.decision.model, ...(s.decision.endpoint ? { endpoint: s.decision.endpoint } : {}),
-        ...(decisionApiKey(ctx.io.env, s.decision.provider) ? { apiKey: decisionApiKey(ctx.io.env, s.decision.provider)! } : {}),
+        ...(apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider) ? { apiKey: apiKeyFor(ctx.io.env, s.decision.apiKeyRef, s.decision.provider)! } : {}),
         cacheDir, budget: { remainingUsd: decisionBudget(p) },
         onUsage: (u) => appendFileSync(paths(p.dir).decisions, JSON.stringify({ at: new Date().toISOString(), kind: 'cut', candidate: [c.start, c.end], ...u }) + '\n'),
       });
@@ -730,19 +728,21 @@ async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 
   return { ...r, warnings: plan.warnings };
 }
 
-export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
-  const { values } = opts(args, { preview: { type: 'boolean' }, final: { type: 'boolean' }, target: { type: 'string' }, out: { type: 'string' } }, { max: 0 });
-  if (values.preview && values.final) throw new CliError('usage', 'choose --preview or --final');
-  const quality = values.final ? 'final' : 'preview';
-  const p = openProject(ctx);
+/** Main + every derived variant that exists (for --all). */
+export function allTimelines(p: Project): Project[] {
+  return [{ ...p, variant: null }, ...VARIANTS.filter((v) => variantExists(p.dir, v)).map((v) => ({ ...p, variant: v }))];
+}
+
+async function renderOne(ctx: Ctx, p: Project, o: { quality: 'preview' | 'final'; target?: string; out?: string }): Promise<Record<string, unknown> & { warnings: string[]; output: string }> {
   const tl = readTimeline(p);
-  const target = (values.target ?? (quality === 'final' ? tl.meta.targets[0] : undefined)) as Target | undefined;
+  // a variant renders for its own target (docs/18); the main video for the given or first target
+  const target = (p.variant ?? o.target ?? (o.quality === 'final' ? tl.meta.targets[0] : undefined)) as Target | undefined;
   if (target && !['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels'].includes(target)) throw new CliError('usage', `unknown target: ${target}`);
-  const output = values.out ? resolve(ctx.io.cwd, values.out) : quality === 'preview' ? vpaths(p).preview : join(p.dir, 'renders', target!, `${slugFile(tl.meta.title)}.mp4`);
+  const output = o.out ? resolve(ctx.io.cwd, o.out) : o.quality === 'preview' ? vpaths(p).preview : join(p.dir, 'renders', target!, `${slugFile(tl.meta.title)}.mp4`);
   const started = Date.now();
-  const r = await renderTimeline(ctx, p, tl, { quality, ...(target ? { target } : {}), output });
+  const r = await renderTimeline(ctx, p, tl, { quality: o.quality, ...(target ? { target } : {}), output });
   const out = rel(p, r.output);
-  if (quality === 'final' && target) {
+  if (o.quality === 'final' && target) {
     const prev = tl.outputs.find((x) => x.target === target);
     const ffmpeg = await resolveTool('ffmpeg');
     const output = prev ?? {
@@ -750,19 +750,39 @@ export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
       metadata: { title: tl.meta.title, titleCandidates: [], description: '', tags: [], chapters: tl.outline.length > 1 },
     };
     await applyEdit(p, [{ op: 'setOutput', output: { ...output, render: { path: out, hash: String(statSync(r.output).size), at: new Date().toISOString(), toolVersions: { solocut: '0.1.0', ...(ffmpeg ? { ffmpeg: basename(ffmpeg) } : {}) } } } }], by(ctx));
-    setStep(p, 'final', 'done');
-    if (loadSettings().archive.autoRegister.includes('export')) {
+    setStep(p, p.variant ? `final:${p.variant}` : 'final', 'done');
+    if (!p.variant && loadSettings().archive.autoRegister.includes('export')) {
       try {
         await registerProject(p.dir, { reason: 'export' });
       } catch (e) {
         r.warnings.push(`archive: ${(e as Error).message}`);
       }
     }
-  } else if (!values.out) setStep(p, 'preview', 'done');
-  emit(ctx, { output: out, quality, ...(target ? { target } : {}), reused: r.reused, rendered: r.rendered, seconds: Math.round((Date.now() - started) / 100) / 10, warnings: r.warnings }, () => [
-    t(ctx, `書き出しました: ${out}（作り直し ${r.rendered}、再利用 ${r.reused}）`, `rendered ${out} (${r.rendered} rendered, ${r.reused} reused)`),
+  } else if (!o.out && !p.variant) setStep(p, 'preview', 'done');
+  return { variant: p.variant ?? 'main', output: out, quality: o.quality, ...(target ? { target } : {}), reused: r.reused, rendered: r.rendered, seconds: Math.round((Date.now() - started) / 100) / 10, warnings: r.warnings };
+}
+
+export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
+  const { values } = opts(args, { preview: { type: 'boolean' }, final: { type: 'boolean' }, target: { type: 'string' }, out: { type: 'string' }, all: { type: 'boolean' } }, { max: 0 });
+  if (values.preview && values.final) throw new CliError('usage', 'choose --preview or --final');
+  if (values.all && (values.out || values.target || ctx.variant)) throw new CliError('usage', '--all renders every video; do not combine it with --out, --target or --variant');
+  const quality = values.final ? 'final' : 'preview';
+  const p = openProject(ctx);
+  const line = (r: Record<string, unknown> & { warnings: string[]; output: string }) => [
+    t(ctx, `書き出しました: ${r.output}（作り直し ${r.rendered}、再利用 ${r.reused}）`, `rendered ${r.output} (${r.rendered} rendered, ${r.reused} reused)`),
     ...r.warnings.map((w) => `! ${w}`),
-  ]);
+  ];
+  if (values.all) {
+    const results: Awaited<ReturnType<typeof renderOne>>[] = [];
+    for (const x of allTimelines(p)) {
+      info(ctx, `${x.variant ?? 'main'}:`);
+      results.push(await renderOne(ctx, x, { quality }));
+    }
+    emit(ctx, { results }, () => results.flatMap(line));
+    return;
+  }
+  const r = await renderOne(ctx, p, { quality, ...(values.target ? { target: values.target } : {}), ...(values.out ? { out: values.out } : {}) });
+  emit(ctx, r, () => line(r));
 }
 
 /** The preview, re-rendered when timeline.json is newer. */
@@ -796,21 +816,19 @@ export async function cmdFrame(ctx: Ctx, args: string[]): Promise<void> {
   emit(ctx, { frame, timecode: frameToTimecode(frame, tl.canvas.fps), path: out }, () => out);
 }
 
-export async function cmdCheck(ctx: Ctx, args: string[]): Promise<void> {
-  const { values } = opts(args, { input: { type: 'string' }, target: { type: 'string' }, only: { type: 'string' } }, { max: 0 });
-  const p = openProject(ctx);
+async function checkOne(ctx: Ctx, p: Project, o: { input?: string; target?: string; only?: string }): Promise<{ variant: string; run: string; passed: number; failed: number; needsHuman: number; report: string; findings: unknown[] }> {
   const tl = readTimeline(p);
   const m = await media();
-  const input = values.input ? resolve(ctx.io.cwd, values.input) : await freshPreview(ctx, p, tl);
-  const target = (values.target ?? tl.meta.targets[0]) as Target | undefined;
+  const input = o.input ? resolve(ctx.io.cwd, o.input) : await freshPreview(ctx, p, tl);
+  const target = (p.variant ?? o.target ?? tl.meta.targets[0]) as Target | undefined;
   let findings = await m.runMachineChecks(input, target ? { target } : {});
-  if (values.only === 'failed' && tl.review.lastCheck) {
+  if (o.only === 'failed' && tl.review.lastCheck) {
     const prev = readJsonFile<{ findings: { check: string; status: string }[] }>(join(p.dir, 'checks', tl.review.lastCheck.run, 'report.json'));
-    const failed = new Set(prev.findings.filter((f) => f.status !== 'pass').map((f) => f.check));
-    findings = findings.filter((f) => failed.has(f.check));
+    const failedSet = new Set(prev.findings.filter((f) => f.status !== 'pass').map((f) => f.check));
+    findings = findings.filter((f) => failedSet.has(f.check));
   }
   const now = new Date();
-  const run = `chk_${now.toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')}`;
+  const run = `chk_${now.toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')}${p.variant ? `-${p.variant}` : ''}`;
   const dir = join(p.dir, 'checks', run);
   mkdirSync(dir, { recursive: true });
   const passed = findings.filter((f) => f.status === 'pass').length;
@@ -818,7 +836,7 @@ export async function cmdCheck(ctx: Ctx, args: string[]): Promise<void> {
   const needsHuman = findings.filter((f) => f.status === 'needs-human').length;
   const fmt = (sec: number) => frameToTimecode(secondsToFrame(sec, tl.canvas.fps), tl.canvas.fps);
   const md = [
-    `# ${t(ctx, 'チェック結果', 'Check report')} ${run}`,
+    `# ${t(ctx, 'チェック結果', 'Check report')} ${run}${p.variant ? ` (${p.variant})` : ''}`,
     '',
     `- ${t(ctx, '対象', 'input')}: \`${rel(p, input)}\`${target ? ` (${target})` : ''}`,
     `- ${t(ctx, '合格', 'passed')} ${passed} / ${t(ctx, '不合格', 'failed')} ${failed} / ${t(ctx, '要確認', 'needs human')} ${needsHuman}`,
@@ -832,12 +850,27 @@ export async function cmdCheck(ctx: Ctx, args: string[]): Promise<void> {
     ].join('\n')),
   ].join('\n');
   writeFileSync(join(dir, 'report.md'), md + '\n');
-  writeFileSync(join(dir, 'report.json'), JSON.stringify({ run, at: now.toISOString(), input: rel(p, input), target, findings }, null, 2));
-  await applyEdit(p, [{ op: 'setReview', patch: { lastCheck: { run, passed, failed, needsHuman, at: now.toISOString() } } }], by(ctx));
-  setStep(p, 'check', 'done', failed ? t(ctx, `${failed} 件が不合格`, `${failed} failed`) : undefined);
-  emit(ctx, { run, passed, failed, needsHuman, report: `checks/${run}/report.md`, findings }, () => [
-    ...findings.map((f) => `${f.status === 'pass' ? '✓' : f.status === 'fail' ? '✗' : '!'} ${f.check}: ${f.note}`),
-    t(ctx, `レポート: checks/${run}/report.md`, `report: checks/${run}/report.md`),
-  ]);
+  writeFileSync(join(dir, 'report.json'), JSON.stringify({ run, at: now.toISOString(), variant: p.variant ?? 'main', input: rel(p, input), target, findings }, null, 2));
+  await applyEdit(p, [{ op: 'setReview', patch: { lastCheck: { run: run as `chk_${string}`, passed, failed, needsHuman, at: now.toISOString() } } }], by(ctx));
+  setStep(p, p.variant ? `check:${p.variant}` : 'check', 'done', failed ? t(ctx, `${failed} 件が不合格`, `${failed} failed`) : undefined);
+  return { variant: p.variant ?? 'main', run, passed, failed, needsHuman, report: `checks/${run}/report.md`, findings };
 }
 
+export async function cmdCheck(ctx: Ctx, args: string[]): Promise<void> {
+  const { values } = opts(args, { input: { type: 'string' }, target: { type: 'string' }, only: { type: 'string' }, all: { type: 'boolean' } }, { max: 0 });
+  if (values.all && (values.input || ctx.variant)) throw new CliError('usage', '--all checks every video; do not combine it with --input or --variant');
+  const p = openProject(ctx);
+  const o = { ...(values.input ? { input: values.input } : {}), ...(values.target ? { target: values.target } : {}), ...(values.only ? { only: values.only } : {}) };
+  const lines = (r: Awaited<ReturnType<typeof checkOne>>) => [
+    ...(r.findings as { check: string; status: string; note: string }[]).map((f) => `${f.status === 'pass' ? '✓' : f.status === 'fail' ? '✗' : '!'} ${f.check}: ${f.note}`),
+    t(ctx, `レポート: ${r.report}`, `report: ${r.report}`),
+  ];
+  if (values.all) {
+    const results: Awaited<ReturnType<typeof checkOne>>[] = [];
+    for (const x of allTimelines(p)) results.push(await checkOne(ctx, x, o));
+    emit(ctx, { results, failed: results.reduce((a, r) => a + r.failed, 0) }, () => results.flatMap((r) => [`[${r.variant}]`, ...lines(r)]));
+    return;
+  }
+  const r = await checkOne(ctx, p, o);
+  emit(ctx, r, () => lines(r));
+}

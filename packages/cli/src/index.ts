@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline';
 import { loadSettings } from '@solocut/settings';
 import { createMcpServer } from './mcp.js';
+import { parseVariant } from './project.js';
 import { CliError, CLI_VERSION, type Ctx, type IO, type Lang } from './ctx.js';
 import {
   cmdConfig, cmdDoctor, cmdInit, cmdLib, cmdNext, cmdPrompts, cmdStatus, cmdStep, cmdTemplates, cmdValidate, cmdVersion,
@@ -13,6 +14,7 @@ import { cmdPast } from './commands/past.js';
 import { cmdMeta } from './commands/meta.js';
 import { cmdThumb } from './commands/thumb.js';
 import { cmdFeedback } from './commands/feedback.js';
+import { cmdDerive } from './commands/derive.js';
 
 export { CliError, CLI_VERSION } from './ctx.js';
 export type { IO } from './ctx.js';
@@ -61,6 +63,7 @@ const COMMANDS: Record<string, Handler> = {
   meta: cmdMeta,
   thumb: cmdThumb,
   feedback: cmdFeedback,
+  derive: cmdDerive,
   config: cmdConfig,
   prompts: cmdPrompts,
   templates: cmdTemplates,
@@ -134,13 +137,14 @@ Global: --json  --project <dir>  --by human|agent  --agent <name>`,
 const AGENT_ENV: [string, string][] = [['CLAUDECODE', 'claude'], ['CODEX_SANDBOX', 'codex'], ['GEMINI_CLI', 'gemini']];
 
 /** Split global flags (anywhere in argv) from the command's own args. */
-function globals(argv: string[]): { json: boolean; help: boolean; project?: string; by?: string; agent?: string; rest: string[] } {
+function globals(argv: string[]): { json: boolean; help: boolean; project?: string; by?: string; agent?: string; variant?: string; rest: string[] } {
   const rest: string[] = [];
   let json = false;
   let help = false;
   let project: string | undefined;
   let by: string | undefined;
   let agent: string | undefined;
+  let variant: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--') {
@@ -149,18 +153,20 @@ function globals(argv: string[]): { json: boolean; help: boolean; project?: stri
     }
     if (a === '--json') json = true;
     else if (a === '--help' || a === '-h') help = true;
-    else if (a === '--project' || a === '--by' || a === '--agent') {
+    else if (a === '--project' || a === '--by' || a === '--agent' || a === '--variant') {
       const v = argv[++i];
       if (v === undefined) throw new CliError('usage', `${a} needs a value`);
       if (a === '--project') project = v;
       else if (a === '--by') by = v;
+      else if (a === '--variant') variant = v;
       else agent = v;
-    } else if (a.startsWith('--project=')) project = a.slice(10);
+    } else if (a.startsWith('--variant=')) variant = a.slice(10);
+    else if (a.startsWith('--project=')) project = a.slice(10);
     else if (a.startsWith('--by=')) by = a.slice(5);
     else if (a.startsWith('--agent=')) agent = a.slice(8);
     else rest.push(a);
   }
-  return { json, help, ...(project ? { project } : {}), ...(by ? { by } : {}), ...(agent ? { agent } : {}), rest };
+  return { json, help, ...(project ? { project } : {}), ...(by ? { by } : {}), ...(agent ? { agent } : {}), ...(variant ? { variant } : {}), rest };
 }
 
 function defaultIO(): IO {
@@ -211,7 +217,8 @@ export async function main(argv: string[], io: IO = defaultIO()): Promise<number
     const byRaw = g.by ?? io.env.SOLOCUT_BY ?? (g.agent || envAgent ? 'agent' : 'human');
     if (byRaw !== 'human' && byRaw !== 'agent') throw new CliError('usage', '--by must be human or agent');
     const agent = g.agent ?? envAgent;
-    const ctx: Ctx = { io, json, lang, by: byRaw, ...(g.project ? { projectFlag: g.project } : {}), ...(agent ? { agent } : {}) };
+    if (g.variant !== undefined) parseVariant(g.variant);
+    const ctx: Ctx = { io, json, lang, by: byRaw, ...(g.project ? { projectFlag: g.project } : {}), ...(agent ? { agent } : {}), ...(g.variant ? { variant: g.variant } : {}) };
     await handler(ctx, args);
     return 0;
   } catch (e) {

@@ -73,7 +73,7 @@ describe('init', () => {
   it('creates the project layout, files and status', async () => {
     const r = await init();
     expect(r.code, r.stdout + r.stderr).toBe(0);
-    expect(r.json.project).toMatchObject({ schema: 1, title: '設定の3つのコツ', template: { id: 'talk-youtube', version: '1' }, language: 'ja' });
+    expect(r.json.project).toMatchObject({ schema: 1, title: '設定の3つのコツ', template: { id: 'talk-youtube', version: '2' }, language: 'ja' });
     expect(r.json.project.id).toMatch(/^prj_\d{8}_[0-9a-f]{8}$/);
     for (const d of ['media/takes', 'media/imports', 'assets', 'derived/proxies', 'derived/transcripts', 'derived/analysis', 'derived/cache', 'captions', 'checks', 'feedback', 'renders', '.solocut']) {
       expect(existsSync(join(dir, d)), d).toBe(true);
@@ -109,7 +109,7 @@ describe('init', () => {
   it('accepts the folder as --dir (desktop form)', async () => {
     const r = await sb.run(['init', '--title', 'T', '--template', 'talk-tiktok', '--lang', 'en', '--dir', dir, '--no-git', '--json']);
     expect(r.json, r.stdout).toMatchObject({ ok: true, project: { dir, title: 'T', language: 'en' } });
-    expect(timeline().canvas).toMatchObject({ width: 1080, height: 1920 });
+    expect(timeline().canvas).toMatchObject({ width: 1920, height: 1080 }); // talk-tiktok is now an alias of talk: main video is 16:9, verticals are derived
     expect((await sb.run(['init', join(sb.root, 'a'), '--dir', join(sb.root, 'b'), '--json'])).code).toBe(2);
   });
 
@@ -131,7 +131,9 @@ describe('status / next / step', () => {
 
   it('a fresh project waits for media', async () => {
     const s = await inDir(['status']);
-    expect(s.json.steps).toHaveLength(14);
+    expect(s.json.steps).toHaveLength(21);
+    expect(s.json.steps.map((x: { step: string }) => x.step)).toContain('derive:tiktok');
+    expect(s.json.variants).toEqual({ tiktok: { exists: false, stale: false, lastCheckFailed: 0 }, 'youtube-shorts': { exists: false, stale: false, lastCheckFailed: 0 } });
     expect(s.json.next).toMatchObject({ step: 'ingest', state: 'needs-human' });
     const n = await inDir(['next']);
     expect(n.json).toMatchObject({ ok: true, step: 'ingest', state: 'needs-human' });
@@ -162,7 +164,7 @@ describe('status / next / step', () => {
     writeFileSync(join(dir, 'derived', 'transcripts', 'main.json'), JSON.stringify({ words: [] }));
     const n = await inDir(['next', '--with-prompt']);
     expect(n.json.step).toBe('rough-cut');
-    expect(n.json.prompt).toMatch(/talk-youtube\/prompts\/rough-cut\.md$/);
+    expect(n.json.prompt).toMatch(/talk[\\/]prompts[\\/]rough-cut\.md$/);
     expect(n.json.promptText).toContain('粗カット');
   });
 
@@ -397,7 +399,7 @@ describe('config / prompts / templates / lib / past', () => {
 
   it('templates lists the built-ins', async () => {
     const r = await sb.run(['templates', '--json']);
-    expect(r.json.templates.map((x: { id: string }) => x.id)).toEqual(['shorts-from-long', 'talk-tiktok', 'talk-youtube', 'tech-short', 'tech-tutorial']);
+    expect(r.json.templates.map((x: { id: string }) => x.id)).toEqual(['talk', 'tech']);
     expect(r.json.errors).toEqual([]);
   });
 

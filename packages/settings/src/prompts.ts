@@ -47,15 +47,19 @@ export const DEFAULT_PROMPTS: Prompt[] = [
     agent: 'default',
     autopilot: true,
     body: {
-      ja: `このプロジェクト（{{project}}）の動画を、テンプレート {{template}} の手順に沿って投稿できる状態まで完成させてください。
+      ja: `このプロジェクト（{{project}}）の素材から、テンプレート {{template}} の手順に沿って、投稿できる状態の動画を3本完成させてください: YouTube の本編（16:9）、TikTok（9:16）、YouTube Shorts（9:16）。
 ${LOOP_JA} state が done になるまで止まらないでください。
+- まず本編を仕上げ、チェックに合格したら \`solocut derive --target tiktok\` と \`--target youtube-shorts\` で縦型の2本を作り、テンプレートの prompts/vertical.md に沿って直します（各コマンドに \`--variant tiktok\` などを付けると、その版を操作できます）。
+- サムネイルと投稿文（タイトル・説明文・タグ）は3本それぞれに作ります。仕上げは \`solocut render --final --all\`。
 - 判定モデルの答えが中間のものは、一番確率の高い答えで進め、needsReview の印を付けて残してください。
 - チェックの不合格は直して \`solocut check\` をやり直します。同じ項目を3回直しても通らなければ、.solocut/questions.md に書いて先へ進んでください。
 - 同期の信頼度が低いときだけは待ってください（ずれた同期は全体を壊します）。待つ間に進められる手順を先に進めます。
 - 投稿はしないでください。投稿は人が承認してからです。
 最後に .solocut/handoff.md を更新し、やったことと確認してほしい点を3行で報告してください。`,
-      en: `Finish this project's video ({{project}}) following the steps of template {{template}} until it is ready to publish.
+      en: `From this project's footage ({{project}}), finish three videos ready to publish, following template {{template}}: the YouTube main video (16:9), TikTok (9:16) and YouTube Shorts (9:16).
 ${LOOP_EN} Do not stop until state is done.
+- Finish the main video first; once its checks pass, derive the vertical ones with \`solocut derive --target tiktok\` and \`--target youtube-shorts\` and refine them following the template's prompts/vertical.md (add \`--variant tiktok\` etc. to any command to work on that version).
+- Make a thumbnail and post text (title, description, tags) for each of the three. Final renders: \`solocut render --final --all\`.
 - When the decision model is unsure, take the most likely answer, mark it needsReview and move on.
 - Fix failed checks and re-run \`solocut check\`. If the same item still fails after 3 fixes, note it in .solocut/questions.md and move on.
 - Only wait when sync confidence is low (a wrong sync breaks everything); meanwhile continue with steps that do not depend on it.

@@ -169,7 +169,7 @@ describe('mcp end to end', () => {
     const msgs = out.trim().split('\n').map((l) => JSON.parse(l));
     expect(msgs).toHaveLength(2);
     expect(msgs[0].result.serverInfo.name).toBe('solocut');
-    expect(JSON.parse(msgs[1].result.content[0].text).steps).toHaveLength(14);
+    expect(JSON.parse(msgs[1].result.content[0].text).steps).toHaveLength(21);
   });
 });
 

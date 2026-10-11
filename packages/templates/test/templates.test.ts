@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  CLAUDE_MD, STEP_IDS, TemplateError, builtinTemplatesDir, deepMerge, generateAgentsMd, initialStatus, listTemplates,
-  listTemplatesWithErrors, loadTemplate, nextStep, toRational, type NextContext, type StepId, type StepState, type Template,
+  CLAUDE_MD, STEP_IDS, TemplateError, builtinTemplatesDir, deepMerge, derivedTargets, expandPipeline, generateAgentsMd, initialStatus, listTemplates,
+  listTemplatesWithErrors, loadTemplate, nextStep, toRational, type NextContext, type PipelineStep, type StepId, type StepState, type Template,
 } from '../src/index.js';
 
 let home: string;
@@ -31,61 +31,71 @@ function writeTemplate(root: string, id: string, yaml: string, files: Record<str
 }
 
 describe('built-in templates', () => {
-  const BUILTIN = ['shorts-from-long', 'talk-tiktok', 'talk-youtube', 'tech-short', 'tech-tutorial'];
+  const FAMILIES = ['talk', 'tech'];
+  const ALIASES = { 'tech-tutorial': 'tech', 'tech-short': 'tech', 'talk-youtube': 'talk', 'talk-tiktok': 'talk', 'shorts-from-long': 'talk' };
 
-  it('resolves the repo /templates dir', () => {
-    expect(builtinTemplatesDir().endsWith('/templates')).toBe(true);
+  it('resolves the repo templates dir', () => {
+    expect(basename(builtinTemplatesDir())).toBe('templates');
+    expect(existsSync(join(builtinTemplatesDir(), 'tech', 'template.yaml'))).toBe(true);
   });
 
-  it('lists all five without errors and hides the abstract bases', () => {
+  it('lists the two families without errors; hides bases and aliases', () => {
     const r = listTemplatesWithErrors();
     expect(r.errors.map((e) => e.message)).toEqual([]);
-    expect(r.templates.map((t) => t.id).sort()).toEqual(BUILTIN);
+    expect(r.templates.map((t) => t.id).sort()).toEqual(FAMILIES);
     const all = listTemplatesWithErrors({ includeAbstract: true }).templates.map((t) => t.id);
-    expect(all).toContain('base-horizontal');
-    expect(all).toContain('base-vertical');
+    for (const id of ['base-horizontal', 'base-vertical', ...Object.keys(ALIASES)]) expect(all).toContain(id);
   });
 
-  it.each(BUILTIN)('%s is complete', (id) => {
+  it.each(FAMILIES)('%s is complete and makes three videos', (id) => {
     const t = loadTemplate(id);
     expect(t.abstract).toBe(false);
-    for (const p of ['rough-cut', 'multicam', 'captions', 'sfx', 'thumbnail']) {
+    for (const p of ['rough-cut', 'multicam', 'captions', 'sfx', 'thumbnail', 'vertical']) {
       expect(t.prompts[p], `${id} prompts/${p}.md`).toBeTruthy();
       expect(t.prompts[p]!.length).toBeGreaterThan(200);
     }
-    expect(t.rules.length).toBeGreaterThan(200);
-    expect(t.pipeline[0]).toBe('ingest');
-    expect(t.pipeline).toContain('final');
-    expect(t.name.ja && t.name.en).toBeTruthy();
+    expect(t.rules).toContain('1回の撮影から3本');
+    expect([t.canvas.width, t.canvas.height]).toEqual([1920, 1080]);
+    expect(Object.keys(t.outputs ?? {}).sort()).toEqual(['tiktok', 'youtube', 'youtube-shorts']);
+    expect(derivedTargets(t)).toEqual(['tiktok', 'youtube-shorts']);
+    expect(t.outputs!['youtube-shorts']).toMatchObject({ derive: 'vertical', sameAs: 'tiktok', maxSec: 60 });
     expect(t.canvas.fps).toEqual({ num: 30, den: 1 });
   });
 
-  it('vertical templates inherit 9:16 and horizontal ones 16:9', () => {
-    for (const id of ['tech-short', 'talk-tiktok', 'shorts-from-long']) {
-      const t = loadTemplate(id);
-      expect([t.canvas.width, t.canvas.height]).toEqual([1080, 1920]);
-      expect(t.chain.at(-1)).toBe('base-vertical');
-    }
-    for (const id of ['tech-tutorial', 'talk-youtube']) {
-      const t = loadTemplate(id);
-      expect([t.canvas.width, t.canvas.height]).toEqual([1920, 1080]);
-      expect(t.chain).toEqual([id, 'base-horizontal']);
-    }
+  it.each(Object.entries(ALIASES))('old id %s is an alias of %s', (id, fam) => {
+    const t = loadTemplate(id);
+    expect(t.alias).toBe(true);
+    expect(t.chain.slice(0, 2)).toEqual([id, fam]);
+    expect(t.prompts.vertical).toBe(loadTemplate(fam).prompts.vertical);
+    expect(t.outputs).toEqual(loadTemplate(fam).outputs);
   });
 
   it('merges extends: child overrides keys, keeps the rest; arrays replace', () => {
-    const t = loadTemplate('talk-youtube');
+    const t = loadTemplate('talk');
     expect(t.cut.silence).toEqual({ minMs: 400, padMs: 100, noiseDb: -35 }); // noiseDb from base
     expect(t.cut.fillers).toContain('えっと'); // from base
     expect(t.layouts.allowed).toEqual(['camera-full', 'scene']); // replaced
     expect(t.rules.indexOf('共通の方針')).toBeLessThan(t.rules.indexOf('語り動画（YouTube）の編集方針')); // base first
   });
 
-  it('tech templates enable the tech features', () => {
-    const t = loadTemplate('tech-tutorial');
+  it('tech enables the tech features; vertical layouts per family', () => {
+    const t = loadTemplate('tech');
     expect(t.kind).toBe('tech');
     expect(t.features).toMatchObject({ autoZoom: true, keystrokes: true, cursorHighlight: true, piiMask: true });
     expect(t.checks).toContain('pii-on-screen');
+    expect(t.outputs!.tiktok!.layout).toBe('split-v');
+    expect(loadTemplate('talk').outputs!.tiktok!.layout).toBe('camera-full');
+  });
+
+  it('expands the pipeline per docs/18', () => {
+    expect(expandPipeline(loadTemplate('talk'))).toEqual([
+      'ingest', 'sync', 'transcribe', 'rough-cut', 'multicam', 'captions', 'sfx', 'layout', 'preview', 'check',
+      'derive:tiktok', 'check:tiktok', 'derive:youtube-shorts', 'check:youtube-shorts',
+      'thumbnail', 'metadata', 'review', 'final', 'final:tiktok', 'final:youtube-shorts', 'publish',
+    ]);
+    expect(expandPipeline({ pipeline: ['ingest', 'final'], outputs: undefined })).toEqual(['ingest', 'final']);
+    expect(expandPipeline({ pipeline: ['ingest'], outputs: { tiktok: { enabled: false, derive: 'vertical' } } })).toEqual(['ingest']);
+    expect(expandPipeline({ pipeline: ['ingest'], outputs: { tiktok: { enabled: true, derive: 'vertical' } } })).toEqual(['ingest', 'derive:tiktok', 'check:tiktok', 'final:tiktok', 'publish']);
   });
 });
 
@@ -145,16 +155,17 @@ describe('loader errors and overrides', () => {
     expect(t.promptFiles.captions).toBe(join(dir, 'prompts', 'captions.md'));
     expect(t.prompts['rough-cut']).toContain('粗カット'); // inherited
     expect(t.rules.endsWith('自分のルール')).toBe(true);
-    expect(t.chain).toEqual(['my-talk', 'talk-youtube', 'base-horizontal']);
+    expect(t.chain).toEqual(['my-talk', 'talk-youtube', 'talk', 'base-horizontal']);
     expect(listTemplates().map((x) => x.id)).toContain('my-talk');
+    expect(t.alias).toBe(false); // alias is not inherited
   });
 
   it('a user template with a built-in id shadows it and may extend it', () => {
     writeTemplate(join(home, 'templates'), 'talk-youtube', 'id: talk-youtube\nextends: talk-youtube\nversion: 9\n');
     const t = loadTemplate('talk-youtube');
     expect(t.version).toBe('9');
-    expect(t.chain).toEqual(['talk-youtube', 'talk-youtube', 'base-horizontal']);
-    expect(listTemplates().filter((x) => x.id === 'talk-youtube')).toHaveLength(1);
+    expect(t.chain).toEqual(['talk-youtube', 'talk-youtube', 'talk', 'base-horizontal']);
+    expect(listTemplates().filter((x) => x.id === 'talk-youtube')).toHaveLength(1); // the user's copy is not an alias
   });
 
   it('extra dirs (project templates) come first', () => {
@@ -231,9 +242,9 @@ describe('generateAgentsMd', () => {
 describe('nextStep', () => {
   const tpl = (): Template => loadTemplate('talk-youtube');
   const ctx = (o: Partial<NextContext> = {}): NextContext => ({ hasTakes: true, hasTranscript: true, openItems: 0, lastCheckFailed: 0, ...o });
-  const status = (t: Template, done: StepId[], extra: Partial<Record<StepId, StepState['state']>> = {}): StepState[] =>
-    t.pipeline.map((step) => ({ step, state: extra[step] ?? (done.includes(step) ? 'done' : 'todo') }));
-  const upTo = (t: Template, step: StepId): StepId[] => t.pipeline.slice(0, t.pipeline.indexOf(step));
+  const status = (t: Template, done: PipelineStep[], extra: Partial<Record<PipelineStep, StepState['state']>> = {}): StepState[] =>
+    expandPipeline(t).map((step) => ({ step, state: extra[step] ?? (done.includes(step) ? 'done' : 'todo') }));
+  const upTo = (t: Template, step: PipelineStep): PipelineStep[] => expandPipeline(t).slice(0, expandPipeline(t).indexOf(step));
 
   it('initialStatus is all todo', () => {
     expect(initialStatus(tpl()).every((s) => s.state === 'todo')).toBe(true);
@@ -251,8 +262,8 @@ describe('nextStep', () => {
 
   it('walks the pipeline in order, one step at a time', () => {
     const t = tpl();
-    for (const step of t.pipeline) {
-      if (step === 'review') continue;
+    for (const step of expandPipeline(t)) {
+      if (step === 'review' || step === 'publish') continue;
       const n = nextStep(t, status(t, upTo(t, step)), ctx());
       expect(n.step, `after ${upTo(t, step).at(-1)}`).toBe(step);
       expect(n.state).toBe('ready');
@@ -303,11 +314,11 @@ describe('nextStep', () => {
 
   it('check failed → check again with preview first; 0 failures passes', () => {
     const t = tpl();
-    const st = status(t, upTo(t, 'review'));
+    const st = status(t, upTo(t, 'derive:tiktok'));
     const n = nextStep(t, st, ctx({ lastCheckFailed: 2 }));
     expect(n).toMatchObject({ step: 'check', state: 'ready' });
     expect(n.commands).toContain('solocut check --json');
-    expect(nextStep(t, st, ctx({ lastCheckFailed: 0 }))).toMatchObject({ step: 'review', state: 'needs-human' });
+    expect(nextStep(t, st, ctx({ lastCheckFailed: 0 }))).toMatchObject({ step: 'derive:tiktok', state: 'ready', variant: 'tiktok' });
   });
 
   it('review waits for a human; autopilot skips to final; done review → final per target', () => {
@@ -340,7 +351,7 @@ describe('nextStep', () => {
 
   it('everything done → done; English text', () => {
     const t = tpl();
-    const n = nextStep(t, status(t, [...t.pipeline]), ctx({ lang: 'en' }));
+    const n = nextStep(t, status(t, expandPipeline(t)), ctx({ lang: 'en' }));
     expect(n).toMatchObject({ step: 'done', state: 'done', commands: [] });
     expect(n.why).toMatch(/All template steps/);
   });
@@ -355,5 +366,57 @@ describe('nextStep', () => {
   it('missing status entries count as todo; unknown steps are ignored', () => {
     expect(nextStep(tpl(), [{ step: 'ingest', state: 'done' }], ctx()).step).toBe('sync');
     expect(STEP_IDS.length).toBe(14);
+  });
+
+  describe('variants (docs/18)', () => {
+    const v = (o: Partial<{ exists: boolean; stale: boolean; lastCheckFailed: number }> = {}) => ({ exists: true, stale: false, lastCheckFailed: 0, ...o });
+
+    it('derive steps follow prompts/vertical.md and carry the variant', () => {
+      const t = tpl();
+      const n = nextStep(t, status(t, upTo(t, 'derive:tiktok')), ctx());
+      expect(n).toMatchObject({ step: 'derive:tiktok', state: 'ready', variant: 'tiktok', prompt: t.promptFiles.vertical });
+      expect(n.commands[0]).toBe('solocut derive --target tiktok --json');
+      const c = nextStep(t, status(t, upTo(t, 'check:youtube-shorts')), ctx());
+      expect(c.commands).toEqual(['solocut render --preview --variant youtube-shorts --json', 'solocut check --variant youtube-shorts --json']);
+    });
+
+    it('a stale or missing variant is derived again; a failed variant check is redone', () => {
+      const t = tpl();
+      const st = status(t, upTo(t, 'thumbnail'));
+      expect(nextStep(t, st, ctx({ variants: { tiktok: v(), 'youtube-shorts': v() } })).step).toBe('thumbnail');
+      expect(nextStep(t, st, ctx({ variants: { tiktok: v({ stale: true }), 'youtube-shorts': v() } }))).toMatchObject({ step: 'derive:tiktok', state: 'ready' });
+      expect(nextStep(t, st, ctx({ variants: { tiktok: v(), 'youtube-shorts': v({ exists: false }) } })).step).toBe('derive:youtube-shorts');
+      expect(nextStep(t, st, ctx({ variants: { tiktok: v({ lastCheckFailed: 1 }), 'youtube-shorts': v() } })).step).toBe('check:tiktok');
+    });
+
+    it('thumbnail and metadata list commands for every video', () => {
+      const t = tpl();
+      const n = nextStep(t, status(t, upTo(t, 'thumbnail')), ctx());
+      expect(n.commands.some((c) => c.includes('--variant tiktok'))).toBe(true);
+      expect(n.commands.some((c) => c.includes('--variant youtube-shorts'))).toBe(true);
+    });
+
+    it('finals per variant, then publish always waits for a human (also on autopilot)', () => {
+      const t = tpl();
+      expect(nextStep(t, status(t, upTo(t, 'final:tiktok')), ctx()).commands).toEqual(['solocut render --final --variant tiktok --json']);
+      const p = nextStep(t, status(t, upTo(t, 'publish')), ctx({ autopilot: true }));
+      expect(p).toMatchObject({ step: 'publish', state: 'needs-human', commands: [] });
+    });
+
+    it('while the review waits, a variant step can run meanwhile', () => {
+      const t = tpl();
+      const st = status(t, upTo(t, 'derive:tiktok'), { 'rough-cut': 'done' });
+      st.find((x) => x.step === 'review')!.state = 'todo';
+      const n = nextStep(t, status(t, upTo(t, 'review'), { 'final:tiktok': 'todo' }), ctx());
+      expect(n).toMatchObject({ step: 'review', state: 'needs-human' });
+      expect(st.length).toBe(expandPipeline(t).length);
+    });
+
+    it('AGENTS.md lists the variant steps and the vertical prompt', () => {
+      const md = generateAgentsMd(tpl(), { dir: '/p', title: 'x', lang: 'ja' });
+      expect(md).toContain('**derive:tiktok**');
+      expect(md).toContain('prompts/vertical.md');
+      expect(md).toContain('**publish**');
+    });
   });
 });

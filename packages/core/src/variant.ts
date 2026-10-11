@@ -1,7 +1,9 @@
 import { sha256Hex } from './hash.js';
+import { segmentFocus } from './reframe.js';
+import type { FocusPathOptions, Tracks } from './tracks.js';
 import { PRESETS } from './presets.js';
 import type {
-  Bgm, Caption, Chapter, Focus, Frame, Marker, Overlay, Point, Rect, Scene, Segment, Sfx, Target, Timeline, VideoChoice,
+  Bgm, Caption, Chapter, Focus, FocusValue, Frame, Marker, Overlay, Point, Rect, Scene, Segment, Sfx, Target, Timeline, VideoChoice,
 } from './schema.js';
 import { SCHEMA_VERSION } from './schema.js';
 import { repackSegments, segmentLength, takeFps } from './timeline.js';
@@ -85,6 +87,9 @@ export interface DeriveOptions {
   hookSegment?: string;
   /** Crop focus for the screen per main segment (e.g. from the cursor log); default centre. */
   screenFocus?: Record<string, Focus>;
+  /** Analysis tracks: faces drive the vertical crops of cameras, the cursor drives the screen crop in split-v. */
+  tracks?: Tracks;
+  smoothing?: Partial<Omit<FocusPathOptions, 'fromSec' | 'toSec' | 'fps'>>;
   /** ISO time for meta.derivedFrom.at (default now). */
   at?: string;
   /** Free text recorded in meta.derivedFrom.rules (e.g. the prompts/vertical.md rules used). */
@@ -128,13 +133,17 @@ export function deriveVariant(main: Timeline, target: 'tiktok' | 'youtube-shorts
   const convert = (seg: Segment): VideoChoice => {
     const v = seg.video;
     const want = opts.layoutMap?.[v.layout];
-    const screenFocus = opts.screenFocus?.[seg.id];
-    const split = (screen: string, camera: string): VideoChoice => ({
-      layout: 'split-v', top: screen, bottom: camera, ...(screenFocus ? { topFocus: screenFocus } : {}), bottomFocus: focus,
-    });
+    const tr = opts.tracks;
+    const face = (cam: string, region: { width: number; height: number }): FocusValue =>
+      (tr && opts.reframe !== 'center' ? segmentFocus(main, seg, cam, 'face', tr, region, opts.smoothing) : null) ?? focus;
+    const half = { width: W, height: H / 2 };
+    const split = (screen: string, camera: string): VideoChoice => {
+      const screenFocus = opts.screenFocus?.[seg.id] ?? (tr ? segmentFocus(main, seg, screen, 'cursor', tr, half, opts.smoothing) : null);
+      return { layout: 'split-v', top: screen, bottom: camera, ...(screenFocus ? { topFocus: screenFocus } : {}), bottomFocus: face(camera, half) };
+    };
     switch (v.layout) {
       case 'camera-full':
-        return want === 'split-v' ? v : { layout: 'camera-full', camera: v.camera, focus };
+        return want === 'split-v' ? v : { layout: 'camera-full', camera: v.camera, focus: face(v.camera, { width: W, height: H }) };
       case 'screen-with-wipe':
         if (want === 'screen-with-wipe') return v;
         if (want === 'screen-full') return { layout: 'screen-full', screen: v.screen };
@@ -168,7 +177,7 @@ export function deriveVariant(main: Timeline, target: 'tiktok' | 'youtube-shorts
       len = segmentLength(main, { src });
     }
     used += len;
-    const copy: Segment = { ...structuredClone(s), id: `${s.id}${sfx}`, src, video: convert(s) };
+    const copy: Segment = { ...structuredClone(s), id: `${s.id}${sfx}`, src, video: convert({ ...s, src }) };
     delete copy.checks;
     segs.push(copy);
     selection.push(src.to !== s.src.to ? { segment: s.id, from: src.from, to: src.to } : { segment: s.id });

@@ -165,6 +165,27 @@ export function renderScenes(t, custom?): { back: string | null; front: string |
   // wrap by character width (no BudouX in core); put "\n" in a slot to force a break.
   // Text: Noto Sans JP (\b400/700/900), code: JetBrains Mono (bundled OFL fonts; pass fontsDir). Japanese slot text breaks
   // only between BudouX phrases (jaPhrases, wrapText, fitText exported).
+// Tracking (pure; callers read derived/analysis/*): faces.<sourceId>.json = FaceTrack { fps, frames: [{ f, faces: [{x,y,w,h,score}] }] }
+// (normalized), cursor.<takeId>.jsonl = CursorEvent { t_ms, x, y, click? }, keys.<takeId>.jsonl = KeyEvent { t_ms, keys }.
+export interface Tracks { faces?: Record<sourceId, FaceTrack>; cursor?: Record<takeId, CursorEvent[]>; keys?: Record<takeId, KeyEvent[]>;
+  cuts?: Record<sourceId, number[] /* source seconds */> }
+export function parseJsonl<T>(text): T[]; faceSamples(track, o?): TrackSample[]; cursorSamples(events): TrackSample[];
+export function focusPath(samples, { fromSec, toSec, fps, cuts?, minCutoff? = 0.4, beta? = 0.6, deadZone? = 0.04, tolerance? = 0.01, fallback? }):
+  { at: Frame /* from fromSec */; x; y }[];   // dead zone → one-euro smoothing (restarts at cuts: hard jump) → keyframe reduction
+export function focusForPoint(p, sourceSize, regionSize): Focus;   // cover-crop focus that centres a normalized point
+export function segmentFocus(t, seg, sourceId, 'face'|'cursor', tracks, region, smoothing?): FocusValue | null;
+export function applyTracks(t, tracks, { followClicks?: boolean | { scale = 1.6, holdSec = 1.5, rampSec = 0.35 }, smoothing? }): Segment[];
+  // zoom keyframes with focus 'face'/'cursor' become moving canvas points along the track; followClicks (template
+  // zoom.followClicks) adds punch-ins toward clicks on screen segments without a hand-made zoom. Record with setSegments.
+export function clickZoom(t, seg, tracks, o?): ZoomKeyframe[];
+export function overlaysFromInputLogs(t, { cursor?, keys? }, { shortcutsOnly? = true, keyHoldSec? = 1.2, clicks? = true, keys? = true }): Overlay[];
+  // click-ring at the mapped frame/position (layout-aware, incl. vertical crops) and keystroke badges for shortcuts
+  // (repeats merged), only while the take's screen is shown; ids ov_click_N / ov_key_N, unique. Add with addOverlay ops.
+// Focus fields (camera-full focus, split-v topFocus/bottomFocus) accept a static { x, y } or keyframes { at, x, y }[]
+// (segment-relative frames) → per-frame crop expressions in compile; layoutAt evaluates them. deriveVariant takes
+// `tracks` + `smoothing`: faces drive camera crops (unless reframe 'center'), the cursor drives the split-v screen crop.
+// Bubbles: fitBubble(label, base, max, maxSize, minSize, maxLines = 3) — the largest size (explain-illust-bubbles:
+// frame height / 14) with ≤ 3 BudouX lines; the bubble grows up to max.
 // helpers: wipeGeometry, reanchor, sha256Hex (pure), ffFilterValue (filtergraph escaping), voiceSource, assTime, assEscape, assColor, assTagColor,
 // assHeader, assStyleLine, assDialogue, overlaysToAss
 ```

@@ -21,6 +21,50 @@ export interface FeedbackSession {
 
 export type Stroke = NonNullable<FeedbackSession['strokes']>[number];
 
+/** The desktop app's session format: one event list, times in ms since the mic started. */
+export interface AppSession {
+  schema: 1;
+  id?: string;
+  createdAt?: string;
+  fps?: { num: number; den: number };
+  video?: { path: string; durationSec?: number };
+  micFile?: string;
+  micStartMs?: number;
+  events: { t_ms: number; kind: 'play' | 'pause' | 'seek' | 'stroke' | 'box' | 'text'; frame: number; videoTime?: number; data?: Record<string, unknown> }[];
+}
+
+const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+
+/** Convert the app's event list into a FeedbackSession (boxes become closed strokes, text becomes notes). */
+export function fromAppSession(a: AppSession): FeedbackSession {
+  const playback: NonNullable<FeedbackSession['playback']> = [];
+  const strokes: Stroke[] = [];
+  const notes: NonNullable<FeedbackSession['notes']> = [];
+  let state: 'playing' | 'paused' = 'paused';
+  for (const e of [...a.events].sort((x, y) => x.t_ms - y.t_ms)) {
+    if (!num(e.t_ms) || !num(e.frame)) throw new Error('every event needs numeric t_ms and frame');
+    const d = e.data ?? {};
+    if (e.kind === 'play' || e.kind === 'pause' || e.kind === 'seek') {
+      if (e.kind !== 'seek') state = e.kind === 'play' ? 'playing' : 'paused';
+      playback.push({ atMs: e.t_ms, state, frame: e.frame });
+    } else if (e.kind === 'stroke') {
+      const pts = d.points;
+      if (!Array.isArray(pts)) throw new Error('stroke events need data.points');
+      strokes.push({ startMs: e.t_ms, endMs: e.t_ms, frame: e.frame, points: pts as [number, number][] });
+    } else if (e.kind === 'box') {
+      const { x, y, w, h } = d as { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
+      if (!num(x) || !num(y) || !num(w) || !num(h)) throw new Error('box events need data.x, y, w, h');
+      strokes.push({ startMs: e.t_ms, endMs: e.t_ms, frame: e.frame, points: [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]] });
+    } else if (e.kind === 'text') {
+      if (typeof d.text === 'string' && d.text.trim()) notes.push({ atMs: e.t_ms, text: d.text, frame: e.frame });
+    }
+  }
+  return {
+    schema: 1, ...(a.createdAt ? { createdAt: a.createdAt } : {}), ...(a.micFile ? { audio: a.micFile } : {}), audioStartMs: 0,
+    playback, strokes, notes,
+  };
+}
+
 /** Timeline frame shown at session time `ms`. */
 export function frameAt(s: FeedbackSession, ms: number, fps: Rational): number {
   const ev = [...(s.playback ?? [])].sort((a, b) => a.atMs - b.atMs);

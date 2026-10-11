@@ -139,7 +139,7 @@ export function wrapText(text: string, maxEm: number): string[] {
 }
 
 /** Re-wrap to the same number of lines with the narrowest width that still fits (avoids a lone last word). */
-function balance(text: string, lines: string[], maxEm: number): string[] {
+export function balanceLines(text: string, lines: string[], maxEm: number): string[] {
   if (lines.length < 2) return lines;
   const total = textWidthEm(text.replace(/\s+/g, ' '));
   for (let em = Math.max(1, total / lines.length); em < maxEm; em += 0.5) {
@@ -154,7 +154,7 @@ export function fitText(text: string, boxW: number, boxH: number, maxSize: numbe
   for (let size = Math.round(maxSize); size >= Math.round(minSize); size -= Math.max(1, Math.round(size * 0.06))) {
     const lines = wrapText(text, boxW / size);
     const widest = Math.max(0, ...lines.map(textWidthEm));
-    if (lines.length * size * 1.25 <= boxH && widest * size <= boxW) return { size, lines: balance(text, lines, boxW / size) };
+    if (lines.length * size * 1.25 <= boxH && widest * size <= boxW) return { size, lines: balanceLines(text, lines, boxW / size) };
   }
   const size = Math.round(minSize);
   return { size, lines: wrapText(text, boxW / size) };

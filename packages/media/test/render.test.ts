@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Decided, Segment, Timeline } from '@solocut/core';
-import { applyOp, applyOps, compile, compileFrame, deriveVariant, emptyTimeline, pickHighlights, validateTimeline } from '@solocut/core';
+import { applyOp, applyOps, applyTracks, compile, compileFrame, deriveVariant, emptyTimeline, overlaysFromInputLogs, pickHighlights, validateTimeline } from '@solocut/core';
 import { executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
 import { countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
 
@@ -157,6 +157,44 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     const bottom = regionLuma(r.output, 5, 400, 1300, 200, 200);
     const cam = frameLuma(p('cam.mp4'), 75 + 5);
     expect(Math.abs(bottom - cam)).toBeLessThan(12);
+  });
+
+  it('tracked reframing: the vertical crop follows a moving face; clicks punch in; input overlays render', async () => {
+    // camera: horizontal brightness ramp (dark left → bright right), 4 s
+    ff(['-f', 'lavfi', '-i', "color=black:s=640x360:r=30:d=4,format=yuv420p,geq=lum='16+X*219/W':cb=128:cr=128", '-c:v', 'libx264', '-preset', 'ultrafast', '-qp', '0', '-pix_fmt', 'yuv420p', p('ramp.mp4')]);
+    const e = emptyTimeline({ title: 'r', kind: 'tech', template: { id: 'tech', version: '1' }, canvas: { width: 640, height: 360, fps: { num: 30, den: 1 } }, language: 'ja', targets: ['youtube'] });
+    const main = applyOps({
+      ...e,
+      sources: {
+        ramp: { kind: 'camera', path: 'ramp.mp4', take: 'take_1', role: 'front', fps: { num: 30, den: 1 }, size: { width: 640, height: 360 }, offset: 0, audio: false },
+        scr: { kind: 'screen', path: 'scr.mp4', take: 'take_1', display: 'main', fps: { num: 30, den: 1 }, size: { width: 320, height: 240 }, offset: 0, audio: false },
+        mic: { kind: 'mic', path: 'mic.wav', take: 'take_1', sampleRate: 48000, offset: 0 },
+      },
+    }, [{ op: 'setSegments', segments: [
+      { id: 'seg_c', range: { start: 0, end: 0 }, src: { from: 0, to: 90, take: 'take_1' }, text: '', chapter: 'ch_1', role: 'hook', video: { layout: 'camera-full', camera: 'ramp' }, decided: D },
+      { id: 'seg_s', range: { start: 0, end: 0 }, src: { from: 90, to: 120, take: 'take_1' }, text: '', chapter: 'ch_1', role: 'demo', video: { layout: 'screen-full', screen: 'scr' }, decided: D },
+    ] }]).timeline;
+    // a face moving left → right over 3 s
+    const faces = { fps: 30, frames: Array.from({ length: 91 }, (_, f) => ({ f, faces: [{ x: 0.05 + 0.8 * (f / 90), y: 0.3, w: 0.1, h: 0.15, score: 0.95 }] })) };
+    const v = deriveVariant(main, 'tiktok', { selection: ['seg_c'], tracks: { faces: { ramp: faces } } });
+    expect(Array.isArray((v.segments[0]!.video as { focus: unknown }).focus)).toBe(true);
+    const r = await executeRenderPlan(compile(v, { quality: 'preview', projectDir: dir }), { projectDir: dir, cacheDir: 'cache', output: 'out/reframe.mp4' });
+    expect((await probe(r.output)).streams[0]).toMatchObject({ width: 540, height: 960 });
+    expect(frameLuma(r.output, 85)).toBeGreaterThan(frameLuma(r.output, 5) + 60); // the crop moved right (brighter)
+    // click punch-in on the screen segment + click ring / keystroke overlays
+    const cursor = [{ t_ms: 3400, x: 0.75, y: 0.75, click: true }];
+    const zoomed = applyOp(main, { op: 'setSegments', segments: applyTracks(main, { cursor: { take_1: cursor } }, { followClicks: true }) }).timeline;
+    expect(zoomed.segments[1]!.zoom!.length).toBeGreaterThan(1);
+    const withInputs = applyOps(zoomed, overlaysFromInputLogs(zoomed, { cursor: { take_1: cursor }, keys: { take_1: [{ t_ms: 3100, keys: ['⌘', 'S'] }] } })
+      .map((overlay) => ({ op: 'addOverlay' as const, overlay }))).timeline;
+    expect(withInputs.overlays.map((o) => o.kind).sort()).toEqual(['click-ring', 'keystroke']);
+    if (HAVE_LIBASS) {
+      const z = await executeRenderPlan(compile(withInputs, { quality: 'preview', projectDir: dir }), { projectDir: dir, cacheDir: 'cache', output: 'out/clicks.mp4' });
+      expect(countFrames(z.output)).toBe(120);
+    } else {
+      const z = await executeRenderPlan(compile(zoomed, { quality: 'preview', projectDir: dir }), { projectDir: dir, cacheDir: 'cache', output: 'out/clicks.mp4' });
+      expect(countFrames(z.output)).toBe(120);
+    }
   });
 
   it('fill mask lands where the source coordinates say', async () => {

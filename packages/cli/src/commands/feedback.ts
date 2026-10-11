@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { frameToSeconds, frameToTimecode, type Timeline } from '@solocut/core';
 import { getAgent } from '@solocut/agents';
@@ -7,7 +7,7 @@ import { loadSettings } from '@solocut/settings';
 import { whichSync } from '@solocut/toolchain';
 import { CliError, emit, info, opts, t, type Ctx } from '../ctx.js';
 import {
-  buildItems, feedbackMarkdown, splitRemarks, strokesAss, strokesBox, targetsAt, type FeedbackItem, type FeedbackSession,
+  buildItems, feedbackMarkdown, fromAppSession, splitRemarks, type AppSession, strokesAss, strokesBox, targetsAt, type FeedbackItem, type FeedbackSession,
 } from '../feedback.js';
 import { applyEdit, openProject, readJsonFile, readTimeline, writeAtomic, type Project } from '../project.js';
 import { defaultRun } from '../thumb.js';
@@ -18,9 +18,18 @@ function newFeedbackId(now = new Date()): string {
   return `fb_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
 }
 
-function validSession(raw: unknown): FeedbackSession {
+function validSession(raw: unknown): FeedbackSession & { id?: string } {
+  if (!raw || typeof raw !== 'object' || (raw as { schema?: unknown }).schema !== 1) throw new CliError('invalid-session', 'session.json must be an object with "schema": 1');
+  if (Array.isArray((raw as AppSession).events)) {
+    // the desktop app's event list (docs: CONTRACTS.md, feedback import)
+    try {
+      const a = raw as AppSession;
+      return { ...fromAppSession(a), ...(typeof a.id === 'string' ? { id: a.id } : {}) };
+    } catch (e) {
+      throw new CliError('invalid-session', (e as Error).message);
+    }
+  }
   const s = raw as FeedbackSession;
-  if (!s || typeof s !== 'object' || s.schema !== 1) throw new CliError('invalid-session', 'session.json must be an object with "schema": 1');
   for (const st of s.strokes ?? []) {
     if (!Array.isArray(st.points) || st.points.some((pt) => !Array.isArray(pt) || pt.length !== 2 || pt.some((v) => typeof v !== 'number' || !Number.isFinite(v)))) {
       throw new CliError('invalid-session', 'stroke points must be [x, y] pairs normalized to 0..1');
@@ -131,7 +140,8 @@ async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
   const tl = readTimeline(p);
   const src = resolve(ctx.io.cwd, positionals[0]!);
   const session = validSession(readJsonFile(join(src, 'session.json')));
-  const id = values.id ?? newFeedbackId();
+  const sessionId = typeof session.id === 'string' && /^fb_[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(session.id) ? session.id : undefined;
+  const id = values.id ?? sessionId ?? newFeedbackId();
   if (!/^fb_[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(id)) throw new CliError('usage', `invalid feedback id: ${id}`);
   const dir = join(p.dir, 'feedback', id);
   if (existsSync(join(dir, 'items.json'))) throw new CliError('exists', t(ctx, `すでにあります: feedback/${id}`, `feedback/${id} already exists`));
@@ -172,18 +182,72 @@ async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
   }
   copyFileSync(join(src, 'session.json'), join(dir, 'session.json'));
   if (audio && existsSync(audio)) copyFileSync(audio, join(dir, 'voice.wav'));
-  writeAtomic(join(dir, 'items.json'), JSON.stringify({ id, createdAt: session.createdAt ?? new Date().toISOString(), organizedBy, items }, null, 2));
+  writeAtomic(join(dir, 'items.json'), JSON.stringify({ id, createdAt: session.createdAt ?? new Date().toISOString(), organizedBy, variant: p.variant ?? 'main', items }, null, 2));
   writeAtomic(join(dir, 'feedback.md'), feedbackMarkdown(id, items, tl, p.file.language));
   await applyEdit(p, [{ op: 'setReview', patch: {
     feedback: [...tl.review.feedback.filter((f) => f.id !== id), { id: id as `fb_${string}`, status: 'open', items: items.length }],
     openItems: [...tl.review.openItems, { ref: id, kind: 'feedback', summary: t(ctx, `フィードバック ${items.length} 件（feedback/${id}/feedback.md）`, `${items.length} feedback item(s) (feedback/${id}/feedback.md)`) }],
   } }], { by: 'human', note: 'feedback import' });
   info(ctx, t(ctx, `エージェントへ: 「feedback/${id}/feedback.md を読んで対応して。終わったら solocut render --preview と solocut check」`, `to the agent: "Read feedback/${id}/feedback.md and address it. Then run solocut render --preview and solocut check"`));
-  emit(ctx, { id, items: items.length, path: `feedback/${id}/feedback.md`, organizedBy: organizedBy ?? null, warnings }, () => [
+  emit(ctx, { id, dir: `feedback/${id}`, path: `feedback/${id}/feedback.md`, variant: p.variant ?? 'main', count: items.length, items: appItems(id, items, tl), organizedBy: organizedBy ?? null, warnings }, () => [
     t(ctx, `フィードバックを ${items.length} 件に分けました: feedback/${id}/feedback.md`, `split into ${items.length} item(s): feedback/${id}/feedback.md`),
     ...items.map((it) => `  ${it.index}. [${frameToTimecode(it.frame, tl.canvas.fps)}] ${it.title ?? it.speech.slice(0, 30)}`),
     ...warnings.map((w) => `! ${w}`),
   ]);
+}
+
+/** Items in the shape the app shows (n, timecode, project-relative image). */
+function appItems(id: string, items: FeedbackItem[], tl: Timeline) {
+  return items.map((it) => {
+    const nn = String(it.index).padStart(2, '0');
+    return {
+      n: it.index, frame: it.frame, timecode: frameToTimecode(it.frame, tl.canvas.fps), image: `feedback/${id}/${nn}.png`,
+      spoken: it.speech, request: it.request ?? '', title: it.title ?? '', notes: it.notes, targets: it.targets.map(({ kind, id: tid, label }) => ({ kind, id: tid, label })),
+    };
+  });
+}
+
+/** `feedback set <id> --items file.json`: the app's edited items (edits / deletions) → reindex, images, items.json, feedback.md. */
+async function cmdSet(ctx: Ctx, args: string[]): Promise<void> {
+  const { values, positionals } = opts(args, { items: { type: 'string' } }, { min: 1, max: 1, usage: 'solocut feedback set <id> --items <file.json>' });
+  const id = positionals[0]!;
+  if (!/^fb_[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(id)) throw new CliError('usage', `invalid feedback id: ${id}`);
+  if (!values.items) throw new CliError('usage', 'usage: solocut feedback set <id> --items <file.json>');
+  const p = openProject(ctx);
+  const dir = join(p.dir, 'feedback', id);
+  const current = readJsonFile<{ id: string; createdAt?: string; organizedBy?: string; variant?: string; items: FeedbackItem[] }>(join(dir, 'items.json'));
+  if (current.variant && current.variant !== 'main' && !p.variant) p.variant = current.variant as Project['variant'];
+  const raw = readJsonFile<unknown>(resolve(ctx.io.cwd, values.items));
+  const list = Array.isArray(raw) ? raw : (raw as { items?: unknown }).items;
+  if (!Array.isArray(list)) throw new CliError('usage', 'the items file must be an array (or { items: [...] })');
+  const byIndex = new Map(current.items.map((it) => [it.index, it]));
+  const next: FeedbackItem[] = [];
+  for (const x of list as Record<string, unknown>[]) {
+    const idx = Number(x.index ?? x.n);
+    const base = byIndex.get(idx);
+    if (!base) throw new CliError('usage', `unknown item index: ${String(x.index ?? x.n)}`);
+    next.push({
+      ...base,
+      ...(typeof x.title === 'string' ? { title: x.title } : {}),
+      ...(typeof x.request === 'string' ? { request: x.request } : {}),
+      ...(Array.isArray(x.notes) ? { notes: (x.notes as unknown[]).filter((n): n is string => typeof n === 'string') } : {}),
+    });
+  }
+  // renumber 1..n and move the images along (via temporary names so swaps cannot clobber)
+  const moves = next.map((it, i) => ({ from: it.index, to: i + 1 }));
+  const img = (n: number) => join(dir, `${String(n).padStart(2, '0')}.png`);
+  for (const m of moves) if (existsSync(img(m.from))) renameSync(img(m.from), join(dir, `.tmp-${m.from}.png`));
+  for (const old of current.items) if (!moves.some((m) => m.from === old.index)) rmSync(img(old.index), { force: true });
+  for (const m of moves) if (existsSync(join(dir, `.tmp-${m.from}.png`))) renameSync(join(dir, `.tmp-${m.from}.png`), img(m.to));
+  next.forEach((it, i) => (it.index = i + 1));
+  const tl = readTimeline(p);
+  writeAtomic(join(dir, 'items.json'), JSON.stringify({ ...current, items: next }, null, 2));
+  writeAtomic(join(dir, 'feedback.md'), feedbackMarkdown(id, next, tl, p.file.language));
+  if (tl.review.feedback.some((f) => f.id === id)) {
+    await applyEdit(p, [{ op: 'setReview', patch: { feedback: tl.review.feedback.map((f) => (f.id === id ? { ...f, items: next.length } : f)) } }], { by: 'human', note: 'feedback set' });
+  }
+  emit(ctx, { id, path: `feedback/${id}/feedback.md`, count: next.length, items: appItems(id, next, tl) }, () =>
+    t(ctx, `フィードバック ${id} を ${next.length} 件で保存しました`, `saved ${id} with ${next.length} item(s)`));
 }
 
 function listFeedback(p: Project, tl: Timeline): { id: string; status: string; items: number; path: string }[] {
@@ -199,6 +263,7 @@ function listFeedback(p: Project, tl: Timeline): { id: string; status: string; i
 export async function cmdFeedback(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   if (sub === 'import') return cmdImport(ctx, rest);
+  if (sub === 'set' || sub === 'update') return cmdSet(ctx, rest);
   const p = openProject(ctx);
   const tl = readTimeline(p);
   if (sub === 'list' || sub === undefined) {
@@ -213,14 +278,21 @@ export async function cmdFeedback(ctx: Ctx, args: string[]): Promise<void> {
     if (!/^fb_[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(id)) throw new CliError('usage', `invalid feedback id: ${id}`);
     const f = join(p.dir, 'feedback', id, 'feedback.md');
     if (!existsSync(f)) throw new CliError('not-found', t(ctx, `フィードバックがありません: ${id}`, `no feedback ${id}`));
-    const items = existsSync(join(p.dir, 'feedback', id, 'items.json')) ? (readJsonFile<{ items: FeedbackItem[] }>(join(p.dir, 'feedback', id, 'items.json')).items) : [];
+    const data = existsSync(join(p.dir, 'feedback', id, 'items.json')) ? readJsonFile<{ items: FeedbackItem[]; variant?: string }>(join(p.dir, 'feedback', id, 'items.json')) : { items: [] as FeedbackItem[] };
     const md = readFileSync(f, 'utf8');
-    emit(ctx, { id, markdown: md, items }, () => md);
+    const vtl = data.variant && data.variant !== 'main' ? readTimeline({ dir: p.dir, variant: data.variant as Project['variant'] }) : tl;
+    emit(ctx, { id, variant: data.variant ?? 'main', markdown: md, items: data.items, view: appItems(id, data.items, vtl) }, () => md);
     return;
   }
   if (sub === 'done') {
     const { positionals } = opts(rest, {}, { min: 1, max: 1, usage: 'solocut feedback done <id>' });
     const id = positionals[0]!;
+    const meta = join(p.dir, 'feedback', id, 'items.json');
+    const v = existsSync(meta) ? readJsonFile<{ variant?: string }>(meta).variant : undefined;
+    if (v && v !== 'main' && !p.variant) {
+      p.variant = v as Project['variant'];
+      return cmdFeedback({ ...ctx, variant: v }, args);
+    }
     const cur = tl.review.feedback.find((f) => f.id === id);
     if (!cur) throw new CliError('not-found', t(ctx, `フィードバックがありません: ${id}`, `no feedback ${id}`));
     await applyEdit(p, [{ op: 'setReview', patch: {
@@ -230,5 +302,5 @@ export async function cmdFeedback(ctx: Ctx, args: string[]): Promise<void> {
     emit(ctx, { id, status: 'done' }, () => t(ctx, `${id} を対応済みにしました`, `${id} marked done`));
     return;
   }
-  throw new CliError('usage', 'usage: solocut feedback import <dir> [--organize claude|codex] | list [--open] | show <id> | done <id>');
+  throw new CliError('usage', 'usage: solocut feedback import <dir> [--organize claude|codex] [--variant v] | set <id> --items <file> | list [--open] | show <id> | done <id>');
 }
