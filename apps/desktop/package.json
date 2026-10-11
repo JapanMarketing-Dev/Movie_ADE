@@ -1,7 +1,7 @@
 {
   "name": "@solocut/desktop",
   "productName": "Solocut",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "The ADE for video editing",
   "author": "JapanMarketing-Dev",

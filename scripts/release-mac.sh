@@ -13,8 +13,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$HOME/.solocut-release/notary.env"
 : "${SOLOCUT_MAC_IDENTITY:?}" "${APPLE_API_KEY:?}" "${APPLE_API_KEY_ID:?}" "${APPLE_API_ISSUER:?}"
 
-cd "$ROOT"
+# Build from a clean worktree of the tag, so work in progress in the main checkout never ships.
+WT="$(mktemp -d)/solocut-v$VERSION"
+git -C "$ROOT" worktree add --detach "$WT" "v$VERSION"
+trap 'git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
+cd "$WT"
 node -e "const v=require('./apps/desktop/package.json').version; if (v!=='$VERSION') { console.error('apps/desktop version is '+v+', expected $VERSION'); process.exit(1) }"
+pnpm install --frozen-lockfile
 node scripts/build-cli.mjs
 cd apps/desktop
 rm -rf release
@@ -33,6 +38,8 @@ for dmg in release/*.dmg; do
   spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 done
 
+mkdir -p "$ROOT/apps/desktop/release"
+cp release/Solocut-"$VERSION"-mac-*.{dmg,zip} "$ROOT/apps/desktop/release/"
 cd "$ROOT"
 gh release upload "v$VERSION" -R JapanMarketing-Dev/solocut --clobber apps/desktop/release/Solocut-"$VERSION"-mac-*.{dmg,zip}
 echo "✓ signed + notarized mac builds attached to v$VERSION. Next: node scripts/release.mjs $VERSION --notes docs/release-notes/$VERSION.md"
