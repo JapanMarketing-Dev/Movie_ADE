@@ -198,7 +198,7 @@ function brief(t: Timeline, r: QueryResult): string {
 export async function cmdTl(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const fps = tl.canvas.fps;
   if (sub === 'summary' || sub === undefined) {
     const s = summarize(tl);

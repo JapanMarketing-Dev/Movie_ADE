@@ -1265,3 +1265,28 @@ textarea.input {
   flex-direction: column;
   gap: 10px;
 }
+.tpl.alias {
+  opacity: 0.7;
+}
+.posts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1300px) {
+  .posts {
+    grid-template-columns: 1fr;
+  }
+}
+.post.off {
+  opacity: 0.6;
+}
+.approve-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}

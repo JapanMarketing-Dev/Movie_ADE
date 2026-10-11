@@ -28,6 +28,8 @@ export interface Ctx {
   io: IO;
   json: boolean;
   projectFlag?: string;
+  /** --variant (docs/18): main (default) | tiktok | youtube-shorts. */
+  variant?: string;
   lang: Lang;
   /** Who is acting (history `by`). */
   by: 'human' | 'agent';

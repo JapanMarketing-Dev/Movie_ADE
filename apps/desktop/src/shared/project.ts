@@ -1,6 +1,6 @@
 // Pure parsing of CLI output and timeline.json for the project workspace. Defensive on purpose: the
 // files are written by agents and other tools, so unknown or partial shapes must not crash the UI.
-import type { LaneItem, LaneName, NextStep, ReviewItem, StepState, TimelineOverview } from './types';
+import type { LaneItem, LaneName, NextStep, ReviewItem, StepState, TimelineOverview, Variant } from './types';
 
 const STEP_STATES = new Set(['todo', 'running', 'done', 'needs-human', 'skipped']);
 
@@ -264,4 +264,41 @@ export function formatFrames(f: number, fpsNum: number, fpsDen: number): string 
   const s = totalSec % 60;
   const p = (n: number) => String(n).padStart(2, '0');
   return (h > 0 ? `${p(h)}:` : '') + `${p(m)}:${p(s)}:${p(ff)}`;
+}
+
+// ---------- variants (docs/18) ----------
+
+export function isVariant(v: unknown): v is Variant {
+  return v === 'main' || v === 'tiktok' || v === 'youtube-shorts';
+}
+
+/** Project-relative timeline file of a variant. */
+export function variantTimelinePath(v: Variant): string {
+  return v === 'main' ? 'timeline.json' : `variants/${v}/timeline.json`;
+}
+
+/** `--variant` flag for CLI calls (none for the main video). */
+export function variantArgs(v: Variant | undefined): string[] {
+  return v && v !== 'main' ? ['--variant', v] : [];
+}
+
+/** Where `render --preview` puts each variant's preview, most likely first (project-relative). */
+export function previewCandidates(v: Variant): string[] {
+  if (v === 'main') return ['renders/preview.mp4', 'renders/preview/preview.mp4'];
+  return [`renders/${v}/preview.mp4`, `variants/${v}/renders/preview.mp4`, `renders/preview-${v}.mp4`];
+}
+
+/**
+ * Steps shown for a variant: the main video shows the plain steps (ingest … publish); a variant shows its own
+ * `<step>:<variant>` steps with the suffix removed.
+ */
+export function stepsForVariant(steps: StepState[], v: Variant): StepState[] {
+  if (v === 'main') return steps.filter((s) => !s.step.includes(':'));
+  const suffix = `:${v}`;
+  return steps.filter((s) => s.step.endsWith(suffix)).map((s) => ({ ...s, step: s.step.slice(0, -suffix.length) }));
+}
+
+/** Short label of the main/variant output for the UI. */
+export function variantTarget(v: Variant): 'youtube' | 'tiktok' | 'youtube-shorts' {
+  return v === 'main' ? 'youtube' : v;
 }

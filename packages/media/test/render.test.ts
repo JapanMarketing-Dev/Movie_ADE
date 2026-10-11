@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Decided, Segment, Timeline } from '@solocut/core';
-import { applyOp, applyOps, compile, compileFrame, emptyTimeline } from '@solocut/core';
+import { applyOp, applyOps, compile, compileFrame, deriveVariant, emptyTimeline, pickHighlights, validateTimeline } from '@solocut/core';
 import { executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
 import { countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
 
@@ -137,6 +137,26 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     expect(ringTop).toBeGreaterThan(60);
     const shadow = applyOp(t, { op: 'setVideo', id: 'seg_b', video: { layout: 'screen-with-wipe', screen: 'scr', camera: 'cam', wipe: { shape: 'rounded', corner: 'tl', style: 'shadow' } }, decided: D }).timeline;
     expect(countFrames((await render(shadow, 'out/shadow.mp4')).output)).toBe(60);
+  });
+
+  it('renders a derived TikTok variant at 1080x1920 (one take → vertical)', async () => {
+    const main = applyOp(base, { op: 'setVideo', id: 'seg_a', video: { layout: 'camera-full', camera: 'cam' }, decided: { ...D, reason: 'hook' } }).timeline;
+    const hooked = applyOp(main, { op: 'setSegments', segments: main.segments.map((s) => (s.id === 'seg_b' ? { ...s, role: 'hook' as const } : s)) }).timeline;
+    const sel = pickHighlights(hooked, { maxFrames: 60 });
+    expect(sel[0]).toBe('seg_b');
+    const v = deriveVariant(hooked, 'tiktok', { selection: sel });
+    expect(validateTimeline(v).ok).toBe(true);
+    expect(v.segments[0]!.video).toMatchObject({ layout: 'split-v', top: 'scr', bottom: 'cam' });
+    const plan = compile(v, { quality: 'final', target: 'tiktok', projectDir: dir });
+    const r = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache', output: 'out/tiktok.mp4' });
+    const pr = await probe(r.output);
+    expect(pr.streams.find((s) => s.type === 'video')).toMatchObject({ codec: 'h264', width: 1080, height: 1920, fps: { num: 30, den: 1 } });
+    expect(pr.streams.find((s) => s.type === 'audio')).toMatchObject({ codec: 'aac', sampleRate: 48000, channels: 2 });
+    expect(countFrames(r.output)).toBe(v.segments.reduce((n, s) => n + s.range.end - s.range.start, 0));
+    // bottom half shows the flat-gray camera, top half the screen pattern
+    const bottom = regionLuma(r.output, 5, 400, 1300, 200, 200);
+    const cam = frameLuma(p('cam.mp4'), 75 + 5);
+    expect(Math.abs(bottom - cam)).toBeLessThan(12);
   });
 
   it('fill mask lands where the source coordinates say', async () => {

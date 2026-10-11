@@ -28,7 +28,15 @@ export function Home({ info, onOpen, toast }: { info: AppInfo | null; onOpen: (d
   }, [info]);
 
   const lang = info?.language ?? 'ja';
-  const shown = useMemo(() => (templates ?? []).filter((x) => x.kind === kind), [templates, kind]);
+  // docs/18: the tech / talk families (3 outputs) first; old ids kept as aliases are listed after them
+  const shown = useMemo(
+    () =>
+      (templates ?? [])
+        .filter((x) => x.kind === kind)
+        .sort((a, b) => Number(a.alias ?? false) - Number(b.alias ?? false) || b.outputs.length - a.outputs.length || a.id.localeCompare(b.id)),
+    [templates, kind],
+  );
+  const threeVideos = (tp: TemplateInfo) => ['youtube', 'tiktok', 'youtube-shorts'].every((o) => tp.outputs.includes(o));
   useEffect(() => {
     if (!shown.some((x) => x.id === template)) setTemplate(shown[0]?.id ?? '');
   }, [shown, template]);
@@ -99,16 +107,28 @@ export function Home({ info, onOpen, toast }: { info: AppInfo | null; onOpen: (d
           ) : (
             <div className="templates">
               {shown.map((tp) => (
-                <button key={tp.id} className={`tpl ${tp.id === template ? 'selected' : ''}`} onClick={() => setTemplate(tp.id)}>
+                <button
+                  key={tp.id}
+                  className={`tpl ${tp.id === template ? 'selected' : ''} ${tp.alias ? 'alias' : ''}`}
+                  onClick={() => setTemplate(tp.id)}
+                  title={tp.description}
+                >
                   <span className="name">{tp.name[lang]}</span>
-                  <span className="dim mono">{tp.id}</span>
-                  <span className="row wrap" style={{ gap: 4 }}>
-                    {tp.targets.map((x) => (
-                      <span key={x} className="pill">
-                        {x}
-                      </span>
-                    ))}
+                  <span className="dim mono">
+                    {tp.id}
+                    {tp.alias ? ` · ${t('home.aliases')}` : ''}
                   </span>
+                  {threeVideos(tp) ? (
+                    <span className="pill accent">{t('home.threeVideos')}</span>
+                  ) : (
+                    <span className="row wrap" style={{ gap: 4 }}>
+                      {tp.outputs.map((x) => (
+                        <span key={x} className="pill">
+                          {x}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

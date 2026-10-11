@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ImagePlus, RefreshCw, Sparkles, Star } from 'lucide-react';
-import type { ProjectInfo, ThumbCandidate, ThumbImage } from '@shared/types';
+import type { ProjectInfo, ThumbCandidate, ThumbImage, Variant } from '@shared/types';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 
@@ -15,6 +15,8 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
   const [n, setN] = useState(3);
   const [busy, setBusy] = useState<'cands' | 'gen' | null>(null);
   const [images, setImages] = useState<ThumbImage[]>([]);
+  // YouTube main → 16:9; Shorts → 9:16 (TikTok takes a cover frame time instead of an image)
+  const [variant, setVariant] = useState<Variant>('main');
   const dir = project?.dir ?? null;
 
   const loadCands = useCallback(async () => {
@@ -22,7 +24,7 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
     setBusy('cands');
     setCandErr(null);
     try {
-      const r = await api.invoke('thumbs:candidates', dir);
+      const r = await api.invoke('thumbs:candidates', dir, variant);
       if (r.ok && r.data) {
         setCands(r.data);
         setFrame((f) => f ?? r.data![0]?.frame ?? null);
@@ -33,7 +35,7 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
     } finally {
       setBusy(null);
     }
-  }, [dir, t]);
+  }, [dir, variant, t]);
 
   useEffect(() => {
     setCands(null);
@@ -47,13 +49,13 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
     void api.invoke('thumbs:existing', dir).then(setImages);
     void loadCands();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir]);
+  }, [dir, variant]);
 
   const generate = async () => {
     if (!dir || frame === null) return;
     setBusy('gen');
     try {
-      const r = await api.invoke('thumbs:generate', dir, { frame, n, provider, title });
+      const r = await api.invoke('thumbs:generate', dir, { frame, n, provider, title, variant });
       if (!r.ok || !r.data) toast(`${t('thumb.genFailed')}: ${r.error ?? ''}`);
       else setImages((cur) => [...r.data!, ...cur.filter((c) => !r.data!.some((x) => x.path === c.path))]);
     } catch (e) {
@@ -86,6 +88,14 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
         <span className="title">{t('nav.thumbnails')}</span>
         <span className="dim">{project.title}</span>
         <span className="grow" />
+        <div className="segmented">
+          <button className={variant === 'main' ? 'on' : ''} onClick={() => setVariant('main')}>
+            {t('var.main')} 16:9
+          </button>
+          <button className={variant === 'youtube-shorts' ? 'on' : ''} onClick={() => setVariant('youtube-shorts')}>
+            {t('var.shorts')} 9:16
+          </button>
+        </div>
         <button className="btn ghost small" disabled={busy !== null} onClick={() => void loadCands()}>
           <RefreshCw size={13} className={busy === 'cands' ? 'spin' : ''} /> {t('thumb.candidates')}
         </button>

@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Check, FolderOpen, Pause, Play, RefreshCw, Sparkles, Video, X } from 'lucide-react';
-import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, TimelineOverview } from '@shared/types';
-import { formatFrames, progressOf, stepMark } from '@shared/project';
+import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, TimelineOverview, Variant } from '@shared/types';
+import { formatFrames, progressOf, stepMark, variantArgs } from '@shared/project';
 import { LangContext, useT, type TKey } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { terminals } from '../lib/terminals';
@@ -24,6 +24,7 @@ export function Workspace({
   const t = useT();
   const lang = useContext(LangContext);
   const [fbActive, setFbActive] = useState(false);
+  const [variant, setVariant] = useState<Variant>('main');
   const [snap, setSnap] = useState<ProjectSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -37,13 +38,13 @@ export function Workspace({
     if (!dir) return;
     setLoading(true);
     try {
-      setSnap(await api.invoke('project:snapshot', dir));
+      setSnap(await api.invoke('project:snapshot', dir, variant));
     } catch (e) {
       toast(errMsg(e));
     } finally {
       setLoading(false);
     }
-  }, [dir, toast]);
+  }, [dir, variant, toast]);
 
   const loadPrompts = useCallback(async () => {
     setPrompts(await api.invoke('prompts:list', dir ?? undefined));
@@ -51,6 +52,7 @@ export function Workspace({
 
   useEffect(() => {
     if (prevDir.current && prevDir.current !== dir && terminals.tabs.length > 0) terminals.closeAll();
+    if (prevDir.current !== dir) setVariant('main');
     prevDir.current = dir;
     setSnap(null);
     setSelected(null);
@@ -88,7 +90,7 @@ export function Workspace({
 
   const decide = async (item: ReviewItem, decision: 'accept' | 'reject') => {
     if (!dir) return;
-    const r = await api.invoke('project:review', dir, item, decision);
+    const r = await api.invoke('project:review', dir, item, decision, variant);
     if (!r.ok) toast(r.error ?? t('common.error'));
     else void refresh();
   };
@@ -96,7 +98,16 @@ export function Workspace({
   const renderPreview = async () => {
     if (!dir) return;
     setLoading(true);
-    const r = await api.invoke('project:cli', dir, ['render', '--preview']);
+    const r = await api.invoke('project:cli', dir, ['render', '--preview', ...variantArgs(variant)]);
+    setLoading(false);
+    if (!r.ok) toast(r.error ?? t('common.error'));
+    void refresh();
+  };
+
+  const derive = async () => {
+    if (!dir || variant === 'main') return;
+    setLoading(true);
+    const r = await api.invoke('project:cli', dir, ['derive', '--target', variant]);
     setLoading(false);
     if (!r.ok) toast(r.error ?? t('common.error'));
     void refresh();
@@ -148,6 +159,14 @@ export function Workspace({
         <span className="title">{project.title}</span>
         {project.template && <span className="pill mono">{project.template.id}</span>}
         <span className="grow" />
+        <div className="segmented" title={t('ws.variantHint')}>
+          {(['main', 'tiktok', 'youtube-shorts'] as Variant[]).map((v) => (
+            <button key={v} className={variant === v ? 'on' : ''} disabled={fbActive} onClick={() => setVariant(v)}>
+              {t(v === 'main' ? 'var.main' : v === 'tiktok' ? 'var.tiktok' : 'var.shorts')}
+              {snap && v !== 'main' && !snap.variants.includes(v) ? ' ·' : ''}
+            </button>
+          ))}
+        </div>
         <button className="btn ghost small" onClick={onRecord}>
           <Video size={14} /> {t('nav.record')}
         </button>
@@ -166,6 +185,7 @@ export function Workspace({
                 <video ref={videoRef} key={snap.preview.url} src={snap.preview.url} controls={!fbActive} preload="metadata" />
                 <FeedbackLayer
                   dir={project.dir}
+                  variant={variant}
                   videoRef={videoRef}
                   previewPath={snap.preview.path}
                   fpsNum={snap.overview?.fpsNum ?? 30}
@@ -179,13 +199,34 @@ export function Workspace({
               </>
             ) : (
               <div className="placeholder">
-                <span>{t('ws.noPreview')}</span>
-                <button className="btn" disabled={loading} onClick={() => void renderPreview()}>
-                  <Play size={14} /> {t('ws.renderPreview')}
-                </button>
+                {variant !== 'main' && snap && !snap.variants.includes(variant) ? (
+                  <>
+                    <span>{t('ws.notDerived')}</span>
+                    <button className="btn" disabled={loading} onClick={() => void derive()}>
+                      <Sparkles size={14} /> {t('ws.derive')}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span>{t('ws.noPreview')}</span>
+                    <button className="btn" disabled={loading} onClick={() => void renderPreview()}>
+                      <Play size={14} /> {t('ws.renderPreview')}
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
+          {snap?.stale && (
+            <div className="section">
+              <div className="notice row" style={{ justifyContent: 'space-between' }}>
+                <span>{t('ws.stale')}</span>
+                <button className="btn small" disabled={loading} onClick={() => void derive()}>
+                  {t('ws.derive')}
+                </button>
+              </div>
+            </div>
+          )}
           {snap && snap.errors.length > 0 && (
             <div className="section">
               {snap.errors.map((e) => (

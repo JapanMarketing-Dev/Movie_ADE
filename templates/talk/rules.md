@@ -15,3 +15,8 @@
 ### 図解・画像
 - 数字、比較、手順、固有名詞が出てきたら、scenes（big-number、compare-2col、bullet-points など）で画面に出すことを検討する。1 分に 1〜2 回まで
 - シーンの文字は話した言葉の要約。話していないことは書かない
+
+### 1回の撮影から3本（docs/18）
+- 本編（YouTube 16:9）を先に仕上げ、チェックに合格してから縦型の2本（TikTok・Shorts）を `solocut derive` で作る。縦型の作り方は prompts/vertical.md
+- 本編を直したら、縦型の版を作り直す（`solocut next` が知らせる）。縦型の版だけを直した部分は作り直しても残る
+- サムネイルと投稿文は3本それぞれに作る（`--variant tiktok` / `--variant youtube-shorts`）。タイトル・説明文・タグは出力先ごとに書き分ける

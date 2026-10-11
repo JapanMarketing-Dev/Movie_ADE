@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatFrames, isUnknownOpError, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
+import { formatFrames, isUnknownOpError, isVariant, previewCandidates, stepsForVariant, variantArgs, variantTarget, variantTimelinePath, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
 
 const decidedReview = { by: 'decision-model', reason: 'mid-word cut', confidence: 0.55, needsReview: true };
 
@@ -154,5 +154,34 @@ describe('formatFrames', () => {
     expect(formatFrames(30 * 61 + 5, 30, 1)).toBe('01:01:05');
     expect(formatFrames(30 * 3600, 30, 1)).toBe('01:00:00:00');
     expect(formatFrames(30000, 30000, 1001)).toBe('16:41:00'); // 30000 frames at 29.97 fps = 1001 s
+  });
+});
+
+describe('variants (docs/18)', () => {
+  const steps = parseSteps([
+    { step: 'ingest', state: 'done' },
+    { step: 'check', state: 'running' },
+    { step: 'derive:tiktok', state: 'done' },
+    { step: 'check:tiktok', state: 'needs-human' },
+    { step: 'derive:youtube-shorts', state: 'todo' },
+    { step: 'final:youtube-shorts', state: 'todo' },
+    { step: 'publish', state: 'todo' },
+  ]);
+  it('main shows plain steps; a variant shows its own steps without the suffix', () => {
+    expect(stepsForVariant(steps, 'main').map((s) => s.step)).toEqual(['ingest', 'check', 'publish']);
+    expect(stepsForVariant(steps, 'tiktok')).toEqual([{ step: 'derive', state: 'done' }, { step: 'check', state: 'needs-human' }]);
+    expect(stepsForVariant(steps, 'youtube-shorts').map((s) => s.step)).toEqual(['derive', 'final']);
+  });
+  it('paths and flags', () => {
+    expect(variantTimelinePath('main')).toBe('timeline.json');
+    expect(variantTimelinePath('tiktok')).toBe('variants/tiktok/timeline.json');
+    expect(variantArgs('main')).toEqual([]);
+    expect(variantArgs(undefined)).toEqual([]);
+    expect(variantArgs('youtube-shorts')).toEqual(['--variant', 'youtube-shorts']);
+    expect(previewCandidates('main')[0]).toBe('renders/preview.mp4');
+    expect(previewCandidates('tiktok')[0]).toBe('renders/tiktok/preview.mp4');
+    expect(variantTarget('main')).toBe('youtube');
+    expect(variantTarget('tiktok')).toBe('tiktok');
+    expect(['main', 'tiktok', 'youtube-shorts', 'shorts', '', null].map(isVariant)).toEqual([true, true, true, false, false, false]);
   });
 });

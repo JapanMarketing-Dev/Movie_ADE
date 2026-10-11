@@ -71,7 +71,7 @@ async function cmdCandidates(ctx: Ctx, args: string[]): Promise<void> {
   if (!(n >= 1 && n <= 50)) throw new CliError('usage', '--n must be 1..50');
   if (!(everySec >= 0.25)) throw new CliError('usage', '--every must be ≥ 0.25 (seconds)');
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const total = durationFrames(tl);
   if (!total) throw new CliError('no-segments', t(ctx, '区間がありません', 'no segments'));
   const m = await media();
@@ -199,7 +199,7 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
   const n = intOpt(values.n, 'n') ?? 3;
   if (!(n >= 1 && n <= 6)) throw new CliError('usage', '--n must be 1..6');
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const settings = loadSettings();
   let frame: number;
   if (values.frame) frame = parseFrame(ctx, tl, values.frame);

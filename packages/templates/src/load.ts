@@ -5,7 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { solocutHome } from '@solocut/toolchain';
 import { TemplateFileSchema, type TemplateFile } from './schema.js';
 
-export interface Template extends Omit<TemplateFile, 'abstract'> {
+export interface Template extends Omit<TemplateFile, 'abstract' | 'alias'> {
   /** Folder of the template (the child, when it extends another). */
   dir: string;
   /** rules.md of the whole extends chain, base first. */
@@ -17,6 +17,7 @@ export interface Template extends Omit<TemplateFile, 'abstract'> {
   /** Ids from this template up to the root base. */
   chain: string[];
   abstract: boolean;
+  alias: boolean;
 }
 
 export class TemplateError extends Error {
@@ -118,7 +119,7 @@ function loadFromDir(dir: string, dirs: string[]): Template {
   // merge root → leaf
   let merged: unknown = {};
   for (const t of [...chain].reverse()) {
-    const { extends: _e, abstract: _a, ...rest } = t.raw;
+    const { extends: _e, abstract: _a, alias: _al, ...rest } = t.raw;
     merged = deepMerge(merged, rest);
   }
   const leaf = chain[0]!;
@@ -126,6 +127,7 @@ function loadFromDir(dir: string, dirs: string[]): Template {
     throw new TemplateError(`template id "${String(leaf.raw.id)}" must match its folder name "${basename(leaf.dir)}"`, join(leaf.dir, 'template.yaml'));
   }
   (merged as Record<string, unknown>).abstract = leaf.raw.abstract ?? false;
+  (merged as Record<string, unknown>).alias = leaf.raw.alias ?? false;
   (merged as Record<string, unknown>).id = leaf.raw.id;
   const parsed = TemplateFileSchema.safeParse(merged);
   if (!parsed.success) {
@@ -175,7 +177,7 @@ export function listTemplatesWithErrors(o: LoadOptions & { includeAbstract?: boo
       seen.add(name);
       try {
         const t = loadFromDir(join(d, name), dirs);
-        if (!t.abstract || o.includeAbstract) templates.push(t);
+        if ((!t.abstract && !t.alias) || o.includeAbstract) templates.push(t);
       } catch (e) {
         errors.push(e instanceof TemplateError ? e : new TemplateError(String(e)));
       }
@@ -184,7 +186,7 @@ export function listTemplatesWithErrors(o: LoadOptions & { includeAbstract?: boo
   return { templates, errors };
 }
 
-/** Usable templates (abstract bases excluded); a user template shadows a built-in with the same id. */
+/** Usable templates (abstract bases and aliases excluded); a user template shadows a built-in with the same id. */
 export function listTemplates(o: LoadOptions = {}): Template[] {
   return listTemplatesWithErrors(o).templates;
 }

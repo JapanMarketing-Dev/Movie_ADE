@@ -1,0 +1,35 @@
+# 語り動画。1回の撮影から、YouTube の本編（16:9）と、縦型の TikTok・YouTube Shorts（9:16）の3本を作る。
+id: talk
+version: 2
+extends: base-horizontal
+name: { ja: 語り動画（YouTube＋TikTok＋Shorts）, en: Talking head (YouTube + TikTok + Shorts) }
+description:
+  ja: カメラに向かって話す解説動画。ジャンプカットごとに軽いズームで変化をつけ、図解や画像を挟む
+  en: Talking-head explainer. Light punch-ins on jump cuts, with diagrams and images inserted
+kind: talk
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full, scene]
+
+cut:
+  silence: { minMs: 400, padMs: 100 }
+  jumpZoom: { every: 2, scale: 1.12 }
+
+multicam: { maxShotSec: 12, minShotSec: 2 }
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, camera-switch]
+
+# 1回の撮影から3本（docs/18）。本編（YouTube 16:9）から、縦型の2本を派生させる。
+outputs:
+  youtube:        { }
+  tiktok:         { derive: vertical, maxSec: 90, captions: tiktok-bold, layout: camera-full }
+  youtube-shorts: { derive: vertical, sameAs: tiktok, maxSec: 60, captions: tiktok-bold, layout: camera-full, hook: shorts }
+
+pipeline: [ingest, sync, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, thumbnail, metadata, review, final]

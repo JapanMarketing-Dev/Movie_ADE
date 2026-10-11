@@ -107,8 +107,12 @@ export interface InvokeMap {
   'publish:youtubeConnect': { args: []; result: { ok: boolean; error?: string } };
   'publish:youtubeDisconnect': { args: []; result: void };
   'publish:youtubeUpload': {
-    args: [dir: string, form: YouTubeForm];
+    args: [dir: string, form: YouTubeForm, target?: 'youtube' | 'youtube-shorts'];
     result: { ok: boolean; url?: string; videoId?: string; warnings: string[]; error?: string };
+  };
+  'publish:saveMeta': {
+    args: [dir: string, target: 'youtube' | 'tiktok' | 'youtube-shorts', meta: { title: string; description: string; tags: string[] }];
+    result: CliResult;
   };
   'publish:openIntent': { args: [dir: string, platform: 'x' | 'threads' | 'facebook', text: string, url: string]; result: void };
   'publish:manual': { args: [dir: string, target: 'tiktok' | 'instagram', file: string]; result: void };
@@ -165,7 +169,7 @@ const invoke: Record<InvokeChannel, true> = {
   'feedback:begin': true, 'feedback:finish': true, 'feedback:update': true,
   'thumbs:candidates': true, 'thumbs:existing': true, 'thumbs:generate': true, 'thumbs:favorite': true, 'thumbs:providers': true,
   'publish:draft': true, 'publish:youtubeStatus': true, 'publish:youtubeConnect': true, 'publish:youtubeDisconnect': true,
-  'publish:youtubeUpload': true, 'publish:openIntent': true, 'publish:manual': true,
+  'publish:youtubeUpload': true, 'publish:openIntent': true, 'publish:saveMeta': true, 'publish:manual': true,
   'secrets:status': true, 'secrets:set': true,
 };
 const send: Record<SendChannel, true> = {

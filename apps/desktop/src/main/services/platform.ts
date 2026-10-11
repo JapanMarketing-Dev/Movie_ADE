@@ -177,13 +177,24 @@ export function renderPromptText(id: string, dir: string | undefined, vars: Reco
 
 export function templates(): TemplateInfo[] {
   const list = listTemplates() as unknown as Dict[];
-  return list.map((t) => ({
-    id: String(t.id),
-    version: String(t.version ?? '1'),
-    name: isObj(t.name) ? { ja: String(t.name.ja ?? t.id), en: String(t.name.en ?? t.id) } : { ja: String(t.id), en: String(t.id) },
-    kind: t.kind === 'talk' ? 'talk' : 'tech',
-    targets: Array.isArray(t.targets) ? t.targets.map(String) : [],
-  }));
+  const lang = language();
+  return list.map((t) => {
+    const targets = Array.isArray(t.targets) ? t.targets.map(String) : [];
+    // docs/18: families declare an `outputs` map (youtube / tiktok / youtube-shorts)
+    const outputs = isObj(t.outputs) ? Object.keys(t.outputs) : targets;
+    const info: TemplateInfo = {
+      id: String(t.id),
+      version: String(t.version ?? '1'),
+      name: isObj(t.name) ? { ja: String(t.name.ja ?? t.id), en: String(t.name.en ?? t.id) } : { ja: String(t.id), en: String(t.id) },
+      kind: t.kind === 'talk' ? 'talk' : 'tech',
+      targets,
+      outputs,
+    };
+    if (isObj(t.description)) info.description = String(t.description[lang] ?? t.description.ja ?? '');
+    else if (typeof t.description === 'string') info.description = t.description;
+    if (t.alias === true || typeof t.aliasOf === 'string') info.alias = true;
+    return info;
+  });
 }
 
 // ---------- agents ----------

@@ -14,7 +14,35 @@ export interface ProjectFile {
   tools?: Record<string, string>;
 }
 
-export interface Project { dir: string; file: ProjectFile }
+export const VARIANTS = ['tiktok', 'youtube-shorts'] as const;
+export type Variant = (typeof VARIANTS)[number];
+
+/** A project opened on the main timeline (variant null) or on a derived variant (docs/18). */
+export interface Project { dir: string; file: ProjectFile; variant: Variant | null }
+
+/** "main" | "youtube" → null; "tiktok" | "youtube-shorts" → the variant. */
+export function parseVariant(v: string | undefined): Variant | null {
+  if (v === undefined || v === '' || v === 'main' || v === 'youtube') return null;
+  if ((VARIANTS as readonly string[]).includes(v)) return v as Variant;
+  throw new CliError('usage', `unknown variant: ${v} (main, tiktok, youtube-shorts)`);
+}
+
+/** Files that differ per variant. */
+export function vpaths(p: Pick<Project, 'dir' | 'variant'>) {
+  const v = p.variant;
+  return {
+    timeline: v ? join(p.dir, 'variants', v, 'timeline.json') : join(p.dir, 'timeline.json'),
+    history: v ? join(p.dir, '.solocut', `history.${v}.jsonl`) : join(p.dir, '.solocut', 'history.jsonl'),
+    preview: v ? join(p.dir, 'renders', v, 'preview.mp4') : join(p.dir, 'renders', 'preview.mp4'),
+    /** Project-relative caption files (used by compile and uploads). */
+    ass: v ? `captions/${v}.ass` : 'captions/main.ass',
+    srt: v ? `captions/${v}.srt` : 'captions/main.srt',
+  };
+}
+
+export function variantExists(dir: string, v: Variant): boolean {
+  return existsSync(join(dir, 'variants', v, 'timeline.json'));
+}
 
 export function writeAtomic(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -59,7 +87,7 @@ export function openProject(ctx: Ctx): Project {
   const file = readJsonFile<ProjectFile>(join(dir, 'solocut.json'));
   if (file.schema !== 1 || !file.template?.id) throw new CliError('invalid-project', `${join(dir, 'solocut.json')}: unsupported or incomplete`);
   if (file.language === 'ja' || file.language === 'en') ctx.lang = file.language;
-  return { dir, file };
+  return { dir, file, variant: parseVariant(ctx.variant) };
 }
 
 export const paths = (dir: string) => ({
@@ -74,20 +102,27 @@ export const paths = (dir: string) => ({
   preview: join(dir, 'renders', 'preview.mp4'),
 });
 
-export function readTimelineRaw(dir: string): unknown {
-  return readJsonFile(paths(dir).timeline);
+type Where = string | Pick<Project, 'dir' | 'variant'>;
+const tlPath = (w: Where) => (typeof w === 'string' ? join(w, 'timeline.json') : vpaths(w).timeline);
+
+export function readTimelineRaw(w: Where): unknown {
+  const f = tlPath(w);
+  if (typeof w !== 'string' && w.variant && !existsSync(f)) {
+    throw new CliError('no-variant', `variant ${w.variant} does not exist yet; create it with \`solocut derive --target ${w.variant}\``);
+  }
+  return readJsonFile(f);
 }
 
-export function readTimeline(dir: string): Timeline {
-  const v = validateTimeline(readTimelineRaw(dir));
+export function readTimeline(w: Where): Timeline {
+  const v = validateTimeline(readTimelineRaw(w));
   if (!v.ok) {
     throw new CliError('invalid-timeline', `timeline.json is invalid (${v.issues.length} issue(s)); run \`solocut validate\``, v.issues);
   }
   return v.timeline;
 }
 
-export function writeTimeline(dir: string, t: Timeline): void {
-  writeAtomic(paths(dir).timeline, JSON.stringify(t, null, 2) + '\n');
+export function writeTimeline(w: Where, t: Timeline): void {
+  writeAtomic(tlPath(w), JSON.stringify(t, null, 2) + '\n');
 }
 
 export function projectTemplate(p: Project): Template {
@@ -182,7 +217,7 @@ export interface HistoryEntry {
 }
 
 export function readHistory(p: Project): HistoryEntry[] {
-  const f = paths(p.dir).history;
+  const f = vpaths(p).history;
   if (!existsSync(f)) return [];
   const out: HistoryEntry[] = [];
   for (const line of readFileSync(f, 'utf8').split('\n')) {
@@ -198,8 +233,8 @@ export function readHistory(p: Project): HistoryEntry[] {
 }
 
 function appendHistory(p: Project, e: HistoryEntry): void {
-  mkdirSync(dirname(paths(p.dir).history), { recursive: true });
-  appendFileSync(paths(p.dir).history, JSON.stringify(e) + '\n');
+  mkdirSync(dirname(vpaths(p).history), { recursive: true });
+  appendFileSync(vpaths(p).history, JSON.stringify(e) + '\n');
 }
 
 /** Replay the log into undo / redo stacks of edit indexes. */
@@ -230,7 +265,7 @@ export async function applyEdit(
   o: { by: string; agent?: string; kind?: HistoryEntry['kind']; ref?: number; dryRun?: boolean; note?: string },
 ): Promise<EditResult> {
   return withLock(p, () => {
-    const before = readTimeline(p.dir);
+    const before = readTimeline(p);
     let r: { timeline: Timeline; inverse: Op[] };
     try {
       r = applyOps(before, ops);
@@ -241,7 +276,7 @@ export async function applyEdit(
     if (!v.ok) throw new CliError('invalid-result', `the edit would make timeline.json invalid: ${v.issues.filter((i) => i.level === 'error').map((i) => `${i.path}: ${i.message}`).slice(0, 5).join('; ')}`, v.issues);
     const changed = JSON.stringify(before) !== JSON.stringify(v.timeline);
     if (!o.dryRun && changed) {
-      writeTimeline(p.dir, v.timeline);
+      writeTimeline(p, v.timeline);
       appendHistory(p, {
         at: new Date().toISOString(), by: o.by, ...(o.agent ? { agent: o.agent } : {}), kind: o.kind ?? 'edit',
         ...(o.ref !== undefined ? { ref: o.ref } : {}), ops, inverse: r.inverse, ...(o.note ? { note: o.note } : {}),

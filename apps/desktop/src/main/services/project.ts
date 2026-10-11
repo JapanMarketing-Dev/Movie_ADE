@@ -4,8 +4,8 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, promises as fsp, readFileSync, readdirSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem } from '../../shared/types';
-import { isUnknownOpError, parseNext, parseSteps, reviewOps, timelineOverview } from '../../shared/project';
+import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem, Variant } from '../../shared/types';
+import { isUnknownOpError, parseNext, parseSteps, previewCandidates, reviewOps, stepsForVariant, timelineOverview, variantArgs, variantTimelinePath } from '../../shared/project';
 import { mediaUrl } from '../../shared/ipc';
 import { runCli } from './cli';
 import { allowMediaRoot } from './media-protocol';
@@ -81,70 +81,86 @@ export async function createProject(o: { parentDir: string; title: string; templ
   return { ...r, data: openProject(dir) };
 }
 
-/** Newest playable render: renders/preview.mp4 first, else the newest video under renders/. */
-export function latestRender(dir: string): { path: string; mtimeMs: number } | null {
-  const renders = join(dir, 'renders');
-  const preferred = [join(renders, 'preview.mp4'), join(renders, 'preview', 'preview.mp4')];
-  for (const p of preferred) if (existsSync(p)) return { path: p, mtimeMs: statSync(p).mtimeMs };
+/** Newest playable render of a variant: its preview first, else (main only) the newest video under renders/. */
+export function latestRender(dir: string, variant: Variant = 'main'): { path: string; mtimeMs: number } | null {
+  for (const rel of previewCandidates(variant)) {
+    const p = join(dir, rel);
+    if (existsSync(p)) return { path: p, mtimeMs: statSync(p).mtimeMs };
+  }
+  const root = variant === 'main' ? join(dir, 'renders') : join(dir, 'renders', variant);
   let best: { path: string; mtimeMs: number } | null = null;
   const walk = (d: string, depth: number) => {
     if (depth > 2 || !existsSync(d)) return;
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const p = join(d, e.name);
-      if (e.isDirectory()) walk(p, depth + 1);
-      else if (/\.(mp4|mov|webm)$/i.test(e.name) && !e.name.endsWith('.part')) {
+      // the main video never picks up a vertical variant's render
+      if (e.isDirectory()) {
+        if (variant === 'main' && (e.name === 'tiktok' || e.name === 'youtube-shorts' || e.name === 'thumbnails')) continue;
+        walk(p, depth + 1);
+      } else if (/\.(mp4|mov|webm)$/i.test(e.name) && !e.name.endsWith('.part')) {
         const m = statSync(p).mtimeMs;
         if (!best || m > best.mtimeMs) best = { path: p, mtimeMs: m };
       }
     }
   };
-  walk(renders, 0);
+  walk(root, 0);
   return best;
 }
 
-export async function snapshot(dir: string): Promise<ProjectSnapshot> {
+export function availableVariants(dir: string): Variant[] {
+  const out: Variant[] = ['main'];
+  for (const v of ['tiktok', 'youtube-shorts'] as const) if (existsSync(join(dir, variantTimelinePath(v)))) out.push(v);
+  return out;
+}
+
+export async function snapshot(dir: string, variant: Variant = 'main'): Promise<ProjectSnapshot> {
   const errors: string[] = [];
   const project = readProject(dir);
   allowMediaRoot(dir);
 
-  // `status --json` carries both steps and next (CONTRACTS.md)
+  // `status --json` carries the steps of every variant and the next step (CONTRACTS.md)
   const status = await runCli(['status'], { cwd: dir, timeoutMs: 30_000 });
-  let steps = status.ok ? parseSteps(status.data) : [];
-  if (steps.length === 0) steps = parseSteps(readJson(join(dir, '.solocut', 'status.json')));
+  let all = status.ok ? parseSteps(status.data) : [];
+  if (all.length === 0) all = parseSteps(readJson(join(dir, '.solocut', 'status.json')));
   if (!status.ok && status.error) errors.push(`status: ${status.error}`);
   const sd = status.data as { timelineError?: unknown } | undefined;
   if (status.ok && typeof sd?.timelineError === 'string') errors.push(`timeline.json: ${sd.timelineError}`);
 
-  const snap: ProjectSnapshot = { project, steps, errors };
+  const snap: ProjectSnapshot = { project, variant, variants: availableVariants(dir), steps: stepsForVariant(all, variant), errors };
   const n = status.ok ? parseNext(status.data) : undefined;
   if (n) snap.next = n;
 
-  const tlPath = join(dir, 'timeline.json');
+  const tlPath = join(dir, variantTimelinePath(variant));
   if (existsSync(tlPath)) {
     const t = readJson(tlPath);
-    if (t === undefined) errors.push('timeline.json: invalid JSON');
-    else snap.overview = timelineOverview(t);
+    if (t === undefined) errors.push(`${variantTimelinePath(variant)}: invalid JSON`);
+    else {
+      snap.overview = timelineOverview(t);
+      const derived = (t as { meta?: { derivedFrom?: { mainHash?: unknown } } }).meta?.derivedFrom;
+      const flag = (t as { meta?: { stale?: unknown } }).meta?.stale;
+      if (derived && flag === true) snap.stale = true;
+    }
   }
-  const r = latestRender(dir);
+  const r = latestRender(dir, variant);
   if (r) snap.preview = { path: r.path, mtimeMs: r.mtimeMs, url: mediaUrl(r.path, r.mtimeMs) };
   return snap;
 }
 
-export async function applyOps(dir: string, ops: unknown[]): Promise<CliResult> {
+export async function applyOps(dir: string, ops: unknown[], variant: Variant = 'main'): Promise<CliResult> {
   if (ops.length === 0) return { ok: false, code: null, stdout: '', stderr: '', error: 'nothing to change' };
   const file = join(tmpdir(), `solocut-ops-${process.pid}-${Date.now()}.json`);
   writeFileSync(file, JSON.stringify(ops));
   try {
-    return await runCli(['edit', '--ops', file, '--by', 'human'], { cwd: dir });
+    return await runCli(['edit', '--ops', file, '--by', 'human', ...variantArgs(variant)], { cwd: dir });
   } finally {
     await fsp.rm(file, { force: true });
   }
 }
 
-export async function review(dir: string, item: ReviewItem, decision: 'accept' | 'reject'): Promise<CliResult> {
-  const t = readJson(join(dir, 'timeline.json'));
-  const r = await applyOps(dir, reviewOps(t, item, decision, 'setDecided'));
-  if (!r.ok && isUnknownOpError(r.data ?? r.error)) return applyOps(dir, reviewOps(t, item, decision, 'legacy'));
+export async function review(dir: string, item: ReviewItem, decision: 'accept' | 'reject', variant: Variant = 'main'): Promise<CliResult> {
+  const t = readJson(join(dir, variantTimelinePath(variant)));
+  const r = await applyOps(dir, reviewOps(t, item, decision, 'setDecided'), variant);
+  if (!r.ok && isUnknownOpError(r.data ?? r.error)) return applyOps(dir, reviewOps(t, item, decision, 'legacy'), variant);
   return r;
 }
 
@@ -178,10 +194,11 @@ export class ProjectWatcher {
     this.close();
     this.dir = dir;
     if (!dir) return;
-    const add = (path: string, fn: (name: string | null) => ChangeKind | null) => {
+    const add = (path: string, fn: (name: string | null) => ChangeKind | null, recursive = false) => {
       if (!existsSync(path)) return;
       try {
-        const w = watch(path, { persistent: false }, (_e, name) => {
+        // recursive watching is native on macOS / Windows; on Linux it falls back to the top level only
+        const w = watch(path, { persistent: false, recursive: recursive && process.platform !== 'linux' }, (_e, name) => {
           const kind = fn(name ? String(name) : null);
           if (kind) this.fire(kind);
         });
@@ -195,7 +212,10 @@ export class ProjectWatcher {
     mkdirSync(join(dir, '.solocut'), { recursive: true });
     add(join(dir, '.solocut'), (name) => (name === 'status.json' || name === 'history.jsonl' ? 'status' : null));
     mkdirSync(join(dir, 'renders'), { recursive: true });
-    add(join(dir, 'renders'), () => 'renders');
+    add(join(dir, 'renders'), () => 'renders', true);
+    // variants/<target>/timeline.json (docs/18)
+    mkdirSync(join(dir, 'variants'), { recursive: true });
+    add(join(dir, 'variants'), (name) => (name && /timeline\.json$/.test(name) ? 'timeline' : null), true);
   }
 
   private fire(kind: ChangeKind): void {

@@ -99,13 +99,10 @@ export function parseFeedbackShow(input: unknown, timecode?: (frame: number) => 
 export function applyItemEdits(raw: unknown[], edited: FeedbackItem[]): Record<string, unknown>[] {
   const byIndex = new Map<number, Record<string, unknown>>();
   for (const r of raw) if (isObj(r) && typeof r.index === 'number') byIndex.set(r.index, r);
-  return edited
-    .map((e) => {
-      const r = byIndex.get(e.n);
-      return r ? { ...r, request: e.request } : null;
-    })
-    .filter((x): x is Record<string, unknown> => x !== null)
-    .map((r, i) => ({ ...r, index: i + 1 }));
+  return edited.flatMap((e) => {
+    const r = byIndex.get(e.n);
+    return r ? [{ ...r, request: e.request }] : [];
+  }).map((r, i) => ({ ...r, index: i + 1 }));
 }
 
 /** Minimal feedback.md (docs/04 format), used only when the CLI cannot rewrite it. */

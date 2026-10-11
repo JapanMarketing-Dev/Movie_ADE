@@ -1,5 +1,5 @@
 import type { Template } from './load.js';
-import { stepText } from './next.js';
+import { derivedTargets, expandPipeline, splitStep, stepText } from './next.js';
 
 // AGENTS.md generator (docs/04 「エージェントへの指示書」). CLAUDE.md only contains `@AGENTS.md`.
 
@@ -92,10 +92,12 @@ function table(rows: [string, string][], head: [string, string]): string {
 export function generateAgentsMd(t: Template, project: AgentsMdProject): string {
   const ja = project.lang === 'ja';
   const name = ja ? t.name.ja : t.name.en;
-  const steps = t.pipeline
+  const variants = derivedTargets(t);
+  const steps = expandPipeline(t)
     .map((s, i) => {
-      const txt = stepText(s, project.lang);
-      const prompt = t.promptFiles[s] ? (ja ? `（\`${t.promptFiles[s]}\` に従う）` : ` (follow \`${t.promptFiles[s]}\`)`) : '';
+      const txt = stepText(s, project.lang, variants);
+      const promptKey = splitStep(s).base === 'derive' ? 'vertical' : s;
+      const prompt = t.promptFiles[promptKey] ? (ja ? `（\`${t.promptFiles[promptKey]}\` に従う）` : ` (follow \`${t.promptFiles[promptKey]}\`)`) : '';
       return `${i + 1}. **${s}** — ${txt.do}${prompt}`;
     })
     .join('\n');

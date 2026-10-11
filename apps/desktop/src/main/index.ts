@@ -241,8 +241,8 @@ function registerIpc(): void {
   handle('project:recent', () => project.recentProjects());
   handle('project:create', (_e, o) => project.createProject(o));
   handle('project:open', (_e, dir) => project.openProject(dir));
-  handle('project:snapshot', (_e, dir) => project.snapshot(dir));
-  handle('project:review', (_e, dir, item, decision) => project.review(dir, item, decision));
+  handle('project:snapshot', (_e, dir, variant) => project.snapshot(dir, variant ?? 'main'));
+  handle('project:review', (_e, dir, item, decision, variant) => project.review(dir, item, decision, variant ?? 'main'));
   handle('project:readScript', (_e, dir) => project.readScript(dir));
   handle('project:cli', (_e, dir, args) => runCli(args, { cwd: dir }));
 
@@ -347,10 +347,10 @@ function registerIpc(): void {
     if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
     return feedback.beginFeedback(dir);
   });
-  handle('feedback:finish', (_e, dir, id, session) => feedback.finishFeedback(dir, id, session));
-  handle('feedback:update', (_e, dir, id, items) => feedback.updateFeedback(dir, id, items));
+  handle('feedback:finish', (_e, dir, id, session, variant) => feedback.finishFeedback(dir, id, session, variant && variant !== 'main' ? variant : undefined));
+  handle('feedback:update', (_e, dir, id, items, variant) => feedback.updateFeedback(dir, id, items, variant && variant !== 'main' ? variant : undefined));
 
-  handle('thumbs:candidates', (_e, dir) => thumbs.candidates(dir));
+  handle('thumbs:candidates', (_e, dir, variant) => thumbs.candidates(dir, variant ?? 'main'));
   handle('thumbs:existing', (_e, dir) => thumbs.existing(dir));
   handle('thumbs:generate', (_e, dir, o) => thumbs.generate(dir, o));
   handle('thumbs:favorite', (_e, dir, path, on) => thumbs.setFavorite(dir, path, on));
@@ -371,8 +371,9 @@ function registerIpc(): void {
     }
   });
   handle('publish:youtubeDisconnect', () => youtube.disconnectYouTube());
-  handle('publish:youtubeUpload', async (_e, dir, form) => {
-    const base = { at: new Date().toISOString(), project: dir, target: 'youtube', method: 'api-byo' as const, privacy: form.publishAt ? 'private' : form.privacy,
+  handle('publish:saveMeta', (_e, dir, target, meta) => publish.saveMeta(dir, target, meta));
+  handle('publish:youtubeUpload', async (_e, dir, form, target) => {
+    const base = { at: new Date().toISOString(), project: dir, target: target ?? 'youtube', method: 'api-byo' as const, privacy: form.publishAt ? 'private' : form.privacy,
       disclosures: { madeForKids: form.madeForKids === true, containsSyntheticMedia: form.containsSyntheticMedia } };
     try {
       const r = await youtube.uploadToYouTube(form, (p) => emit(mainWc(), 'publish:progress', p));

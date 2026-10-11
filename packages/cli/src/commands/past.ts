@@ -103,7 +103,7 @@ export async function cmdPast(ctx: Ctx, args: string[]): Promise<void> {
     const { positionals } = opts(rest, {}, { min: 1, max: 1, usage: 'solocut past compare <id>' });
     const { entry, stats } = wrapArchive(ctx, () => getArchive(positionals[0]!));
     const p = openProject(ctx);
-    const current = computeStats(readTimeline(p.dir));
+    const current = computeStats(readTimeline(p));
     const diff = compareStats(stats, current);
     emit(ctx, { archive: entry.id, past: stats, current, diff }, () => [
       `${t(ctx, '項目', 'metric').padEnd(16)} ${t(ctx, '過去', 'past').padStart(8)} ${t(ctx, '今', 'now').padStart(8)}`,
@@ -117,7 +117,7 @@ export async function cmdPast(ctx: Ctx, args: string[]): Promise<void> {
     for (const w of what) if (!(REUSE_PARTS as readonly string[]).includes(w)) throw new CliError('usage', `unknown part: ${w} (${REUSE_PARTS.join(', ')})`);
     const past = wrapArchive(ctx, () => getArchive(positionals[0]!));
     const p = openProject(ctx);
-    const cur = readTimeline(p.dir);
+    const cur = readTimeline(p);
     const plan = planReuse(past, cur, computeStats(cur), what, { lang: ctx.lang, by: ctx.by, ...(ctx.agent ? { agent: ctx.agent } : {}) });
     if (values.out) writeAtomic(resolve(ctx.io.cwd, values.out), JSON.stringify(plan.ops, null, 2) + '\n');
     let applied = false;

@@ -133,7 +133,7 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
       target: { type: 'string', multiple: true }, title: { type: 'string' }, description: { type: 'string' }, 'description-file': { type: 'string' },
       tags: { type: 'string' }, candidates: { type: 'string', multiple: true }, chapters: { type: 'boolean' }, 'no-chapters': { type: 'boolean' }, file: { type: 'string' },
     }, { max: 0, usage: 'solocut meta set [--target youtube] --title … [--description …|--description-file f] [--tags a,b] [--candidates …] | --file meta.json' });
-    const tl = readTimeline(p.dir);
+    const tl = readTimeline(p);
     const targets = (values.target ?? tl.meta.targets) as Target[];
     for (const x of targets) if (!(TARGETS as readonly string[]).includes(x)) throw new CliError('usage', `unknown target: ${x}`);
     if (!targets.length) throw new CliError('usage', 'no targets (set meta.targets or pass --target)');
@@ -169,7 +169,7 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
   }
   if (sub === 'show' || sub === undefined) {
     const { values } = opts(rest, { target: { type: 'string' } }, { max: 0 });
-    const tl = readTimeline(p.dir);
+    const tl = readTimeline(p);
     const outs = tl.outputs.filter((o) => !values.target || o.target === values.target);
     const chapters = youtubeChapters(tl);
     emit(ctx, { outputs: outs.map((o) => ({ target: o.target, metadata: o.metadata })), chapters, credits: creditLines(tl), assets: usedAssets(tl) }, () =>
@@ -178,7 +178,7 @@ export async function cmdMeta(ctx: Ctx, args: string[]): Promise<void> {
   }
   if (sub === 'write') {
     opts(rest, {}, { max: 0 });
-    const tl = readTimeline(p.dir);
+    const tl = readTimeline(p);
     const files = writeFiles(p, tl, tl.outputs.map((o) => o.target), p.file.language);
     emit(ctx, { files }, () => files.join('\n'));
     return;

@@ -2,7 +2,7 @@ import { wipeGeometry } from './compile.js';
 import type { PatternDef } from './patterns/defs.js';
 import { textWidthEm } from './patterns/draw.js';
 import { renderScene } from './patterns/render.js';
-import type { Canvas, Frame, Mask, Rect, Segment, Source, Timeline } from './schema.js';
+import type { Canvas, Focus, Frame, Mask, Rect, Segment, Source, Timeline } from './schema.js';
 import { fpsValue } from './time.js';
 import { sourceLocalSeconds, takeFrameToSeconds, timelineFrameToTake } from './timeline.js';
 
@@ -39,7 +39,7 @@ function clip(r: Rect, to: Rect): Rect | null {
 }
 
 type Fit = 'cover' | 'fit';
-interface Region { source: string; rect: Rect; fit: Fit; kind: 'video' | 'wipe' }
+interface Region { source: string; rect: Rect; fit: Fit; kind: 'video' | 'wipe'; focus?: Focus }
 
 /** Regions of the canvas filled by each source for a segment's layout (same geometry as compile). */
 export function videoRegions(seg: Segment, canvas: { width: number; height: number }): Region[] {
@@ -48,7 +48,7 @@ export function videoRegions(seg: Segment, canvas: { width: number; height: numb
   const full: Rect = { x: 0, y: 0, w: W, h: H };
   const v = seg.video;
   switch (v.layout) {
-    case 'camera-full': return [{ source: v.camera, rect: full, fit: 'cover', kind: 'video' }];
+    case 'camera-full': return [{ source: v.camera, rect: full, fit: 'cover', kind: 'video', ...(v.focus ? { focus: v.focus } : {}) }];
     case 'screen-full': return [{ source: v.screen, rect: full, fit: 'fit', kind: 'video' }];
     case 'screen-with-wipe': {
       const { d, x, y } = wipeGeometry(v.wipe, W, H);
@@ -60,8 +60,8 @@ export function videoRegions(seg: Segment, canvas: { width: number; height: numb
     case 'split-v': {
       const th = even(H / 2);
       return [
-        { source: v.top, rect: { x: 0, y: 0, w: W, h: th }, fit: 'cover', kind: 'video' },
-        { source: v.bottom, rect: { x: 0, y: th, w: W, h: H - th }, fit: 'cover', kind: 'video' },
+        { source: v.top, rect: { x: 0, y: 0, w: W, h: th }, fit: 'cover', kind: 'video', ...(v.topFocus ? { focus: v.topFocus } : {}) },
+        { source: v.bottom, rect: { x: 0, y: th, w: W, h: H - th }, fit: 'cover', kind: 'video', ...(v.bottomFocus ? { focus: v.bottomFocus } : {}) },
       ];
     }
     case 'scene': return [];
@@ -69,10 +69,12 @@ export function videoRegions(seg: Segment, canvas: { width: number; height: numb
 }
 
 /** Map a rect in source pixels into a region (cover = centre crop, fit = letterbox). */
-export function sourceRectToCanvas(box: Rect, size: { width: number; height: number }, region: Rect, fit: Fit): Rect | null {
+export function sourceRectToCanvas(box: Rect, size: { width: number; height: number }, region: Rect, fit: Fit, focus?: Focus): Rect | null {
   const k = fit === 'cover' ? Math.max(region.w / size.width, region.h / size.height) : Math.min(region.w / size.width, region.h / size.height);
-  const ox = region.x + (region.w - size.width * k) / 2;
-  const oy = region.y + (region.h - size.height * k) / 2;
+  const fx = fit === 'cover' ? focus?.x ?? 0.5 : 0.5;
+  const fy = fit === 'cover' ? focus?.y ?? 0.5 : 0.5;
+  const ox = region.x + (region.w - size.width * k) * fx;
+  const oy = region.y + (region.h - size.height * k) * fy;
   return clip({ x: ox + box.x * k, y: oy + box.y * k, w: box.w * k, h: box.h * k }, region);
 }
 
@@ -208,7 +210,7 @@ export function layoutAt(t: Timeline, frame: Frame, o: LayoutOptions = {}): Layo
         for (const m of t.masks) {
           if (m.source !== rg.source) continue;
           const box = maskBoxAt(m, localFrame);
-          const onCanvas = box && sourceRectToCanvas(box, src.size, rg.rect, rg.fit);
+          const onCanvas = box && sourceRectToCanvas(box, src.size, rg.rect, rg.fit, rg.focus);
           const zr = onCanvas && zoomRect(onCanvas, z, W, H);
           if (zr) masks.push({ kind: 'mask', id: m.id, source: rg.source, segment: seg.id, rect: zr });
         }

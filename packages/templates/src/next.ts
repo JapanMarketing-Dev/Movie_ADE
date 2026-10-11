@@ -4,15 +4,18 @@ import type { Template } from './load.js';
 // `solocut next`: from status.json and each step's pass condition, return exactly one next thing to do
 // (docs/04 「solocut next の動き」, docs/13 autopilot).
 
+/** A base step, or a per-variant step of docs/18: derive:<v>, check:<v>, final:<v>, and publish. */
+export type PipelineStep = StepId | `derive:${string}` | `check:${string}` | `final:${string}` | 'publish';
+
 export interface StepState {
-  step: StepId;
+  step: PipelineStep;
   state: 'todo' | 'running' | 'done' | 'needs-human' | 'skipped';
   note?: string;
   at?: string;
 }
 
 export interface NextStep {
-  step: StepId | 'done';
+  step: PipelineStep | 'done';
   state: 'ready' | 'needs-human' | 'done';
   why: string;
   do: string;
@@ -22,7 +25,9 @@ export interface NextStep {
   /** Ids a human has to decide before this step passes. */
   blocking?: string[];
   /** While waiting for a human: a later step that can already be done. */
-  meanwhile?: StepId;
+  meanwhile?: PipelineStep;
+  /** The variant this step works on (docs/18). */
+  variant?: string;
 }
 
 export interface NextContext {
@@ -38,6 +43,8 @@ export interface NextContext {
   /** Steps where autopilot always stops (settings.autopilot.stopBefore). */
   stopBefore?: string[];
   lang?: 'ja' | 'en';
+  /** Derived variants (docs/18): whether each exists, is stale against the main timeline, and its last check. */
+  variants?: Record<string, { exists: boolean; stale: boolean; lastCheckFailed: number }>;
 }
 
 /** Steps a step needs (only those present in the pipeline count). */
@@ -121,48 +128,122 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
   },
 };
 
-export function stepText(step: StepId, lang: 'ja' | 'en' = 'ja'): { do: string; commands: string[] } {
-  const t = STEP_TEXT[step];
-  return { do: t.do[lang], commands: [...t.commands] };
+/** Variants a template derives (outputs with `derive`, enabled), in a stable order. */
+export function derivedTargets(t: Pick<Template, 'outputs'>): string[] {
+  const order = ['tiktok', 'youtube-shorts', 'instagram-reels', 'youtube'];
+  return Object.entries(t.outputs ?? {})
+    .filter(([, o]) => o && o.enabled !== false && o.derive)
+    .map(([k]) => k)
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 
-export function initialStatus(t: Pick<Template, 'pipeline'>): StepState[] {
-  return t.pipeline.map((step) => ({ step, state: 'todo' }));
+/** The template pipeline with per-variant steps: derive:v and check:v after check, final:v after final, then publish. */
+export function expandPipeline(t: Pick<Template, 'pipeline' | 'outputs'>): PipelineStep[] {
+  const vs = derivedTargets(t);
+  if (!vs.length) return [...t.pipeline];
+  const out: PipelineStep[] = [];
+  const afterCheck = t.pipeline.includes('check') ? 'check' : t.pipeline.includes('preview') ? 'preview' : null;
+  for (const s of t.pipeline) {
+    out.push(s);
+    if (s === afterCheck) for (const v of vs) out.push(`derive:${v}`, `check:${v}`);
+    if (s === 'final') for (const v of vs) out.push(`final:${v}`);
+  }
+  if (!afterCheck) for (const v of vs) out.push(`derive:${v}`, `check:${v}`);
+  if (!t.pipeline.includes('final')) for (const v of vs) out.push(`final:${v}`);
+  out.push('publish');
+  return out;
+}
+
+export function splitStep(step: string): { base: string; variant?: string } {
+  const i = step.indexOf(':');
+  return i < 0 ? { base: step } : { base: step.slice(0, i), variant: step.slice(i + 1) };
+}
+
+function depsOf(step: PipelineStep, pipeline: PipelineStep[]): PipelineStep[] {
+  const { base, variant } = splitStep(step);
+  if (variant) {
+    if (base === 'derive') return ['check'];
+    if (base === 'check') return [`derive:${variant}`];
+    if (base === 'final') return [`check:${variant}`, 'review'];
+  }
+  if (step === 'publish') return pipeline.filter((p) => p === 'final' || p.startsWith('final:'));
+  return STEP_DEPS[step as StepId] ?? [];
+}
+
+const VARIANT_TEXT: Record<'derive' | 'check' | 'final', { do: L; commands: (v: string) => string[] }> = {
+  derive: {
+    do: { ja: '本編から縦型の版を作る（見どころを選び、9:16 に組み替え、字幕を作り直す）。prompts/vertical.md に従う', en: 'Derive the vertical version from the main video (pick highlights, reframe to 9:16, rebuild captions) following prompts/vertical.md' },
+    commands: (v) => [`solocut derive --target ${v} --json`, `solocut tl summary --variant ${v} --json`],
+  },
+  check: {
+    do: { ja: '縦型の版のプレビューを書き出し、チェックして直す', en: 'Render the vertical preview, check it and fix failures' },
+    commands: (v) => [`solocut render --preview --variant ${v} --json`, `solocut check --variant ${v} --json`],
+  },
+  final: {
+    do: { ja: '縦型の版を本番の画質で書き出す', en: 'Render the vertical version at final quality' },
+    commands: (v) => [`solocut render --final --variant ${v} --json`],
+  },
+};
+
+export function stepText(step: PipelineStep, lang: 'ja' | 'en' = 'ja', variants: string[] = []): { do: string; commands: string[] } {
+  const { base, variant } = splitStep(step);
+  if (variant && (base === 'derive' || base === 'check' || base === 'final')) {
+    const vt = VARIANT_TEXT[base];
+    return { do: `${vt.do[lang]}（${variant}）`, commands: vt.commands(variant) };
+  }
+  if (step === 'publish') {
+    return lang === 'ja'
+      ? { do: '投稿は人が承認してから。アプリの「投稿」画面で3本の内容を確認・承認してもらう', commands: [] }
+      : { do: 'Publishing needs a human: they review and approve all posts in the app\'s Publish screen', commands: [] };
+  }
+  const t = STEP_TEXT[step as StepId];
+  const commands = [...t.commands];
+  // thumbnails and post text are made for every video (docs/18)
+  if (variants.length && step === 'thumbnail') commands.push(...variants.map((v) => `solocut thumb gen --variant ${v} --title "<${lang === 'ja' ? '見出し' : 'headline'}>" --json`));
+  if (variants.length && step === 'metadata') commands.push(...variants.map((v) => `solocut meta set --variant ${v} --title "…" --description "…" --tags a,b --json`));
+  return { do: t.do[lang], commands };
+}
+
+export function initialStatus(t: Pick<Template, 'pipeline' | 'outputs'>): StepState[] {
+  return expandPipeline(t).map((step) => ({ step, state: 'todo' }));
 }
 
 export function nextStep(template: Template, status: StepState[], ctx: NextContext): NextStep {
   const lang = ctx.lang ?? 'ja';
   const ja = lang === 'ja';
-  const pipeline = template.pipeline;
-  const stateOf = (s: StepId) => status.find((x) => x.step === s)?.state ?? 'todo';
-  const isPassed = (s: StepId) => !pipeline.includes(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped';
+  const pipeline = expandPipeline(template);
+  const variants = derivedTargets(template);
+  const stateOf = (s: PipelineStep) => status.find((x) => x.step === s)?.state ?? 'todo';
+  const isPassed = (s: PipelineStep) => !pipeline.includes(s) || stateOf(s) === 'done' || stateOf(s) === 'skipped';
 
-  const make = (step: StepId, state: NextStep['state'], why: string, extra: Partial<NextStep> = {}): NextStep => {
-    const txt = stepText(step, lang);
+  const make = (step: PipelineStep, state: NextStep['state'], why: string, extra: Partial<NextStep> = {}): NextStep => {
+    const txt = stepText(step, lang, variants);
     const out: NextStep = { step, state, why, do: txt.do, commands: txt.commands, ...extra };
-    const prompt = template.promptFiles?.[step];
+    const { base, variant } = splitStep(step);
+    if (variant) out.variant = variant;
+    const prompt = template.promptFiles?.[base === 'derive' ? 'vertical' : step];
     if (prompt && !out.prompt) out.prompt = prompt;
     if (step === 'final' && !extra.commands) out.commands = template.targets.map((t) => `solocut render --final --target ${t} --json`);
     return out;
   };
 
   /** A later step whose dependencies are all passed (to do while a human decides). */
-  const meanwhile = (blocked: StepId): StepId | undefined => {
+  const meanwhile = (blocked: PipelineStep): PipelineStep | undefined => {
     const i = pipeline.indexOf(blocked);
     return pipeline.slice(i + 1).find((s) => {
       const st = stateOf(s);
-      return (st === 'todo' || st === 'running') && STEP_DEPS[s].every((d) => d !== blocked && isPassed(d));
+      return s !== 'publish' && (st === 'todo' || st === 'running') && depsOf(s, pipeline).every((d) => d !== blocked && isPassed(d));
     });
   };
 
-  const waitFor = (step: StepId, why: string, blocking?: string[]): NextStep => {
+  const waitFor = (step: PipelineStep, why: string, blocking?: string[]): NextStep => {
     const m = meanwhile(step);
     const base = ja ? '人の確認を待ってください。アプリの「確認」画面に表示されます。' : 'Wait for a human to decide; it is shown in the app\'s Review screen.';
     const extra: Partial<NextStep> = { do: base, commands: [] };
     if (m) {
       extra.meanwhile = m;
       extra.do = ja ? `${base}待つ間に ${m} の手順へ進めます` : `${base} Meanwhile you can do ${m}.`;
-      extra.commands = stepText(m, lang).commands;
+      extra.commands = stepText(m, lang, variants).commands;
     }
     if (blocking?.length) extra.blocking = blocking;
     return make(step, 'needs-human', why, extra);
@@ -195,11 +276,26 @@ export function nextStep(template: Template, status: StepState[], ctx: NextConte
         commands: ['solocut render --preview --json', 'solocut check --json'],
       });
     }
+    {
+      const { base, variant } = splitStep(step);
+      const vs = variant ? ctx.variants?.[variant] : undefined;
+      if (base === 'derive' && variant && st === 'done' && vs && (!vs.exists || vs.stale)) {
+        return make(step, 'ready', vs.exists
+          ? (ja ? `本編が変わりました。${variant} の版を作り直してください（人が直した部分は保たれます）` : `The main video changed; re-derive ${variant} (human edits are kept)`)
+          : (ja ? `${variant} の版がありません` : `The ${variant} version is missing`));
+      }
+      if (base === 'check' && variant && st === 'done' && vs && vs.lastCheckFailed > 0) {
+        return make(step, 'ready', ja ? `${variant} の前回のチェックで ${vs.lastCheckFailed} 件が不合格でした` : `${vs.lastCheckFailed} item(s) failed in the last ${variant} check`);
+      }
+      if (step === 'publish' && st !== 'done' && st !== 'skipped') {
+        return waitFor(step, ja ? '3本の動画がそろいました。投稿は人の承認が必要です' : 'All videos are ready; publishing needs a human approval');
+      }
+    }
     if (st === 'done' || st === 'skipped') continue;
 
     if (st === 'needs-human') {
       // autopilot proceeds with the most likely answer, except sync (a wrong sync breaks everything) and review
-      if (ctx.autopilot && step !== 'sync' && step !== 'review') continue;
+      if (ctx.autopilot && step !== 'sync' && step !== 'review' && step !== 'publish') continue;
       const why = note ?? (ja ? 'この手順は人の判断を待っています' : 'This step is waiting for a human');
       return waitFor(step, why, step === 'rough-cut' ? ctx.openItemRefs : undefined);
     }

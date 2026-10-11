@@ -1,8 +1,10 @@
 // Publish screen data: per-target metadata (from `solocut meta --json`, else timeline.json outputs), the files
 // that can be posted, and the history in ~/.solocut/publish-history.jsonl.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import type { PublishDraft, PublishRecord, PublishTarget } from '../../shared/types';
+import type { CliResult, PublishDraft, PublishRecord, PublishTarget, Variant } from '../../shared/types';
+import { variantArgs, variantTimelinePath } from '../../shared/project';
 import { runCli } from '../services/cli';
 import { home } from '../services/platform';
 
@@ -75,24 +77,33 @@ export function targetFrom(projectDir: string, o: Dict): PublishTarget | null {
   return t;
 }
 
+const VARIANT_OF: Record<'youtube' | 'tiktok' | 'youtube-shorts', Variant> = { youtube: 'main', tiktok: 'tiktok', 'youtube-shorts': 'youtube-shorts' };
+
+/** The three posts of docs/18 (YouTube main, TikTok, Shorts): metadata from `meta show` per variant, files from the timelines. */
 export async function loadDraft(projectDir: string): Promise<PublishDraft> {
-  let targets: PublishTarget[] = [];
+  const targets: PublishTarget[] = [];
   let metaSource: PublishDraft['metaSource'] = 'timeline';
-  const r = await runCli(['meta'], { cwd: projectDir, timeoutMs: 30_000 });
-  if (r.ok && isObj(r.data) && Array.isArray(r.data.outputs)) {
-    targets = r.data.outputs.filter(isObj).map((o) => targetFrom(projectDir, o)).filter((x): x is PublishTarget => x !== null);
-    metaSource = 'cli';
-  } else {
+  for (const target of ['youtube', 'tiktok', 'youtube-shorts'] as const) {
+    const v = VARIANT_OF[target];
+    let tl: Dict = {};
     try {
-      const tl = JSON.parse(readFileSync(join(projectDir, 'timeline.json'), 'utf8')) as Dict;
-      const outs = Array.isArray(tl.outputs) ? tl.outputs.filter(isObj) : [];
-      targets = outs.map((o) => targetFrom(projectDir, o)).filter((x): x is PublishTarget => x !== null);
-      if (targets.length === 0 && isObj(tl.meta)) {
-        for (const tg of strs(tl.meta.targets)) targets.push({ target: tg, title: String(tl.meta.title ?? ''), titleCandidates: [], description: '', tags: [] });
-      }
+      tl = JSON.parse(readFileSync(join(projectDir, variantTimelinePath(v)), 'utf8')) as Dict;
     } catch {
-      /* no timeline yet */
+      /* variant not derived yet */
     }
+    const outs = Array.isArray(tl.outputs) ? tl.outputs.filter(isObj) : [];
+    const fromTl = outs.find((o) => o.target === target);
+    const r = await runCli(['meta', 'show', '--target', target, ...variantArgs(v)], { cwd: projectDir, timeoutMs: 30_000 });
+    const fromCli = r.ok && isObj(r.data) && Array.isArray(r.data.outputs) ? r.data.outputs.filter(isObj).find((o) => o.target === target) : undefined;
+    if (fromCli) metaSource = 'cli';
+    const merged: Dict = { ...(fromTl ?? {}), ...(fromCli ?? {}), target };
+    const t = targetFrom(projectDir, merged) ?? { target, title: '', titleCandidates: [], description: '', tags: [] };
+    if (!t.title && isObj(tl.meta) && typeof tl.meta.title === 'string') t.title = tl.meta.title;
+    if (!t.render) {
+      const guess = files(join(projectDir, 'renders', target), /\.(mp4|mov)$/i, 1)[0];
+      if (guess) t.render = guess;
+    }
+    targets.push(t);
   }
   const renders = join(projectDir, 'renders');
   return {
@@ -103,4 +114,17 @@ export async function loadDraft(projectDir: string): Promise<PublishDraft> {
     history: readHistory(projectDir),
     metaSource,
   };
+}
+
+/** Writes the approved title / description / tags back with `solocut meta set` (so the timeline matches what was posted). */
+export async function saveMeta(projectDir: string, target: 'youtube' | 'tiktok' | 'youtube-shorts', m: { title: string; description: string; tags: string[] }): Promise<CliResult> {
+  const file = join(tmpdir(), `solocut-desc-${process.pid}-${Date.now()}.txt`);
+  writeFileSync(file, m.description);
+  try {
+    const args = ['meta', 'set', '--target', target, '--title', m.title, '--description-file', file, ...variantArgs(VARIANT_OF[target])];
+    if (m.tags.length) args.push('--tags', m.tags.join(','));
+    return await runCli(args, { cwd: projectDir });
+  } finally {
+    rmSync(file, { force: true });
+  }
 }

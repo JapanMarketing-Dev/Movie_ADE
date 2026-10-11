@@ -2,7 +2,8 @@
 // .solocut/thumbnails.json so agents can read them too.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import type { CliResult, ThumbCandidate, ThumbImage } from '../../shared/types';
+import type { CliResult, ThumbCandidate, ThumbImage, Variant } from '../../shared/types';
+import { variantArgs } from '../../shared/project';
 import { runCli } from './cli';
 
 type Dict = Record<string, unknown>;
@@ -50,11 +51,12 @@ export function parseCandidates(dir: string, data: unknown): ThumbCandidate[] {
   return out;
 }
 
+/** `thumb gen --json` → `{ thumbnails: [{ format, file, base, provider }] }` (older shape: `{ images }`). */
 export function parseImages(dir: string, data: unknown): ThumbImage[] {
-  const arr = isObj(data) && Array.isArray(data.images) ? data.images : [];
+  const arr = isObj(data) && Array.isArray(data.thumbnails) ? data.thumbnails : isObj(data) && Array.isArray(data.images) ? data.images : [];
   const favs = new Set(readFavorites(dir).map((f) => abs(dir, f)));
   return arr
-    .map((x) => (typeof x === 'string' ? { path: x } : x))
+    .map((x) => (typeof x === 'string' ? { path: x } : isObj(x) && typeof x.file === 'string' ? { ...x, path: x.file } : x))
     .filter((x): x is Dict & { path: string } => isObj(x) && typeof x.path === 'string')
     .map((x) => {
       const p = abs(dir, x.path);
@@ -64,15 +66,17 @@ export function parseImages(dir: string, data: unknown): ThumbImage[] {
     });
 }
 
-export async function candidates(dir: string): Promise<CliResult<ThumbCandidate[]>> {
-  const r = await runCli(['thumb', 'candidates'], { cwd: dir, timeoutMs: 10 * 60_000 });
+export async function candidates(dir: string, variant: Variant = 'main'): Promise<CliResult<ThumbCandidate[]>> {
+  const r = await runCli(['thumb', 'candidates', ...variantArgs(variant)], { cwd: dir, timeoutMs: 10 * 60_000 });
   return r.ok ? { ...r, data: parseCandidates(dir, r.data) } : { ...r, data: undefined };
 }
 
-export async function generate(dir: string, o: { frame: number; n: number; provider?: string; title?: string }): Promise<CliResult<ThumbImage[]>> {
-  const args = ['thumb', 'gen', '--frame', String(o.frame), '--n', String(Math.max(1, Math.min(6, Math.floor(o.n))))];
+export async function generate(dir: string, o: { frame: number; n: number; provider?: string; title?: string; variant?: Variant }): Promise<CliResult<ThumbImage[]>> {
+  const v = o.variant ?? 'main';
+  // main → 16:9 YouTube thumbnails; vertical variants → 9:16 (Shorts; TikTok uses a cover frame time)
+  const args = ['thumb', 'gen', '--frame', String(o.frame), '--n', String(Math.max(1, Math.min(6, Math.floor(o.n)))), '--formats', v === 'main' ? 'youtube' : 'shorts', ...variantArgs(v)];
   if (o.provider) args.push('--provider', o.provider);
-  if (o.title?.trim()) args.push('--title', o.title.trim());
+  if (o.title?.trim()) args.push('--title', o.title.trim()); // empty: the CLI uses the post title
   const r = await runCli(args, { cwd: dir, timeoutMs: 20 * 60_000 });
   return r.ok ? { ...r, data: parseImages(dir, r.data) } : { ...r, data: undefined };
 }

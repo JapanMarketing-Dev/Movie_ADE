@@ -128,7 +128,7 @@ async function organize(ctx: Ctx, dir: string, items: FeedbackItem[], lang: 'ja'
 async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
   const { values, positionals } = opts(args, { organize: { type: 'string' }, 'no-organize': { type: 'boolean' }, id: { type: 'string' } }, { min: 1, max: 1, usage: 'solocut feedback import <session-dir> [--organize claude|codex]' });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const src = resolve(ctx.io.cwd, positionals[0]!);
   const session = validSession(readJsonFile(join(src, 'session.json')));
   const id = values.id ?? newFeedbackId();
@@ -200,7 +200,7 @@ export async function cmdFeedback(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   if (sub === 'import') return cmdImport(ctx, rest);
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   if (sub === 'list' || sub === undefined) {
     const { values } = opts(rest, { open: { type: 'boolean' } }, { max: 0 });
     const list = listFeedback(p, tl).filter((f) => !values.open || f.status === 'open');

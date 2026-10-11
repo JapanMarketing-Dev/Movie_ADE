@@ -1,50 +1,6 @@
-# 技術動画の縦型（TikTok / Shorts / Reels）。上に画面（操作箇所を追って切り出す）、下に顔。1本1つのコツ、60秒まで。
+# 旧テンプレートの id（既存のプロジェクトのために残す別名）。中身は tech と同じ。新しいプロジェクトは tech を使う。
 id: tech-short
-version: 1
-extends: base-vertical
-name: { ja: 技術動画（縦型ショート）, en: Tech short (vertical) }
-description:
-  ja: 画面の要点を縦型で見せる。上に画面、下に顔。結果を最初に見せ、1本で1つのコツだけを伝える（60秒まで）
-  en: Vertical tech tip. Screen on top, face below. Show the result first, one tip per video, up to 60 seconds
-kind: tech
-targets: [tiktok, youtube-shorts, instagram-reels]
-canvas: { width: 1080, height: 1920, fps: 30 }
-
-record:
-  tracks: [screen, camera, mic]
-  camera: { width: 1920, height: 1080, fps: 30 }
-  screen: { fps: 30 }
-  cursorLog: true
-  keyLog: true
-
-layouts:
-  default: split-v   # 上 1080×960 に画面（focus: auto）、下 1080×960 に顔（focus: face）
-  allowed: [split-v, screen-full, camera-full, scene]
-
-cut:
-  silence: { minMs: 250, padMs: 60 }
-  maxDurationSec: 60
-
-captions:
-  # split-v では画面と顔の境目（y=960 付近）に置く。画面の文字にも顔にも重ねない
-  maxCharsPerLine: 13
-  maxLines: 2
-  position: { anchor: center, y: 0.5 }
-
-audio:
-  sfx: { maxPerMinute: 8, gainDb: -13 }
-
-decisions:
-  cutKeep: { autoAbove: 0.7, autoBelow: 0.3 }
-
-multicam: { maxShotSec: 15, minShotSec: 1.5 }
-
-features:
-  autoZoom: true
-  keystrokes: true
-  cursorHighlight: true
-  piiMask: true
-
-checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, caption-face-overlap, pii-on-screen, mosaic-tracking, camera-switch]
-
-pipeline: [ingest, sync, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, review, final, thumbnail, metadata]
+version: 2
+alias: true
+extends: tech
+name: { ja: 技術動画（縦型ショート）, en: Tech short }

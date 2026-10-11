@@ -42,6 +42,8 @@ export const TemplateFileSchema = z.object({
   description: z.object({ ja: z.string(), en: z.string() }).optional(),
   kind: z.enum(['tech', 'talk']),
   abstract: z.boolean().default(false),
+  /** An old id kept for existing projects: loadable, hidden from listTemplates. */
+  alias: z.boolean().default(false),
   targets: z.array(z.enum(TARGETS)).min(1),
   canvas: z.object({ width: z.number().int().positive().multipleOf(2), height: z.number().int().positive().multipleOf(2), fps: Fps }),
   record: z.object({
@@ -89,6 +91,19 @@ export const TemplateFileSchema = z.object({
     retakeChoice: Threshold.optional(),
   }),
   multicam: z.object({ maxShotSec: z.number().positive(), minShotSec: z.number().positive() }).optional(),
+  /**
+   * docs/18: the videos made from one take. The main timeline is the output without `derive`; derived outputs are
+   * vertical variants (variants/<target>/timeline.json). `sameAs` reuses another variant's selection.
+   */
+  outputs: z.partialRecord(z.enum(TARGETS), z.object({
+    enabled: z.boolean().default(true),
+    derive: z.enum(['vertical']).optional(),
+    sameAs: z.enum(TARGETS).optional(),
+    maxSec: z.number().positive().max(600).optional(),
+    captions: z.string().optional(),
+    layout: z.enum(LAYOUT_IDS).optional(),
+    hook: z.enum(['default', 'shorts']).optional(),
+  })).optional(),
   features: z.object({
     autoZoom: z.boolean().default(false),
     keystrokes: z.boolean().default(false),

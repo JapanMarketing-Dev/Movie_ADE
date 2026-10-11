@@ -65,7 +65,7 @@ export async function cmdInit(ctx: Ctx, args: string[]): Promise<void> {
   writeAtomic(join(dir, 'CLAUDE.md'), CLAUDE_MD);
   if (!existsSync(join(dir, '.gitignore'))) writeFileSync(join(dir, '.gitignore'), GITIGNORE);
   for (const f of ['history.jsonl', 'decisions.jsonl']) if (!existsSync(join(dir, '.solocut', f))) writeFileSync(join(dir, '.solocut', f), '');
-  const p: Project = { dir, file };
+  const p: Project = { dir, file, variant: null };
   writeStatus(p, initialStatus(tpl));
   let git = false;
   if (!values['no-git'] && !existsSync(join(dir, '.git')) && whichSync('git')) {
@@ -100,7 +100,7 @@ export function nextContext(p: Project, tl: Timeline | null, o: { autopilot?: bo
 
 function tryTimeline(p: Project): { tl: Timeline | null; error?: string } {
   try {
-    return { tl: readTimeline(p.dir) };
+    return { tl: readTimeline(p) };
   } catch (e) {
     return { tl: null, error: (e as Error).message };
   }
@@ -157,7 +157,7 @@ export async function cmdStep(ctx: Ctx, args: string[]): Promise<void> {
 export async function cmdValidate(ctx: Ctx, args: string[]): Promise<void> {
   opts(args, {}, { max: 0 });
   const p = openProject(ctx);
-  const v = validateTimeline(readTimelineRaw(p.dir));
+  const v = validateTimeline(readTimelineRaw(p));
   let templateError: string | undefined;
   try {
     projectTemplate(p);
@@ -188,7 +188,7 @@ export async function cmdDoctor(ctx: Ctx, args: string[]): Promise<void> {
   let project: Record<string, unknown> | undefined;
   try {
     const p = openProject(ctx);
-    const v = validateTimeline(readTimelineRaw(p.dir));
+    const v = validateTimeline(readTimelineRaw(p));
     project = { dir: p.dir, timelineValid: v.ok, issues: v.issues.length };
   } catch {
     project = undefined;

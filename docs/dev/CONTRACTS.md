@@ -504,7 +504,21 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
   scene → same pattern in 9:16), captions rebuilt-able (keep words, re-wrap later via captions package), sfx/bgm re-timed,
   masks kept (source coords), outputs = [that target]. Plus `pickHighlights(main, { maxFrames, scores?: Record<segId, number> }) → string[]`
   (hook first, then highest-scoring core/summary segments, keep chronological order after the hook, fit maxFrames).
-  `variantStale(main, variant) → boolean` (mainHash differs).
+  `variantStale(main, variant) → boolean` (mainHash differs; true for a timeline without derivedFrom).
+  Implemented (engine, 2026-10-11): also `mainHash(main)` (sha256 of the main minus outputs/review/meta.derivedFrom),
+  `highlightScore`, `VERTICAL_SAFE` (TikTok ∩ Shorts safe area: x 80–900, y 220–1480 px). deriveVariant options add
+  `screenFocus?: Record<mainSegId, Focus>` (cursor-following crop of the screen), `at?`, `rules?`; it throws on an empty,
+  duplicated or unknown selection. Ids get `_tt` / `_ys` suffixes (`_tt2`… for pieces of a caption/overlay/scene split
+  across segments); masks keep their ids. Layouts: camera-full → camera-full with `focus` ({x .5, y .4} for 'face', centre
+  for 'center'); screen-with-wipe → split-v (screen top with optional `topFocus`, camera bottom with `bottomFocus`);
+  screen-full → split-v with the take's camera when there is one; split-v kept; scene kept (re-laid for 9:16). New
+  schema fields: `VideoChoice` camera-full `focus?`, split-v `topFocus?`/`bottomFocus?` = `{ x, y }` fractions (where
+  the cover crop sits), `meta.derivedFrom?` as above. Captions are clipped/re-timed with style `captionStyle ??
+  'tiktok-bold'` at y = 0.72 (inside the shared safe area); re-wrap their lines with @solocut/captions `layoutLines`.
+  Telop/click-ring positions are scaled and clamped into the safe area; image rects scaled; bgm becomes one span over
+  the mapped range; sfx/markers re-timed (dropped when cut); anchored scenes stay anchored to the renamed segment;
+  voice loudness/peak from the target preset; `outputs` = [the target]. Source paths stay project-relative, so compile
+  a variant with `projectDir` = the project root.
 - cli (platform): `solocut derive --target tiktok|youtube-shorts [--max-sec N] [--selection id,id] [--json]`; global `--variant <target>`
   on every timeline command (edit/undo/redo/history per variant: `.solocut/history.<variant>.jsonl`); `render --all`, `check --all`,
   `thumb ... --variant`, `meta --variant`; `status`/`next` include per-variant steps

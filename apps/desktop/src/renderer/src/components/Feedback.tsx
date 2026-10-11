@@ -3,8 +3,8 @@
 // `solocut feedback import` splits them into items that the user checks before sending them to the agent.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, PenLine, Send, Square, Trash2, Type, X, Save } from 'lucide-react';
-import type { FeedbackEvent, FeedbackImport, FeedbackItem, FeedbackSession } from '@shared/types';
-import { boxFrom, contentRect, feedbackAgentMessage, frameAt, normalizePoint, renumber, simplifyStroke } from '@shared/feedback';
+import type { FeedbackImport, FeedbackItem, FeedbackSession, Variant } from '@shared/types';
+import { boxFrom, boxPoints, contentRect, feedbackAgentMessage, frameAt, normalizePoint, simplifyStroke } from '@shared/feedback';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { SAMPLE_RATE, startPcmCapture, type PcmCapture } from '../lib/pcm-capture';
@@ -18,6 +18,7 @@ type Shape =
 
 interface Props {
   dir: string;
+  variant: Variant;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   previewPath: string;
   fpsNum: number;
@@ -28,7 +29,7 @@ interface Props {
   onActiveChange: (on: boolean) => void;
 }
 
-export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang, toast, active, onActiveChange }: Props) {
+export function FeedbackLayer({ dir, variant, videoRef, previewPath, fpsNum, fpsDen, lang, toast, active, onActiveChange }: Props) {
   const t = useT();
   const canvas = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<Tool>('pen');
@@ -37,17 +38,25 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
   const [textAt, setTextAt] = useState<{ px: number; py: number; nx: number; ny: number } | null>(null);
   const [result, setResult] = useState<FeedbackImport | null>(null);
   const shapes = useRef<Shape[]>([]);
-  const drawing = useRef<{ start: [number, number]; points: [number, number][] } | null>(null);
-  const session = useRef<{ id: string; startMs: number; events: FeedbackEvent[]; cap: PcmCapture | null; ctx: AudioContext | null; stream: MediaStream | null; queue: Promise<unknown> } | null>(null);
+  const drawing = useRef<{ start: [number, number]; points: [number, number][]; atMs: number } | null>(null);
+  const session = useRef<{
+    id: string;
+    startMs: number;
+    data: Pick<FeedbackSession, 'playback' | 'strokes' | 'notes'>;
+    cap: PcmCapture | null;
+    ctx: AudioContext | null;
+    stream: MediaStream | null;
+    queue: Promise<unknown>;
+  } | null>(null);
 
   const now = () => (session.current ? performance.now() - session.current.startMs : 0);
   const frameNow = () => frameAt(videoRef.current?.currentTime ?? 0, fpsNum, fpsDen);
-  const push = useCallback(
-    (kind: FeedbackEvent['kind'], data?: FeedbackEvent['data']) => {
+  const playback = useCallback(
+    (state?: 'playing' | 'paused') => {
       const s = session.current;
-      if (!s) return;
       const v = videoRef.current;
-      s.events.push({ t_ms: Math.round(now()), kind, frame: frameNow(), videoTime: v?.currentTime ?? 0, ...(data ? { data } : {}) });
+      if (!s || !v) return;
+      s.data.playback.push({ atMs: Math.round(now()), state: state ?? (v.paused ? 'paused' : 'playing'), frame: frameNow() });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fpsNum, fpsDen],
@@ -111,9 +120,9 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
       shapes.current = [];
       redraw();
     };
-    const onPlay = () => (push('play'), clear());
-    const onPause = () => push('pause');
-    const onSeeked = () => (push('seek'), clear());
+    const onPlay = () => (playback('playing'), clear());
+    const onPause = () => playback('paused');
+    const onSeeked = () => (playback(), clear());
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
     v.addEventListener('seeked', onSeeked);
@@ -125,7 +134,7 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
       v.removeEventListener('seeked', onSeeked);
       ro.disconnect();
     };
-  }, [active, videoRef, push, redraw]);
+  }, [active, videoRef, playback, redraw]);
 
   useEffect(() => {
     if (!active) return;
@@ -140,8 +149,17 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
       const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
       await api.invoke('record:openTrack', { takeId: id, file: 'mic.wav', kind: 'mic', wav: { sampleRate: ctx.sampleRate, channels: 1 } });
-      const s = { id, startMs: performance.now(), events: [] as FeedbackEvent[], cap: null as PcmCapture | null, ctx, stream, queue: Promise.resolve() as Promise<unknown> };
+      const s = {
+        id,
+        startMs: performance.now(),
+        data: { playback: [], strokes: [], notes: [] } as Pick<FeedbackSession, 'playback' | 'strokes' | 'notes'>,
+        cap: null as PcmCapture | null,
+        ctx,
+        stream,
+        queue: Promise.resolve() as Promise<unknown>,
+      };
       session.current = s;
+      playback('paused');
       s.cap = await startPcmCapture(ctx, stream.getAudioTracks()[0]!, (pcm) => {
         s.queue = s.queue.then(() => api.invoke('record:append', id, 'mic.wav', pcm)).catch((e: unknown) => toast(errMsg(e)));
       }, { maxChannels: 1 });
@@ -164,24 +182,20 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
     s.stream?.getTracks().forEach((tr) => tr.stop());
     await s.ctx?.close().catch(() => undefined);
     const first = s.cap?.firstSampleMs();
-    // event times are relative to the first mic sample so they line up with mic.wav
-    const shift = first !== undefined ? first - s.startMs : 0;
-    const v = videoRef.current;
     const body: FeedbackSession = {
       schema: 1,
-      id: s.id,
       createdAt: new Date().toISOString(),
-      fps: { num: fpsNum, den: fpsDen },
-      video: { path: previewPath, durationSec: v && Number.isFinite(v.duration) ? v.duration : 0 },
-      micFile: 'mic.wav',
-      micStartMs: 0,
-      events: s.events.map((e) => ({ ...e, t_ms: Math.max(0, Math.round(e.t_ms - shift)) })),
+      audio: 'mic.wav',
+      // where the first mic sample sits on the session clock (ms since we started)
+      audioStartMs: first !== undefined ? Math.max(0, Math.round(first - s.startMs)) : 0,
+      ...s.data,
+      ...(variant !== 'main' ? { variant } : {}),
     };
     session.current = null;
     shapes.current = [];
     redraw();
     try {
-      const r = await api.invoke('feedback:finish', dir, s.id, body);
+      const r = await api.invoke('feedback:finish', dir, s.id, body, variant);
       if (!r.ok || !r.data) toast(`${t('fb.importFailed')}: ${r.error ?? ''} (feedback/inbox/${s.id})`);
       else setResult(r.data);
     } catch (e) {
@@ -207,7 +221,7 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
       return;
     }
     (e.target as Element).setPointerCapture(e.pointerId);
-    drawing.current = { start: p.n, points: [p.n] };
+    drawing.current = { start: p.n, points: [p.n], atMs: now() };
   };
   const move = (e: React.PointerEvent) => {
     if (!drawing.current) return;
@@ -218,15 +232,18 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
     const d = drawing.current;
     drawing.current = null;
     if (!d) return;
+    const s = session.current;
+    const stroke = (points: [number, number][]) =>
+      s?.data.strokes.push({ startMs: Math.round(d.atMs), endMs: Math.round(now()), frame: frameNow(), color: '#FF4A3D', width: 0.005, points });
     if (tool === 'pen' && d.points.length > 1) {
       const points = simplifyStroke(d.points);
       shapes.current.push({ kind: 'stroke', points });
-      push('stroke', { points });
+      stroke(points);
     } else if (tool === 'box') {
       const b = boxFrom(d.start, d.points[d.points.length - 1]!);
       if (b.w > 0.005 && b.h > 0.005) {
         shapes.current.push({ kind: 'box', ...b });
-        push('box', b);
+        stroke(boxPoints(b)); // the CLI knows strokes only: a box is a closed outline
       }
     }
     redraw();
@@ -234,7 +251,7 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
   const commitText = (text: string) => {
     if (textAt && text.trim()) {
       shapes.current.push({ kind: 'text', x: textAt.nx, y: textAt.ny, text: text.trim() });
-      push('text', { x: textAt.nx, y: textAt.ny, text: text.trim() });
+      session.current?.data.notes.push({ atMs: Math.round(now()), text: text.trim(), frame: frameNow() });
       redraw();
     }
     setTextAt(null);
@@ -292,12 +309,12 @@ export function FeedbackLayer({ dir, videoRef, previewPath, fpsNum, fpsDen, lang
           </>
         )}
       </div>
-      {result && <FeedbackReview dir={dir} data={result} lang={lang} toast={toast} onClose={() => setResult(null)} />}
+      {result && <FeedbackReview dir={dir} variant={variant} data={result} lang={lang} toast={toast} onClose={() => setResult(null)} />}
     </>
   );
 }
 
-export function FeedbackReview({ dir, data, lang, toast, onClose }: { dir: string; data: FeedbackImport; lang: 'ja' | 'en'; toast: (m: string) => void; onClose: () => void }) {
+export function FeedbackReview({ dir, variant, data, lang, toast, onClose }: { dir: string; variant: Variant; data: FeedbackImport; lang: 'ja' | 'en'; toast: (m: string) => void; onClose: () => void }) {
   const t = useT();
   const [items, setItems] = useState<FeedbackItem[]>(data.items);
   const [dirty, setDirty] = useState(false);
@@ -307,7 +324,7 @@ export function FeedbackReview({ dir, data, lang, toast, onClose }: { dir: strin
     if (!dirty) return true;
     setSaving(true);
     try {
-      const r = await api.invoke('feedback:update', dir, data.id, renumber(items));
+      const r = await api.invoke('feedback:update', dir, data.id, items, variant);
       if (!r.ok) {
         toast(`${t('fb.saveFailed')}: ${r.error ?? ''}`);
         return false;
@@ -334,7 +351,7 @@ export function FeedbackReview({ dir, data, lang, toast, onClose }: { dir: strin
     setDirty(true);
   };
   const remove = (i: number) => {
-    setItems((xs) => renumber(xs.filter((_, k) => k !== i)));
+    setItems((xs) => xs.filter((_, k) => k !== i)); // numbers are reassigned when saved
     setDirty(true);
   };
   const imgUrl = (p: string) => api.mediaUrl(/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${dir}/${p}`);
@@ -358,8 +375,9 @@ export function FeedbackReview({ dir, data, lang, toast, onClose }: { dir: strin
               <div className="fb-body">
                 <div className="row">
                   <span className="pill mono">
-                    {it.n}. {it.timecode || it.frame}
+                    {i + 1}. {it.timecode || it.frame}
                   </span>
+                  {it.title && <strong style={{ fontSize: 12.5 }}>{it.title}</strong>}
                   {it.targets.map((tg) => (
                     <span key={tg.id} className="pill" title={tg.label}>
                       {tg.kind} {tg.id}
@@ -372,6 +390,11 @@ export function FeedbackReview({ dir, data, lang, toast, onClose }: { dir: strin
                 </div>
                 <textarea className="input" rows={2} value={it.request} onChange={(e) => edit(i, e.target.value)} />
                 {it.spoken && <div className="dim" style={{ fontSize: 12 }}>「{it.spoken}」</div>}
+                {it.notes.map((n) => (
+                  <div key={n} className="dim" style={{ fontSize: 12 }}>
+                    ✎ {n}
+                  </div>
+                ))}
               </div>
             </div>
           ))}

@@ -15,7 +15,7 @@ import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx
 import { alignWordsToSpeech } from '../align.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
 import {
-  applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, writeAtomic, type Project,
+  applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, vpaths, writeAtomic, type Project,
 } from '../project.js';
 
 type Media = typeof import('@solocut/media');
@@ -66,7 +66,7 @@ function readTake(dir: string): TakeMeta | null {
 export async function cmdTakes(ctx: Ctx, args: string[]): Promise<void> {
   opts(args, {}, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const takes = listDirs(join(p.dir, 'media', 'takes')).map((id) => {
     const m = readTake(join(p.dir, 'media', 'takes', id));
     const files = readdirSync(join(p.dir, 'media', 'takes', id)).filter((f) => f !== 'take.json');
@@ -123,7 +123,7 @@ async function sourceFor(p: Project, m: Media, file: string, o: { kind?: 'camera
 export async function cmdIngest(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { 'no-proxy': { type: 'boolean' }, force: { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const m = await media();
   const ops: Op[] = [];
   const markers: Marker[] = [...tl.markers];
@@ -161,7 +161,7 @@ export async function cmdIngest(ctx: Ctx, args: string[]): Promise<void> {
   }
   if (markers.length !== tl.markers.length) ops.push({ op: 'setMarkers', markers });
   if (ops.length) await applyEdit(p, ops, by(ctx));
-  const after = readTimeline(p.dir);
+  const after = readTimeline(p);
   const hasSources = Object.values(after.sources).some((s) => s.kind !== 'asset');
   if (hasSources) setStep(p, 'ingest', 'done');
   emit(ctx, { added, markers: markers.length - tl.markers.length }, () =>
@@ -180,7 +180,7 @@ export async function cmdImport(ctx: Ctx, args: string[]): Promise<void> {
   if (kind && !['camera', 'screen', 'mic'].includes(kind)) throw new CliError('usage', '--kind must be camera, screen or mic');
   const role = values.role as Extract<Source, { kind: 'camera' }>['role'] | undefined;
   if (role && !['front', 'close', 'wide', 'side', 'other'].includes(role)) throw new CliError('usage', '--role must be front, close, wide, side or other');
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const existingImports = listDirs(join(p.dir, 'media', 'imports'));
   let n = existingImports.length + 1;
   while (existingImports.includes(`imp${n}`)) n++;
@@ -233,7 +233,7 @@ export function voiceOf(tl: Timeline, take: string): [string, Source] | null {
 export async function cmdSync(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { take: { type: 'string' }, 'min-confidence': { type: 'string' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const minConf = values['min-confidence'] ? Number(values['min-confidence']) : 0.5;
   const takes = values.take ? [values.take] : takesOf(tl);
   if (!takes.length) throw new CliError('no-takes', t(ctx, '同期する素材がありません。先に solocut ingest / import', 'nothing to sync; run solocut ingest / import first'));
@@ -362,7 +362,7 @@ export async function whisperWords(ctx: Ctx, p: Project, file: string, o: { lang
 export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { take: { type: 'string' }, source: { type: 'string' }, model: { type: 'string' }, language: { type: 'string' }, threads: { type: 'string' }, 'no-align': { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const settings = loadSettings();
   const take = values.take ?? takesOf(tl)[0];
   if (!take) throw new CliError('no-takes', t(ctx, '文字起こしする素材がありません。先に solocut ingest / import', 'nothing to transcribe; run solocut ingest / import first'));
@@ -406,7 +406,7 @@ export async function cmdTranscribe(ctx: Ctx, args: string[]): Promise<void> {
 export async function cmdAnalyze(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { take: { type: 'string' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const tpl = projectTemplate(p);
   const m = await media();
   const out: Record<string, unknown> = {};
@@ -534,7 +534,7 @@ export async function cmdPropose(ctx: Ctx, args: string[]): Promise<void> {
   if (what !== 'cuts') throw new CliError('usage', 'usage: solocut propose cuts [--take <take>] [--replace] [--dry-run]');
   const { values } = opts(rest, { take: { type: 'string' }, replace: { type: 'boolean' }, 'dry-run': { type: 'boolean' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const tpl = projectTemplate(p);
   const transcript = readTranscript(p);
   const take = values.take ?? transcript?.take ?? takesOf(tl)[0];
@@ -653,18 +653,21 @@ export async function cmdPropose(ctx: Ctx, args: string[]): Promise<void> {
 
 // ---------- captions ----------
 
-export async function cmdCaptions(ctx: Ctx, args: string[]): Promise<void> {
-  const [sub, ...rest] = args;
-  if (sub !== 'build') throw new CliError('usage', 'usage: solocut captions build [--style <style>]');
-  const { values } = opts(rest, { style: { type: 'string' } }, { max: 0 });
-  const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+/** Build captions for the opened timeline (main or variant) from the transcript, and write its ASS/SRT. */
+export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string } = {}): Promise<{ captions: number; style: string; files: string[] }> {
+  const tl = readTimeline(p);
   const tpl = projectTemplate(p);
   const tr = readTranscript(p);
   if (!tr) throw new CliError('no-transcript', t(ctx, '文字起こしがありません。先に solocut transcribe', 'no transcript; run solocut transcribe first'));
   if (!tl.segments.length) throw new CliError('no-segments', t(ctx, '区間がありません。先に solocut propose cuts', 'no segments; run solocut propose cuts first'));
   const cap = await captionsLib();
-  const style = values.style ?? tpl.captions.style;
+  // variants use the vertical style of the template's outputs map (docs/18), sized by the style itself
+  const variantCfg = p.variant ? tpl.outputs?.[p.variant] : undefined;
+  const style = o.style ?? (p.variant ? variantCfg?.captions ?? 'tiktok-bold' : tpl.captions.style);
+  const styleDef = cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!;
+  const maxCharsPerLine = p.variant ? styleDef.maxCharsPerLine[p.file.language] : tpl.captions.maxCharsPerLine;
+  const maxLines = p.variant ? styleDef.maxLines : tpl.captions.maxLines;
+  const position = p.variant ? styleDef.position : tpl.captions.position;
   const rate = takeFps(tl, tr.take);
   // A word belongs to the timeline when its middle is in a kept segment (the same rule as `propose cuts`);
   // kept words are clamped into their segment so a word straddling a cut edge is never lost.
@@ -677,18 +680,27 @@ export async function cmdCaptions(ctx: Ctx, args: string[]): Promise<void> {
     return [{ ...w, start, end: Math.max(start, Math.min(w.end, r[1] - 1e-6)) }];
   });
   const built = cap.buildCaptions(words, {
-    fps: tl.canvas.fps, maxCharsPerLine: tpl.captions.maxCharsPerLine, maxLines: tpl.captions.maxLines, language: p.file.language, style,
+    fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style,
     mapTime: (sec: number) => takeFrameToTimeline(tl, tr.take, secondsToFrame(sec, rate)),
   });
-  const captions: Caption[] = built.map((c) => ({ ...c, position: tpl.captions.position }));
+  const captions: Caption[] = built.map((c) => ({ ...c, position }));
   await applyEdit(p, [{ op: 'setCaptions', captions }], by(ctx));
-  const styleDef = cap.CAPTION_STYLES[style] ?? Object.values(cap.CAPTION_STYLES)[0]!;
+  const vp = vpaths(p);
   mkdirSync(join(p.dir, 'captions'), { recursive: true });
-  writeAtomic(join(p.dir, 'captions', 'main.ass'), cap.toAss(captions, styleDef, tl.canvas, tl.canvas.fps));
-  writeAtomic(join(p.dir, 'captions', 'main.srt'), cap.toSrt(captions, tl.canvas.fps));
-  setStep(p, 'captions', 'done');
-  emit(ctx, { captions: captions.length, style, files: ['captions/main.ass', 'captions/main.srt'] }, () =>
-    t(ctx, `字幕を ${captions.length} 個作りました（captions/main.ass、main.srt）`, `built ${captions.length} captions (captions/main.ass, main.srt)`));
+  writeAtomic(join(p.dir, vp.ass), cap.toAss(captions, styleDef, tl.canvas, tl.canvas.fps));
+  writeAtomic(join(p.dir, vp.srt), cap.toSrt(captions, tl.canvas.fps));
+  return { captions: captions.length, style, files: [vp.ass, vp.srt] };
+}
+
+export async function cmdCaptions(ctx: Ctx, args: string[]): Promise<void> {
+  const [sub, ...rest] = args;
+  if (sub !== 'build') throw new CliError('usage', 'usage: solocut captions build [--style <style>] [--variant v]');
+  const { values } = opts(rest, { style: { type: 'string' } }, { max: 0 });
+  const p = openProject(ctx);
+  const r = await buildCaptionsFor(ctx, p, values.style ? { style: values.style } : {});
+  if (!p.variant) setStep(p, 'captions', 'done');
+  emit(ctx, { ...r, variant: p.variant ?? 'main' }, () =>
+    t(ctx, `字幕を ${r.captions} 個作りました（${r.files.join('、')}）`, `built ${r.captions} captions (${r.files.join(', ')})`));
 }
 
 // ---------- render / frame / check ----------
@@ -700,12 +712,12 @@ function slugFile(s: string): string {
 async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 'preview' | 'final'; target?: Target; output: string }): Promise<{ output: string; reused: number; rendered: number; warnings: string[] }> {
   const m = await media();
   const tpl = projectTemplate(p);
-  const ass = join(p.dir, 'captions', 'main.ass');
+  const ass = join(p.dir, vpaths(p).ass);
   let plan;
   try {
     plan = compile(tl, {
       quality: o.quality, ...(o.target ? { target: o.target } : {}), projectDir: p.dir,
-      ...(tl.captions.length && tpl.captions.burnIn && existsSync(ass) ? { assPath: 'captions/main.ass' } : {}),
+      ...(tl.captions.length && (p.variant || tpl.captions.burnIn) && existsSync(ass) ? { assPath: vpaths(p).ass } : {}),
     });
   } catch (e) {
     throw new CliError('compile-failed', (e as Error).message);
@@ -723,10 +735,10 @@ export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
   if (values.preview && values.final) throw new CliError('usage', 'choose --preview or --final');
   const quality = values.final ? 'final' : 'preview';
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const target = (values.target ?? (quality === 'final' ? tl.meta.targets[0] : undefined)) as Target | undefined;
   if (target && !['youtube', 'youtube-shorts', 'tiktok', 'instagram-reels'].includes(target)) throw new CliError('usage', `unknown target: ${target}`);
-  const output = values.out ? resolve(ctx.io.cwd, values.out) : quality === 'preview' ? paths(p.dir).preview : join(p.dir, 'renders', target!, `${slugFile(tl.meta.title)}.mp4`);
+  const output = values.out ? resolve(ctx.io.cwd, values.out) : quality === 'preview' ? vpaths(p).preview : join(p.dir, 'renders', target!, `${slugFile(tl.meta.title)}.mp4`);
   const started = Date.now();
   const r = await renderTimeline(ctx, p, tl, { quality, ...(target ? { target } : {}), output });
   const out = rel(p, r.output);
@@ -755,8 +767,8 @@ export async function cmdRender(ctx: Ctx, args: string[]): Promise<void> {
 
 /** The preview, re-rendered when timeline.json is newer. */
 export async function freshPreview(ctx: Ctx, p: Project, tl: Timeline): Promise<string> {
-  const prev = paths(p.dir).preview;
-  if (existsSync(prev) && statSync(prev).mtimeMs >= statSync(paths(p.dir).timeline).mtimeMs) return prev;
+  const prev = vpaths(p).preview;
+  if (existsSync(prev) && statSync(prev).mtimeMs >= statSync(vpaths(p).timeline).mtimeMs) return prev;
   info(ctx, t(ctx, 'プレビューを書き出しています…', 'rendering the preview…'));
   await renderTimeline(ctx, p, tl, { quality: 'preview', output: prev });
   return prev;
@@ -766,7 +778,7 @@ export async function cmdFrame(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { at: { type: 'string' }, out: { type: 'string' }, width: { type: 'string' } }, { max: 0, usage: 'solocut frame --at <frame|timecode> [--out file.png]' });
   if (!values.at) throw new CliError('usage', 'usage: solocut frame --at <frame|timecode> [--out file.png]');
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   let frame: number;
   try {
     frame = /^\d+$/.test(values.at) ? Number(values.at) : timecodeToFrame(values.at, tl.canvas.fps);
@@ -787,7 +799,7 @@ export async function cmdFrame(ctx: Ctx, args: string[]): Promise<void> {
 export async function cmdCheck(ctx: Ctx, args: string[]): Promise<void> {
   const { values } = opts(args, { input: { type: 'string' }, target: { type: 'string' }, only: { type: 'string' } }, { max: 0 });
   const p = openProject(ctx);
-  const tl = readTimeline(p.dir);
+  const tl = readTimeline(p);
   const m = await media();
   const input = values.input ? resolve(ctx.io.cwd, values.input) : await freshPreview(ctx, p, tl);
   const target = (values.target ?? tl.meta.targets[0]) as Target | undefined;

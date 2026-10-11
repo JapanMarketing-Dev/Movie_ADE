@@ -63,6 +63,14 @@ export const MetaSchema = z.strictObject({
   references: z.array(
     z.strictObject({ archive: idSchema('arc'), use: z.array(ReferenceUseSchema), note: z.string().optional() }),
   ),
+  /** Set on derived variants (docs/18): which main timeline and which parts of it this was made from. */
+  derivedFrom: z.strictObject({
+    variantOf: z.literal('main'),
+    at: z.string(),
+    mainHash: z.string(),
+    selection: z.array(z.strictObject({ segment: idSchema('seg'), from: SourceFrameSchema.optional(), to: SourceFrameSchema.optional() })),
+    rules: z.string(),
+  }).optional(),
 });
 
 export const LicenseRefSchema = z.strictObject({
@@ -121,11 +129,17 @@ export const WipeSchema = z.strictObject({
   size: z.number().min(0.15).max(0.5).optional(),
 });
 
+/** Where a cover crop sits in the source: fractions 0..1 of the cropped-away margin (0.5, 0.5 = centre). */
+export const FocusSchema = z.strictObject({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) });
+
 export const VideoChoiceSchema = z.discriminatedUnion('layout', [
-  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema }),
+  z.strictObject({ layout: z.literal('camera-full'), camera: SourceIdSchema, focus: FocusSchema.optional() }),
   z.strictObject({ layout: z.literal('screen-full'), screen: SourceIdSchema }),
   z.strictObject({ layout: z.literal('screen-with-wipe'), screen: SourceIdSchema, camera: SourceIdSchema, wipe: WipeSchema }),
-  z.strictObject({ layout: z.literal('split-v'), top: SourceIdSchema, bottom: SourceIdSchema }),
+  z.strictObject({
+    layout: z.literal('split-v'), top: SourceIdSchema, bottom: SourceIdSchema,
+    topFocus: FocusSchema.optional(), bottomFocus: FocusSchema.optional(),
+  }),
   z.strictObject({ layout: z.literal('scene'), scene: idSchema('scn') }),
 ]);
 
@@ -312,6 +326,7 @@ export type SourceFrame = number;
 export type Rational = z.infer<typeof RationalSchema>;
 export type Size = z.infer<typeof SizeSchema>;
 export type Point = z.infer<typeof PointSchema>;
+export type Focus = z.infer<typeof FocusSchema>;
 export type Rect = z.infer<typeof RectSchema>;
 export type Range = z.infer<typeof RangeSchema>;
 export type Corner = z.infer<typeof CornerSchema>;
