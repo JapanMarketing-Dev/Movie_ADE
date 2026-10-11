@@ -41,10 +41,53 @@ Pixabay、Mixkit、Uppbeat（クレジット必須）、魔王魂（クレジッ
 
 ## イラスト・アイコン・アニメーション
 
-調査中（いらすとや、ちょうどいいイラスト、Loose Drawing、Open Peeps、Fluent Emoji、LottieFiles など）。結果が出たら A / B / C に振り分ける。
+### A. 初期パック（自動でダウンロード）
 
-- いらすとやは「1つの制作物につき20点まで」などの規約がある（要確認）ため、**プロジェクトごとに使った点数を数える**機能を持つ
-- 背景（波模様など）、枠（グラデーションの枠）、吹き出し、丸ワイプの縁取りは、**Solocut がシーンのパターンとして自作する**（SVG / CSS。MIT）。外部の素材に頼らない
+| 種類 | 素材元 | ライセンス | 使いどころ |
+|---|---|---|---|
+| **人物の線画** | Open Peeps、Open Doodles | CC0 | 解説シーン（`explain-illust-bubbles`）の人物。**白線に変換した版**も用意し、黒背景にそのまま使えるようにする |
+| 人物（カラー） | Humaaans | CC0 | 明るい図解 |
+| アイコン | Lucide、Tabler、Phosphor、Heroicons、Material Symbols、game-icons | ISC / MIT / Apache-2.0 / CC BY 3.0 | 箇条書き、比較、図解 |
+| 絵文字 | Fluent Emoji（3D あり）、Twemoji、Noto Emoji | MIT / CC BY 4.0 / Apache-2.0 | リアクション、強調 |
+| 絵文字（線画） | OpenMoji | CC BY-SA 4.0（改変したものは同じライセンスで公開する義務があるので、別に管理する） | 黒背景向けの線画の絵文字 |
+| アニメーション | Noto Animated Emoji（Lottie）、Rive Community（作品ごとに作者を記録） | CC BY 4.0 | 動くリアクション |
+| 公共系 | デジタル庁のイラスト・アイコン | 政府標準利用規約（加工して出す場合は出典と編集内容を明示） | 日本向けのピクトグラム |
+| テクスチャ | ambientCG、Poly Haven | CC0 | 背景の質感 |
+| **背景・枠・吹き出し・ワイプの縁取り・テロップの座布団** | **Solocut が自分で生成する**（SVG ＋シェーダ。MIT） | MIT | 波模様の背景、グラデーションの枠、吹き出し（しっぽの位置・角丸・線幅を指定できる）、丸ワイプの縁取り。日本のテロップ素材サイトはどこも再配布を禁止しているため、外部の素材に頼らない |
+
+**ブランドロゴ（GitHub、Python など）は初期パックに入れない。** 著作権が CC0 や MIT でも商標権は別に残り、改変や商用での利用に条件があるため。技術動画で使う場合は、利用者が取り込むか、注意書き付きの任意のパックにする。メタデータで「改変しない、色は公式の色だけ」と縛り、サムネイルの主役にしたり提携を思わせたりしないよう注意を出す。
+
+### B. 自分で取り込む（日本のイラスト素材）
+
+| 素材元 | 画風 | 注意 |
+|---|---|---|
+| **いらすとや** | カラーのフラットな手描き（黒背景では白いフチを付ける） | **1つの制作物につき20点まで**（重複は1点、表情違いは別の点、色違いは1点）。21点以上は有料。アプリへの収録は禁止 |
+| **Loose Drawing** | **線画で黒背景向き** | 素材そのものの再配布は禁止 |
+| **Linustock** | **ビジネス系の線画で黒背景向き** | テンプレートでの配布は禁止 |
+| ソコスト | シンプルな線とフラット。アニメーション化は可 | **生成 AI への入力は禁止** |
+| ちょうどいいイラスト | カラーのフラット | 直リンクは禁止。AI の学習は禁止 |
+| ぴよたそ | ゆるい手描き | ― |
+| ICOOON MONO | モノトーンのアイコン | ― |
+| イラストAC / シルエットAC | さまざま／シルエット | 本人のログインが必要。無料会員は1日10点まで。**ソフトウェアによるダウンロードは禁止**。生成 AI への入力も禁止 |
+
+取り込みの決まり:
+
+- 公式サイトをそのまま表示し、ダウンロードは**本人がクリック**する。Solocut はダウンロードフォルダを監視して取り込むだけ
+- **やらないこと**: 一覧のスクレイピング、それを使った独自の検索画面、自動のクリック・一括ダウンロード、サムネイルの直リンク
+- **再配布にならないようにする**: 取り込んだ素材が入ったプロジェクトをテンプレートとして書き出すときは、その素材を除く（またはブロックする）
+- **AI に渡さない**: 生成 AI への入力を禁止している素材（ソコスト、ちょうどいいイラスト、AC 系）には `aiInputProhibited` の印を付け、画像生成（[10](./10_thumbnails.md)）や判定モデルに渡さない
+
+### いらすとやの点数を数える
+
+- 単位は「1本の動画（サムネイルを含む）」。素材の id で重複を除き、表情違いは別の点、色違いは1点として数える
+- 18点で警告し、21点目は書き出しの前に確認する
+- シリーズものを「1つの商品（番組）」とみなす場合に備え、**シリーズ単位で合計する**設定を選べる
+- 収益化しない動画では上限がないため、「収益化しない」の設定で制限を外せる
+- 同じ仕組みで、ほかの素材元の点数制限（例: フキダシデザインの「1アプリにつき20素材」）も扱う
+
+### C. 連携しない・同梱しない
+
+unDraw（パックとしての配布やスクレイピングを禁止）、Storyset（ライブラリへの収録を禁止）、DrawKit、Blush、useAnimations、Lordicon、IconScout。LottieFiles の無料アニメーションは、少数を厳選して入れるかどうかを運営に問い合わせてから決める。
 
 ## 素材ごとのライセンス情報
 
@@ -57,6 +100,8 @@ Pixabay、Mixkit、Uppbeat（クレジット必須）、魔王魂（クレジッ
   "license": { "spdx": "CC0-1.0", "url": "https://creativecommons.org/publicdomain/zero/1.0/",
                "attributionRequired": false, "redistributable": true, "commercialOk": true,
                "restrictions": [], "limit": null },
+  "modification": { "allowed": true, "shareAlike": false, "noDerivatives": false },
+  "flags": { "aiInputProhibited": false, "trademark": false, "bundleAllowed": true, "origin": "pack" },
   "contentIdRisk": "low",
   "acquiredAt": "2026-10-11", "tosCheckedAt": "2026-10-11",
   "features": { "durationMs": 180, "lufs": -18.2, "tags": ["ui", "light"] }
@@ -64,7 +109,8 @@ Pixabay、Mixkit、Uppbeat（クレジット必須）、魔王魂（クレジッ
 ```
 
 - `restrictions` の例: `no-contentid-registration`、`no-ai-training`、`youtube-only`、`no-game-use`
-- `limit` の例: `{ "key": "irasutoya", "perProduction": 20 }`
+- `limit` の例: `{ "key": "irasutoya", "perProduction": 20, "scope": "video+thumbnail", "dedupeKey": "irasutoya:businessman_shock" }`
+- `origin`: `pack`（初期パック）／ `user-import`（自分で取り込んだもの）／ `generated`（Solocut が生成したもの）
 
 ## 書き出し・投稿時の処理
 
