@@ -1,0 +1,1198 @@
+/*
+ * Shell chrome: title bar, sidebar, status bar, status popovers, project menu, sidebar project tree.
+ * Ported from Ferret src/renderer/styles/shell.css (MIT). Orca由来の寸法・並びは各節のコメントのとおり（MIT, Copyright (c) 2026 Lovecast Inc.）。
+ * Renamed for Solocut: .titlebar -> .app-titlebar (the screens keep their own .titlebar toolbar), .empty -> .empty-state.
+ */
+
+/* ── タイトルバー ─────────────────────────────────────── */
+
+.app-titlebar {
+  position: relative;
+  display: grid;
+  height: var(--size-titlebar);
+  align-items: center;
+  padding: 0 var(--space-5) 0 var(--titlebar-inset);
+  background: var(--color-bg-chrome);
+  grid-template-columns: 1fr auto 1fr;
+  /*
+   * border-bottom ではなく内側の影で線を引く。border だと content-box が
+   * 1px 縮み、中身の中央が macOS の信号機ボタンの中心とずれる。
+   */
+  box-shadow: inset 0 -1px 0 var(--color-border);
+  -webkit-app-region: drag;
+}
+
+.app-titlebar__left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.app-titlebar__logo {
+  display: inline-flex;
+  margin-left: var(--space-2);
+}
+
+.app-titlebar__sep {
+  width: 1px;
+  height: 14px;
+  flex: none;
+  margin: 0 var(--space-1);
+  background: var(--color-border-strong);
+}
+
+.app-titlebar__center {
+  display: flex;
+  justify-content: center;
+}
+
+.app-titlebar__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+.app-titlebar__left > *,
+.app-titlebar__center > *,
+.app-titlebar__right > * {
+  -webkit-app-region: no-drag;
+}
+
+.app-titlebar__sep,
+.app-titlebar__logo {
+  -webkit-app-region: drag;
+}
+
+.app-titlebar__project {
+  display: inline-flex;
+  min-width: 0;
+  height: var(--size-control);
+  align-items: center;
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  gap: var(--space-3);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
+.app-titlebar__project:hover {
+  border-color: var(--color-border);
+  background: var(--color-surface-hover);
+}
+
+.app-titlebar__project > svg {
+  flex: none;
+  color: var(--color-text-faint);
+  transition: color var(--motion-fast) var(--ease-out);
+}
+
+.app-titlebar__project:hover .app-titlebar__project-icon {
+  color: var(--color-accent);
+}
+
+.app-titlebar__project-name {
+  overflow: hidden;
+  max-width: 28ch;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-titlebar__project-name.is-empty {
+  color: var(--color-text-faint);
+  font-weight: var(--font-weight-regular);
+}
+
+/* ── 左サイドバー ─────────────────────────────────────── */
+
+.sidebar {
+  display: grid;
+  overflow: hidden;
+  width: var(--size-sidebar);
+  height: 100%;
+  /* 「新しいレビュー」はプロジェクトの中へ移したので、一覧だけの1段 */
+  grid-template-rows: minmax(0, 1fr);
+  background: var(--color-bg-sidebar);
+  box-shadow: inset -1px 0 0 var(--color-border);
+}
+
+/* 日付のまとまり。既存のADEの Pinned / In progress と同じ役目 */
+.sidebar__group + .sidebar__group {
+  margin-top: var(--space-2);
+}
+
+.sidebar__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-3) var(--space-3);
+}
+
+.sidebar__section-title {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+}
+
+.sidebar__section-count {
+  min-width: 18px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-hover);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+
+.sidebar__list {
+  overflow-y: auto;
+  padding: 0 var(--space-3) var(--space-4);
+}
+
+/* 240pxの中では既定の余白が広すぎて、見出しが1文字だけ折り返す */
+.sidebar__list .empty-state {
+  height: auto;
+  padding: var(--space-8) var(--space-2) var(--space-6);
+}
+
+.sidebar__list .empty-state__title {
+  font-size: var(--font-size-md);
+}
+
+.sidebar__list .empty-state__description {
+  font-size: var(--font-size-xs);
+}
+
+.sidebar__empty-art {
+  display: block;
+}
+
+/*
+ * レビュー1件のカード。左にサイトの札、右に2段（時刻と件数／対象と状態）。
+ * 選択中は縁と地をアクセントで薄く染める。
+ */
+.session {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  margin-top: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  gap: var(--space-4);
+  text-align: left;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out);
+}
+
+.session:hover {
+  background: var(--color-surface-hover);
+}
+
+.session.is-selected {
+  border-color: var(--color-accent-line);
+  background: var(--color-accent-wash);
+}
+
+.session:focus-visible {
+  outline-offset: -1px;
+}
+
+/* サイトの札。色は付けず、枠線とイニシャルだけ */
+.session__tile {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  place-items: center;
+}
+
+.session__body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.session__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.session__label {
+  overflow: hidden;
+  flex: 1;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session__count {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  gap: var(--space-1);
+}
+
+.session__count > svg {
+  color: var(--color-text-faint);
+}
+
+.session__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.session__target {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session__path {
+  opacity: 0.7;
+}
+
+/* 状態の札。アイコン＋色＋短い語で、読まなくても分かる */
+.session__status {
+  display: inline-flex;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-medium);
+  gap: var(--space-1);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.session__status--draft {
+  background: var(--color-accent-quiet);
+  color: var(--color-accent-hover);
+}
+
+.session__status--sent {
+  background: var(--color-success-quiet);
+  color: var(--color-success);
+}
+
+.session__status--incomplete {
+  background: var(--color-warning-quiet);
+  color: var(--color-warning);
+}
+
+.session__status--broken {
+  background: var(--color-danger-quiet);
+  color: var(--color-danger);
+}
+
+/* ── 下部ステータスバー ──────────────────────────────── */
+
+.statusbar {
+  display: flex;
+  overflow: hidden;
+  height: var(--size-statusbar);
+  align-items: center;
+  padding: 0 var(--space-4);
+  background: var(--color-bg-chrome);
+  box-shadow: inset 0 1px 0 var(--color-border);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  gap: var(--space-5);
+}
+
+.statusbar__item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--color-text-muted);
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.statusbar__item > svg {
+  flex: none;
+  color: var(--color-text-faint);
+}
+
+/* 使える設定は、アイコンを文字と同じ濃さにする（色は付けない。注意だけ黄色）*/
+.statusbar__item--ok > svg {
+  color: var(--color-text-muted);
+}
+
+.statusbar__item--warn,
+.statusbar__item--warn > svg {
+  color: var(--color-warning);
+}
+
+.statusbar__item--off {
+  color: var(--color-text-faint);
+}
+
+.statusbar__item--url {
+  max-width: 36ch;
+  color: var(--color-text-muted);
+}
+
+.statusbar__item--url.is-empty {
+  color: var(--color-text-faint);
+}
+
+.statusbar__value {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.statusbar__divider {
+  width: 1px;
+  height: 11px;
+  flex: none;
+  background: var(--color-border-strong);
+}
+
+.statusbar__spacer {
+  min-width: var(--space-4);
+  flex: 1;
+}
+
+.statusbar__rec {
+  display: inline-flex;
+  height: 16px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--space-3);
+  margin-left: calc(var(--space-2) * -1);
+  border-radius: var(--radius-pill);
+  gap: var(--space-3);
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.statusbar__rec.is-recording {
+  background: var(--color-record-quiet);
+}
+
+.statusbar__elapsed {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar__rec.is-recording .statusbar__elapsed {
+  color: var(--color-record);
+  font-weight: var(--font-weight-bold);
+}
+
+.statusbar__version {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+}
+
+/* 新しい版の準備ができたときだけ出る「再起動して更新」（src/main/autoUpdate.ts）。押せることが分かるよう強調の色にする */
+.statusbar__btn.statusbar__update-ready {
+  flex: none;
+  gap: var(--space-1);
+  color: var(--color-accent);
+  font-weight: var(--font-weight-bold);
+}
+
+/* 押せる項目。帯の高さに収まる小さな面で、ホバーしたときだけ地が出る */
+.statusbar__group {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.statusbar__btn {
+  display: inline-flex;
+  min-width: 0;
+  height: 18px;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  gap: var(--space-2);
+  white-space: nowrap;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.statusbar__btn:hover:not(:disabled),
+.statusbar__btn[aria-expanded='true'] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.statusbar__btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.statusbar__btn:focus-visible {
+  outline: 1px solid var(--color-border-focus);
+  outline-offset: 0;
+}
+
+.statusbar__btn > svg {
+  flex: none;
+}
+
+.statusbar__btn--icon {
+  width: 22px;
+  justify-content: center;
+  padding: 0;
+}
+
+.statusbar__group .statusbar__btn:first-child {
+  padding-right: var(--space-1);
+}
+
+.statusbar__group .statusbar__btn:last-child {
+  padding-left: var(--space-1);
+}
+
+.statusbar__btn.statusbar__item--ok > svg:first-child {
+  color: var(--color-text-muted);
+}
+
+.statusbar__btn.statusbar__item--off {
+  color: var(--color-text-faint);
+}
+
+.statusbar__btn.statusbar__item--warn {
+  color: var(--color-warning);
+}
+
+/* ── ステータスバーのポップオーバー（body 直下へ出す）────── */
+
+.sb-pop {
+  position: fixed;
+  z-index: var(--z-overlay);
+  width: 320px;
+  max-height: calc(100vh - 80px);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+  animation: fade-in var(--motion-fast) var(--ease-out);
+}
+
+.sb-pop__body {
+  display: grid;
+  padding: var(--space-4) var(--space-5);
+  gap: var(--space-1);
+}
+
+.sb-pop__title {
+  display: flex;
+  align-items: center;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  gap: var(--space-3);
+}
+
+.sb-pop .st-row {
+  min-width: 0;
+  min-height: 30px;
+}
+
+/* 選択欄は幅 200px のままだと、マイクの「読み直し」ボタンの分だけ 320px のポップオーバーからはみ出して横に流れていた */
+.sb-pop .st-row > .st-row__label {
+  flex: none;
+}
+
+.sb-pop .st-row > .rv-select,
+.sb-pop .st-mic-select {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.sb-pop .st-select {
+  width: 100%;
+  max-width: 200px;
+}
+
+.sb-pop .st-lock {
+  margin: 0 0 var(--space-2);
+}
+
+.sb-pop__mono {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* 更新のポップオーバー：版を選んで入れる */
+.sb-pop__versions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.sb-pop__versions .st-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.sb-pop__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  gap: var(--space-3);
+}
+
+/* ── プロジェクト切替（タイトルバーのドロップダウン）──────────── */
+
+.project-menu {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* 一覧を開いている間は、ボタンのツールチップが一覧の見出しに重ならないよう出さない */
+.project-menu:has(.project-menu__panel) .tooltip {
+  display: none;
+}
+
+/* 開いている間は内蔵ブラウザのビューを隠しているので、ビューの領域へ伸びてよい */
+.project-menu__panel {
+  position: absolute;
+  z-index: var(--z-overlay);
+  top: calc(100% + var(--space-3));
+  left: 0;
+  display: flex;
+  width: 340px;
+  max-height: min(70vh, 520px);
+  flex-direction: column;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+  -webkit-app-region: no-drag;
+}
+
+.project-menu__list {
+  overflow: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-menu__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+}
+
+.project-menu__item:hover,
+.project-menu__item:focus-within {
+  background: var(--color-surface-hover);
+}
+
+.project-menu__item.is-active {
+  background: var(--color-surface-hover);
+}
+
+.project-menu__row {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  gap: var(--space-4);
+  text-align: left;
+}
+
+.project-menu__check {
+  display: grid;
+  width: 14px;
+  flex: none;
+  color: var(--color-text);
+  place-items: center;
+}
+
+.project-menu__text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: var(--space-1);
+}
+
+.project-menu__name,
+.project-menu__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-menu__name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+}
+
+.project-menu__path {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+}
+
+.project-menu__list + .project-menu__add {
+  margin-top: var(--space-3);
+}
+
+.project-menu__add {
+  display: flex;
+  align-items: center;
+  padding: var(--space-4);
+  border: 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-4);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.project-menu__add:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.project-menu__add > svg {
+  color: var(--color-text-muted);
+}
+
+.project-menu__kbd {
+  margin-left: auto;
+  color: var(--color-text-faint);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-2xs);
+}
+
+/* ── サイドバー: プロジェクト一覧（Orca の Projects 節に合わせる）────────
+ * Orca由来の寸法（MIT）: 見出し h-8・行 h-7（28px）・左 10px・アイコン 16px・
+ * 名前 13px 太字・子の行は 18px 字下げ（SIDEBAR_TREE_INDENT）。
+ */
+
+.sidebar {
+  position: relative; /* 右クリックのメニューをサイドバーの中に置く基準 */
+}
+
+/* 横には決してスクロールさせない（はみ出しで中身が左へずれて見える） */
+.sidebar__list {
+  overflow-x: hidden;
+}
+
+.sb-head {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-3);
+  padding: 0 var(--space-1) 0 var(--space-4);
+}
+
+.sb-head__title {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  user-select: none;
+}
+
+.sb-tree {
+  display: grid;
+  /* 長い名前で列が広がらないよう、列幅はサイドバーに固定する（中で省略させる） */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+.sb-project {
+  position: relative;
+  min-width: 0;
+}
+
+/* オーケストラ（親のフォルダ）に属するプロジェクト。サブフォルダのように深く字下げし、親からの線を引く */
+.sb-project--member {
+  margin-left: 18px;
+  padding-left: 9px;
+  border-left: var(--size-border) solid var(--color-border);
+}
+
+/* 並べ替えのドラッグ: 動かしている行は薄く、落とす位置に線を出す（行の間の gap の中ほど） */
+.sb-project.is-dragging > .sb-project__row {
+  opacity: 0.5;
+}
+
+.sb-project.is-drop-before::before,
+.sb-project.is-drop-after::after {
+  position: absolute;
+  z-index: 1;
+  right: var(--space-2);
+  left: var(--space-2);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  content: '';
+  pointer-events: none;
+}
+
+.sb-project.is-drop-before::before {
+  top: -2px;
+}
+
+.sb-project.is-drop-after::after {
+  bottom: -2px;
+}
+
+.sb-project__row {
+  position: relative;
+  display: flex;
+  height: 28px;
+  align-items: center;
+  padding: 0 var(--space-3) 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  gap: var(--space-3);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.sb-project__row:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sb-project__row:focus-visible {
+  outline: 1px solid var(--color-border-focus);
+  outline-offset: -1px;
+}
+
+.sb-project.is-active > .sb-project__row {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sb-project__row.is-editing {
+  padding: 0 var(--space-1);
+  cursor: default;
+}
+
+.sb-project__row.is-editing .text-field {
+  flex: 1;
+}
+
+.sb-project__icon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  place-items: center;
+}
+
+.sb-project__name {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-project__count {
+  flex: none;
+}
+
+/* ☆（お気に入り）の印と、☆ を付け外すボタン */
+.sb-project__starred {
+  display: inline-grid;
+  flex: none;
+  color: var(--color-warning);
+  place-items: center;
+}
+
+.sb-project__action.is-starred {
+  color: var(--color-warning);
+}
+
+/* 「☆ のみ」で何も出ないとき */
+.sb-tree__empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+/* Agent が動いているプロジェクトの印。ターミナルのタブの「実行中」と同じ色の3本の棒が上下する */
+.sb-project__working {
+  display: inline-flex;
+  height: 10px;
+  flex: none;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.sb-project__working > span {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--agent-working);
+  animation: sb-agent-working 900ms ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+.sb-project__working > span:nth-child(2) {
+  animation-delay: -300ms;
+}
+
+.sb-project__working > span:nth-child(3) {
+  animation-delay: -600ms;
+}
+
+/* Agent が確認を待っている・終わった（まだ見ていない）プロジェクトの印。ターミナルのタブの印と同じ色 */
+.sb-project__agent {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.sb-project__agent--blocked {
+  color: var(--agent-blocked);
+}
+
+.sb-project__agent--done {
+  color: var(--agent-done);
+}
+
+@keyframes sb-agent-working {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* 動きを減らす設定では止め、高さの違う棒として残す（動いていることは色と形で分かる） */
+@media (prefers-reduced-motion: reduce) {
+  .sb-project__working > span {
+    animation: none;
+  }
+
+  .sb-project__working > span:nth-child(1) {
+    transform: scaleY(0.5);
+  }
+
+  .sb-project__working > span:nth-child(3) {
+    transform: scaleY(0.75);
+  }
+}
+
+/* … と折りたたみは、行に触れたときだけ件数の上に重ねて出す（Orca の ProjectHeaderActions） */
+.sb-project__actions {
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  display: flex;
+  padding-left: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+  gap: var(--space-1);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.sb-project__row:hover .sb-project__actions,
+.sb-project__row:focus-within .sb-project__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sb-project__action {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  place-items: center;
+}
+
+.sb-project__action:hover {
+  background: var(--color-surface-active);
+  color: var(--color-text);
+}
+
+.sb-project__action .is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.sb-project__action svg {
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+/* 子の行（レビュー履歴）。Orca で worktree が並ぶ位置に1段下げて置く */
+.sb-project__children {
+  padding: 0 0 var(--space-3) 18px;
+}
+
+.sb-project__empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.sb-group {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-2xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.06em;
+}
+
+.sb-confirm {
+  display: grid;
+  margin: var(--space-2) 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-quiet);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+  line-height: var(--line-height-normal);
+}
+
+.sb-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.sb-menu {
+  position: absolute;
+  z-index: var(--z-overlay);
+  display: grid;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+
+.sb-menu > button {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-4);
+  text-align: left;
+}
+
+.sb-menu > button:hover,
+.sb-menu > button:focus-visible {
+  background: var(--color-surface-hover);
+}
+
+.sb-menu > button:disabled {
+  background: transparent;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.sb-menu > button > svg {
+  color: var(--color-text-muted);
+}
+
+.sb-menu > button.is-danger,
+.sb-menu > button.is-danger > svg {
+  color: var(--color-danger);
+}
+
+.sb-menu__sep {
+  height: 1px;
+  margin: var(--space-2) var(--space-1);
+  background: var(--color-border);
+}
+
+/* タイトルバーのパネル開閉ボタン（LayoutToggles）。録画ボタンの左に寄せて並べる */
+.layout-toggles {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--space-3);
+  gap: 2px;
+}
+
+/* フッターの項目の入れ物（幅が足りないときに優先順位の低いものから hidden にする。StatusBar.tsx） */
+.statusbar__slot {
+  display: inline-flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+/* 使用量だけは縮める（ほかを隠したあとに、使用量が自分で段階的に短くなる） */
+.statusbar__slot--shrink {
+  flex: 0 1 auto;
+}
+
+.statusbar__slot[hidden],
+.statusbar__btn[hidden] {
+  display: none;
+}
+
+/* 「…」メニュー。隠れた項目を1行ずつ並べる。名前は折り返さず、値は省略記号で切る（全文は title）。横には決してはみ出さない */
+.sb-pop:has(.sb-more) {
+  max-width: calc(100vw - 16px);
+  overflow-x: hidden;
+}
+
+.sb-more {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.sb-more__row {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+  text-align: left;
+}
+
+button.sb-more__row {
+  cursor: pointer;
+}
+
+button.sb-more__row:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sb-more__row > svg {
+  flex: none;
+  color: var(--color-text-faint);
+}
+
+.sb-more__name {
+  flex: none;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.sb-more__value {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  color: var(--color-text-faint);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* フッターの部品（API の使用量・GitHub・配色）をそのまま置く欄。右に寄せ、幅が足りなければ部品の中の値を省略記号で切る */
+.sb-more__control {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.sb-more__control > .statusbar__btn {
+  max-width: 100%;
+}
+
+/* 部品が自分で出す区切り線は、メニューの中では要らない */
+.sb-more__control .statusbar__divider {
+  display: none;
+}
+

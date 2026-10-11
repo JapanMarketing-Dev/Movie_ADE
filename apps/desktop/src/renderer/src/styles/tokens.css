@@ -1,0 +1,198 @@
+/*
+ * Design tokens — the single source of truth for the look of the app.
+ * Ported from Ferret (src/renderer/styles/tokens.css, MIT, JapanMarketing-Dev) and adapted to Solocut:
+ *   - dark only (docs/01: no light theme; neutral grays so video colors read correctly)
+ *   - the accent is Solocut red (#ff4a3d) instead of Ferret's blue; recording keeps its own red
+ *
+ * Neutral gray surfaces, 1px lines, 4–6px radii, lucide icons at 14–16px. No gradients or glows.
+ *
+ * Color values: Orca由来: ~/bench/orca/src/renderer/src/assets/main.css（MIT, Copyright (c) 2026 Lovecast Inc.）
+ * の .dark（ダーク）から写した（Ferret 経由）。
+ */
+:root {
+  color-scheme: dark;
+
+  /* ── surfaces (back to front, achromatic) ── */
+  --color-bg-app: #0a0a0a; /* Orca --background (dark) */
+  --color-bg-chrome: #0f0f0f; /* title bar, toolbars, status bar */
+  --color-bg-sidebar: #141414;
+  --color-bg-panel: #171717; /* Orca --card (dark) */
+  --color-bg-elevated: #1e1e1e; /* Orca --editor-surface (dark): inputs, popovers */
+  --color-bg-terminal: #0f0f0f;
+  --color-bg-video: #000000; /* around the preview player */
+
+  /* ── surface states ── */
+  --color-surface-hover: #262626; /* Orca --muted (dark) */
+  --color-surface-active: #404040; /* Orca --accent (dark) */
+  --color-surface-selected: #1e1e1e;
+
+  /* ── primary button (near-white with dark text) ── */
+  --color-primary: #e5e5e5; /* Orca --primary (dark) */
+  --color-primary-fg: #171717;
+
+  /* ── lines ── */
+  --color-border: rgb(255 255 255 / 7%); /* Orca --border (dark) */
+  --color-border-strong: rgb(255 255 255 / 15%); /* Orca --input (dark) */
+  --color-divider: #3f3f46;
+  --color-border-focus: #737373; /* Orca --ring (dark) */
+
+  /* ── text ── */
+  --color-text: #fafafa;
+  --color-text-muted: #a1a1a1;
+  --color-text-faint: rgb(255 255 255 / 52%);
+  --color-text-inverse: #171717;
+
+  /* ── agent state (terminal tabs, sidebar) ── */
+  --agent-working: #eab308;
+  --agent-blocked: #f97316;
+  --agent-done: #86efac;
+  --agent-idle: #a1a1a1;
+
+  /* ── accent: Solocut red. Selection, progress, links, counts ── */
+  --color-accent: #ff4a3d;
+  --color-accent-hover: #ff6b60;
+  --color-accent-quiet: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --color-accent-wash: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  --color-accent-line: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --color-on-accent: #ffffff;
+
+  /* ── meaning ── */
+  --color-success: #86efac;
+  --color-success-quiet: color-mix(in srgb, var(--color-success) 10%, transparent);
+  --color-warning: #eab308;
+  --color-warning-quiet: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  --color-warning-border: color-mix(in srgb, var(--color-warning) 25%, transparent);
+  --color-danger: #ff6568;
+  --color-danger-quiet: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  --color-info: #60a5fa;
+
+  /* ── recording (red only here) ── */
+  --color-record: #ef4444;
+  --color-record-hover: #f87171;
+  --color-record-quiet: color-mix(in srgb, var(--color-record) 14%, transparent);
+  --color-record-line: color-mix(in srgb, var(--color-record) 55%, transparent);
+
+  /* ── spacing (4px base) ── */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 48px;
+
+  /* ── radii ── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius-pill: 999px;
+
+  /* ── type. Latin is Inter / JetBrains Mono (latin subset, fonts.css); Japanese falls back to the OS font ── */
+  --font-ui: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'Hiragino Sans',
+    'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', Meiryo, 'Ubuntu', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Mono', Menlo, Consolas,
+    'DejaVu Sans Mono', 'Noto Sans Mono CJK JP', monospace;
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-bold: 600;
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.45;
+  --line-height-relaxed: 1.6;
+
+  /* ── skeleton sizes (Orca measurements) ── */
+  --size-titlebar: 36px;
+  --size-toolbar: 40px;
+  --size-tabbar: 32px;
+  --size-statusbar: 24px;
+  --size-sidebar: 240px;
+  --size-control: 26px;
+  --size-control-sm: 22px;
+  --size-row: 28px;
+  --size-splitter: 6px;
+  --size-traffic-lights: 80px;
+  --size-settings-panel: 560px;
+  --icon-stroke: 1.75;
+  --size-border: 1px;
+
+  /* ── shadows: floating things only. Orca由来: main.css の --shadow-floating（MIT） ── */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow-md: 0 10px 24px rgb(0 0 0 / 18%);
+  --shadow-lg: 0 16px 36px rgb(0 0 0 / 24%);
+
+  /* ── motion ── */
+  --motion-instant: 100ms;
+  --motion-fast: 150ms;
+  --motion-normal: 200ms;
+  --motion-slow: 260ms;
+  --motion-breathe: 1600ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: var(--ease-out);
+
+  /* ── stacking ── */
+  --z-splitter: 10;
+  --z-toolbar: 20;
+  --z-overlay: 30;
+  --z-tooltip: 40;
+  --z-toast: 50;
+
+  --color-scrim: rgb(10 10 10 / 72%);
+
+  /*
+   * Legacy names used by the screens written before the shell port (styles.css). They now resolve to the
+   * tokens above so every screen shares the same palette.
+   */
+  --bg: var(--color-bg-app);
+  --bg-1: var(--color-bg-panel);
+  --bg-2: var(--color-bg-elevated);
+  --bg-3: var(--color-surface-hover);
+  --line: var(--color-border);
+  --line-2: var(--color-border-strong);
+  --text: var(--color-text);
+  --text-2: var(--color-text-muted);
+  --text-3: var(--color-text-faint);
+  --accent: var(--color-accent);
+  --accent-dim: var(--color-accent-quiet);
+  --ok: var(--color-success);
+  --warn: var(--color-warning);
+  --info: var(--color-info);
+  --radius: var(--radius-md);
+  --mono: var(--font-mono);
+  --sans: var(--font-ui);
+}
+
+/* OS "reduce motion": stop loops, keep one-shot enter/exit. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0ms;
+    --motion-fast: 0ms;
+    --motion-normal: 0ms;
+    --motion-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .spinner,
+  .skeleton,
+  .record-dot--active,
+  .record-btn.is-recording,
+  .ui-progress--indeterminate .ui-progress__bar {
+    animation: none !important;
+  }
+}

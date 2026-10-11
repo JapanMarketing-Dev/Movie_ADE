@@ -2,7 +2,14 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as Sentry from '@sentry/electron/renderer';
 import '@xterm/xterm/css/xterm.css';
+// order matters: tokens → fonts → the older screens → shared primitives → shell chrome → pages
+import './styles/tokens.css';
+import './styles/fonts.css';
 import './styles.css';
+import './styles/ui.css';
+import './styles/shell-ported.css';
+import './styles/settings.css';
+import './styles/shell.css';
 import { App } from './App';
 import { Teleprompter } from './screens/Teleprompter';
 

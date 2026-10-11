@@ -1,0 +1,552 @@
+/*
+ * Terminal pane (TerminalPane.tsx, QuickLaunchButton.tsx, terminalClient.ts).
+ * Ported from Ferret src/renderer/styles/shell.css (the ターミナル section) and editor.css (.pane-menu) (MIT).
+ * Solocut is dark only; colors come from tokens.css (accent #ff4a3d). Tab drag-and-drop rules are not ported.
+ */
+
+.terminal-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: var(--size-tabbar) minmax(0, 1fr);
+  background: var(--color-bg-terminal);
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: stretch;
+  background: var(--color-bg-chrome);
+  box-shadow: inset 0 -1px 0 var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * タブ。既存のADEに合わせて「2px の下線 ＋ ごく薄い地の持ち上げ」で選択を示す。
+ * 下線だけでも地だけでもなく両方。
+ */
+.terminal-tab {
+  position: relative;
+  display: inline-flex;
+  min-width: 108px;
+  max-width: 200px;
+  align-items: center;
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  gap: var(--space-3);
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+  white-space: nowrap;
+}
+
+.terminal-tab:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.terminal-tab[aria-selected='true'] {
+  background: var(--color-bg-terminal);
+  color: var(--color-text);
+}
+
+.terminal-tab::after {
+  position: absolute;
+  height: 2px;
+  background: var(--color-accent);
+  bottom: 0;
+  content: '';
+  left: 0;
+  right: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--motion-normal) var(--ease-out);
+}
+
+.terminal-tab[aria-selected='true']::after {
+  transform: scaleX(1);
+}
+
+/*
+ * Agentの状態の印（WS-4 / 04 4.1-13）。
+ * 「終わった（done＝まだ気づいていない）」と「待機（idle＝確認済み）」を
+ * 色と動きの両方で分ける。done だけがゆっくり光って注意を引く。
+ */
+.terminal-tab__state {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-text-faint);
+  opacity: 0.35;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.terminal-tab__state--working {
+  background: var(--agent-working);
+  opacity: 1;
+}
+
+.terminal-tab__state--blocked {
+  background: var(--agent-blocked);
+  opacity: 1;
+}
+
+/* 終わったが未確認。気づいてほしいので、ここだけ呼吸させる */
+.terminal-tab__state--done {
+  background: var(--agent-done);
+  opacity: 1;
+  animation: agent-done-glow 1800ms var(--ease-out) infinite;
+}
+
+.terminal-tab__state--idle {
+  background: var(--agent-idle);
+  opacity: 0.6;
+}
+
+@keyframes agent-done-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgb(134 239 172 / 55%);
+  }
+
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px rgb(134 239 172 / 0%);
+  }
+}
+
+.terminal-tab__title {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+}
+
+/* 閉じるボタンは、選択中かホバー中のタブにだけ出す */
+.terminal-tab__close {
+  display: inline-flex;
+  width: var(--space-6);
+  height: var(--space-6);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.terminal-tab:hover .terminal-tab__close,
+.terminal-tab[aria-selected='true'] .terminal-tab__close,
+.terminal-tab__close:focus-visible {
+  color: var(--color-text-faint);
+}
+
+.terminal-tab__close:hover {
+  background: var(--color-surface-active);
+  color: var(--color-text);
+}
+
+.terminal-tabs__add {
+  display: inline-flex;
+  width: var(--size-control);
+  height: var(--size-control);
+  flex: none;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  margin-left: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-faint);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-instant) var(--ease-out);
+}
+
+.terminal-tabs__add:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.terminal-tabs__add:active {
+  transform: scale(0.9);
+}
+
+/* Agentタブの印 */
+.terminal-tab__agent {
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+/*
+ * 「＋」のメニュー（Orca の QuickLaunchButton）。popover で最上位に出し、
+ * 位置は QuickLaunchButton が開く直前に決める。
+ */
+.quick-launch {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+}
+
+.quick-launch:popover-open {
+  display: flex;
+  flex-direction: column;
+}
+
+.quick-launch__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  gap: var(--space-4);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.quick-launch__item:hover,
+.quick-launch__item:focus-visible {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+
+.quick-launch__item--muted {
+  color: var(--color-text-muted);
+}
+
+.quick-launch__label {
+  flex: 1;
+}
+
+.quick-launch__shortcut {
+  color: var(--color-text-faint);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.04em;
+}
+
+.quick-launch__separator {
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--color-border);
+}
+
+/* 検索欄（Orca の TabBarCreateEntry）。↑↓で選んだ項目は .is-active */
+.quick-launch__search {
+  display: flex;
+  align-items: center;
+  margin-bottom: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-faint);
+  gap: var(--space-4);
+}
+
+.quick-launch__input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.quick-launch__input::placeholder {
+  color: var(--color-text-faint);
+}
+
+.quick-launch__list {
+  display: flex;
+  max-height: min(360px, 60vh);
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.quick-launch__item.is-active {
+  background: var(--color-surface-hover);
+}
+
+.quick-launch__label {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 種類やURLなどの補足。長いときは省略して、ラベルを優先する */
+.quick-launch__detail {
+  overflow: hidden;
+  max-width: 55%;
+  flex: none;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-launch__empty {
+  padding: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-sm);
+}
+
+.terminal-surfaces {
+  position: relative;
+  min-height: 0;
+}
+
+.terminal-surface {
+  position: absolute;
+  display: flex;
+  inset: 0;
+}
+
+.terminal-surface[hidden] {
+  display: none;
+}
+
+/*
+ * ペインの分割（Orca の .pane-split / .pane-divider）。
+ * 分割は flex で並べ、比率は TerminalPane が flex-grow で渡す。
+ */
+.terminal-split {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+}
+
+.terminal-split.is-vertical {
+  flex-direction: row;
+}
+
+.terminal-split.is-horizontal {
+  flex-direction: column;
+}
+
+.terminal-split__child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 1つのペイン。余白は xterm の器（.terminal-host）の位置で取る */
+.terminal-leaf {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+/*
+ * xterm の器。割合の高さ（height: 100%）だと flex の中で決まらないことがあり、
+ * FitAddon が既定の 24 行のまま止まるので、ペインの内側に絶対配置で広げる
+ */
+.terminal-host {
+  position: absolute;
+  top: var(--space-4);
+  right: 0;
+  bottom: var(--space-3);
+  left: var(--space-5);
+}
+
+/* 上へスクロールしている間だけ出す「一番下へ」のボタン（terminalClient.ts） */
+.terminal-jump {
+  position: absolute;
+  right: var(--space-5);
+  bottom: var(--space-3);
+  z-index: 10;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.85;
+  box-shadow: var(--shadow-sm);
+}
+
+.terminal-jump:hover,
+.terminal-jump:focus-visible {
+  opacity: 1;
+}
+
+.terminal-jump[hidden] {
+  display: none;
+}
+
+/* 変換中の文字。xterm の既定は黒地に白で、ライト配色では黒い箱に見える。ターミナルの色に合わせる（Orca #12729 #19742） */
+.terminal-host .xterm .composition-view {
+  background: var(--color-bg-terminal);
+  color: var(--color-text);
+}
+
+/*
+ * 分割中のペインを動かすつまみ（Orca の .pane-drag-handle）。上端の細い帯で、ペインが1枚なら出さない。
+ * 乗ったときだけ見せる（ターミナルの1行目を隠さない）
+
+
+/* 掴める幅は広く、見える線は ::after で細く描く（交差する区切り線がつながるよう、線を少し延ばす） */
+.terminal-divider {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  background: transparent;
+  touch-action: none;
+}
+
+.terminal-divider.is-vertical {
+  cursor: col-resize;
+}
+
+.terminal-divider.is-horizontal {
+  cursor: row-resize;
+}
+
+.terminal-divider::after {
+  position: absolute;
+  border-radius: 1px;
+  background: var(--color-border);
+  content: '';
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.terminal-divider.is-vertical::after {
+  top: calc(-1 * var(--divider-extension, 5px));
+  bottom: calc(-1 * var(--divider-extension, 5px));
+  left: 50%;
+  width: var(--divider-thickness, 3px);
+  transform: translateX(-50%);
+}
+
+.terminal-divider.is-horizontal::after {
+  top: 50%;
+  right: calc(-1 * var(--divider-extension, 5px));
+  left: calc(-1 * var(--divider-extension, 5px));
+  height: var(--divider-thickness, 3px);
+  transform: translateY(-50%);
+}
+
+.terminal-divider:hover::after,
+.terminal-divider.is-dragging::after {
+  background: var(--color-border-strong);
+}
+
+/* タブ列の右端の「右に分割／下に分割」。タブが増えて横に流れても見えるよう右に貼り付ける */
+.terminal-tabs__actions {
+  position: sticky;
+  right: 0;
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: auto;
+  padding-right: var(--space-3);
+  background: var(--color-bg-chrome);
+}
+
+.terminal-tabs__add:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.terminal-tabs__add:disabled:hover {
+  background: transparent;
+  color: var(--color-text-faint);
+}
+
+/* 分割しているタブのペインの数 */
+.terminal-tab__count {
+  flex: none;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.pane-menu {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.pane-menu__item {
+  display: flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  text-align: left;
+}
+
+.pane-menu__item:hover,
+.pane-menu__item:focus-visible {
+  background: var(--color-surface-hover);
+  outline: none;
+}
+
+.pane-menu__key {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.pane-menu__separator {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
+}
+
+/* the pane fills the right column of the workspace */
+.terminal-pane {
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}

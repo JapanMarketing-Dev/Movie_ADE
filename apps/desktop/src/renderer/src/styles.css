@@ -1,25 +1,5 @@
-/* Dark only (docs/01). Neutral grays around video so colors read correctly; one accent. */
-:root {
-  --bg: #0f1012;
-  --bg-1: #141518;
-  --bg-2: #1a1b1f;
-  --bg-3: #222328;
-  --line: #2a2c31;
-  --line-2: #34363c;
-  --text: #e7e7ea;
-  --text-2: #a4a6ad;
-  --text-3: #6f727a;
-  --accent: #ff4a3d;
-  --accent-dim: rgba(255, 74, 61, 0.14);
-  --ok: #4cc38a;
-  --warn: #f2b84b;
-  --info: #6aa8ff;
-  --radius: 8px;
-  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Segoe UI', 'Noto Sans JP',
-    'Yu Gothic UI', Roboto, sans-serif;
-  color-scheme: dark;
-}
+/* Screens written before the shell port (Home, Workspace, Record, …). Dark only (docs/01). */
+/* Colors, fonts and radii come from styles/tokens.css (the legacy names --bg, --text-2 … map onto the tokens). */
 
 * {
   box-sizing: border-box;
@@ -75,76 +55,7 @@ code,
   background-clip: content-box;
 }
 
-/* ---------- shell ---------- */
-.app {
-  display: grid;
-  grid-template-columns: 60px 1fr;
-  height: 100%;
-}
-.rail {
-  background: var(--bg-1);
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 44px 0 12px;
-  gap: 4px;
-  -webkit-app-region: drag;
-}
-.platform-win .rail,
-.platform-linux .rail {
-  padding-top: 12px;
-}
-.rail .logo {
-  width: 30px;
-  height: 30px;
-  margin-bottom: 14px;
-  border-radius: 7px;
-}
-.rail button {
-  -webkit-app-region: no-drag;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text-3);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  position: relative;
-}
-.rail button:hover {
-  color: var(--text);
-  background: var(--bg-2);
-}
-.rail button.active {
-  color: var(--text);
-  background: var(--bg-3);
-}
-.rail button.active::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-}
-.rail .rec-dot {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: pulse 1.2s infinite;
-}
-.rail .spacer {
-  flex: 1;
-}
+/* ---------- shell: see styles/shell.css ---------- */
 .main {
   position: relative;
   min-width: 0;
@@ -1044,41 +955,6 @@ textarea.input {
 .segmented button.on {
   background: var(--bg-3);
   color: var(--text);
-}
-.update-pill {
-  position: fixed;
-  right: 16px;
-  bottom: 14px;
-  z-index: 60;
-  border: 0;
-  height: 30px;
-  border-radius: 15px;
-  padding: 0 14px;
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
-}
-.update-pill.quiet {
-  background: var(--bg-3);
-  color: var(--text-2);
-  cursor: default;
-}
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 20px;
-  transform: translateX(-50%);
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
-  padding: 8px 14px;
-  border-radius: 9px;
-  z-index: 70;
-  max-width: 70vw;
 }
 .teleprompter {
   height: 100%;

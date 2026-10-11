@@ -1,7 +1,6 @@
 // The single IPC channel registry. Every channel the renderer may use is declared here with its types;
 // the preload exposes only these names and main registers a handler for every invoke channel.
 import type {
-  AgentActivity,
   AnalysisJob,
   AnalysisStatus,
   TakeCursorInfo,
@@ -24,8 +23,6 @@ import type {
   ProjectInfo,
   ProjectSnapshot,
   PromptButton,
-  PtyInfo,
-  PtySpawnOptions,
   RecentProject,
   ReviewItem,
   SettingsDoc,
@@ -37,6 +34,17 @@ import type {
   ValidationResult,
   Variant,
 } from './types';
+import type {
+  AgentSendRequest,
+  AgentSendResult,
+  AgentStateInfo,
+  AgentTabInfo,
+  TerminalAttachInfo,
+  TerminalCreateOptions,
+  TerminalSessionInfo,
+  TerminalSize,
+  TerminalTabInfo,
+} from './terminal';
 
 /** renderer -> main, request/response (ipcRenderer.invoke / ipcMain.handle) */
 export interface InvokeMap {
@@ -58,9 +66,23 @@ export interface InvokeMap {
 
   'templates:list': { args: []; result: TemplateInfo[] };
 
-  'pty:spawn': { args: [opts: PtySpawnOptions]; result: PtyInfo };
-  'pty:kill': { args: [id: string]; result: void };
-  'pty:list': { args: []; result: PtyInfo[] };
+  'terminal:create': { args: [opts: TerminalCreateOptions]; result: TerminalTabInfo };
+  'terminal:close': { args: [id: string]; result: void };
+  'terminal:list': { args: []; result: TerminalSessionInfo[] };
+  /** re-attach to a live terminal after a renderer reload (recent output + size); null when it has exited */
+  'terminal:attach': { args: [id: string]; result: TerminalAttachInfo | null };
+  /** the shell's current folder (a split pane starts there) */
+  'terminal:cwd': { args: [id: string]; result: string | null };
+  'terminal:agentState': { args: [id: string]; result: AgentStateInfo };
+  'terminal:writeClipboard': { args: [text: string]; result: void };
+  /** OSC 52 copy from a program in the terminal; written only while the window has focus */
+  'terminal:programCopy': { args: [id: string, text: string]; result: boolean };
+  /** Ctrl+V on Windows / Linux: main runs the OS paste into the focused terminal */
+  'terminal:paste': { args: []; result: boolean };
+  /** every terminal tab with its agent state (footer, tab dots) */
+  'agent:tabs': { args: []; result: AgentTabInfo[] };
+  /** paste text into an agent (bracketed paste, verify, Enter) */
+  'agent:send': { args: [req: AgentSendRequest]; result: AgentSendResult };
 
   'agents:list': { args: []; result: AgentStatus[] };
   'prompts:list': { args: [dir?: string]; result: PromptButton[] };
@@ -134,9 +156,14 @@ export interface InvokeMap {
 
 /** renderer -> main, fire and forget (ipcRenderer.send / ipcMain.on) */
 export interface SendMap {
-  'pty:write': [id: string, data: string];
-  'pty:resize': [id: string, cols: number, rows: number];
-  'pty:paste': [id: string, text: string];
+  'terminal:write': [id: string, data: string];
+  'terminal:resize': [id: string, size: TerminalSize];
+  /** characters of terminal:data the renderer has drawn (main's flow control) */
+  'terminal:ack': [id: string, chars: number];
+  /** terminals currently on screen (others flush output every 250 ms) */
+  'terminal:visible': [ids: string[]];
+  /** visible text of a terminal (agent state detection) */
+  'terminal:screen': [id: string, text: string];
   'project:watch': [dir: string | null];
   'renderer:ready': [];
   'analysis:progress': [jobId: string, fraction: number];
@@ -144,9 +171,10 @@ export interface SendMap {
 
 /** main -> renderer events (webContents.send / ipcRenderer.on) */
 export interface EventMap {
-  'pty:data': [id: string, data: string];
-  'pty:exit': [id: string, code: number];
-  'pty:activity': [id: string, activity: AgentActivity];
+  'terminal:data': [id: string, data: string];
+  'terminal:exit': [id: string, code: number];
+  /** a tab's agent / state / title changed */
+  'agent:state': [info: AgentTabInfo];
   'project:changed': [dir: string, what: 'timeline' | 'status' | 'renders' | 'project'];
   'settings:changed': [];
   'tools:progress': [name: string, received: number, total?: number];
@@ -169,7 +197,9 @@ const invoke: Record<InvokeChannel, true> = {
   'project:recent': true, 'project:create': true, 'project:open': true, 'project:snapshot': true,
   'project:review': true, 'project:readScript': true, 'project:cli': true,
   'templates:list': true,
-  'pty:spawn': true, 'pty:kill': true, 'pty:list': true,
+  'terminal:create': true, 'terminal:close': true, 'terminal:list': true, 'terminal:attach': true, 'terminal:cwd': true,
+  'terminal:agentState': true, 'terminal:writeClipboard': true, 'terminal:programCopy': true, 'terminal:paste': true,
+  'agent:tabs': true, 'agent:send': true,
   'agents:list': true, 'prompts:list': true, 'prompts:render': true,
   'tools:status': true, 'tools:install': true,
   'archive:list': true, 'archive:get': true, 'archive:useAsReference': true,
@@ -187,10 +217,11 @@ const invoke: Record<InvokeChannel, true> = {
   'secrets:status': true, 'secrets:set': true,
 };
 const send: Record<SendChannel, true> = {
-  'pty:write': true, 'pty:resize': true, 'pty:paste': true, 'project:watch': true, 'renderer:ready': true, 'analysis:progress': true,
+  'terminal:write': true, 'terminal:resize': true, 'terminal:ack': true, 'terminal:visible': true, 'terminal:screen': true,
+  'project:watch': true, 'renderer:ready': true, 'analysis:progress': true,
 };
 const events: Record<EventChannel, true> = {
-  'pty:data': true, 'pty:exit': true, 'pty:activity': true, 'project:changed': true, 'settings:changed': true,
+  'terminal:data': true, 'terminal:exit': true, 'agent:state': true, 'project:changed': true, 'settings:changed': true,
   'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true, 'analysis:state': true,
 };
 

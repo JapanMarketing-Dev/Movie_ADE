@@ -641,6 +641,8 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
   Ids already in the timeline are skipped (the app owns these masks); options `--source --kinds email,phone,token
   --kind pixelate|blur|fill --dry-run`; output `{ variant, added, existing, masks, sources, files, dryRun, changed, warnings }`.
   `status`/`next` treat a todo `masks` step as done when the timeline already has `mask_pii_*` masks.
+- `doctor`: `agents` lists the catalog agents that are installed or `popular` (detectAgents with the CLI's PATH, which the
+  app sets to the login shell's). Settings `agents.order` / prompt `agent` accept any lower-case catalog id or `custom:<name>`.
 History: `.solocut/history.jsonl` (main) / `.solocut/history.<variant>.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.

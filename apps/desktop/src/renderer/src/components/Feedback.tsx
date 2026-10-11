@@ -8,7 +8,7 @@ import { boxFrom, boxPoints, contentRect, feedbackAgentMessage, frameAt, normali
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { SAMPLE_RATE, startPcmCapture, type PcmCapture } from '../lib/pcm-capture';
-import { terminals } from '../lib/terminals';
+import { sendToAgent } from '../terminal/agentSend';
 
 type Tool = 'pen' | 'box' | 'text';
 type Shape =
@@ -338,11 +338,14 @@ export function FeedbackReview({ dir, variant, data, lang, toast, onClose }: { d
   };
 
   const send = async () => {
-    const tab = terminals.targetFor();
-    if (!tab) return toast(t('prompts.noTerminal'));
     if (!(await save())) return;
-    terminals.paste(tab, feedbackAgentMessage(data.dir, lang));
-    toast(`${t('prompts.sent')} → ${tab.title}`);
+    // main picks the project's agent terminal and pastes + checks + presses Enter; with none running it opens the
+    // default agent and sends once its input box is ready
+    const res = await sendToAgent({ text: feedbackAgentMessage(data.dir, lang), projectDir: dir }, { launch: null }).catch(
+      (e: unknown) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }),
+    );
+    if (!res.ok) return toast(res.message);
+    toast(t('prompts.sent'));
     onClose();
   };
 

@@ -251,6 +251,18 @@ export function Record({
     onIngested();
   };
 
+  // the shell's title-bar Record button (and ⌘⇧R) toggles recording through this event
+  const toggleRef = useRef<() => void>(() => undefined);
+  toggleRef.current = () => {
+    if (status.state === 'recording') void stop();
+    else if (status.state === 'idle' && count === null && !ingesting) void start();
+  };
+  useEffect(() => {
+    const on = () => toggleRef.current();
+    window.addEventListener('solocut:record-toggle', on);
+    return () => window.removeEventListener('solocut:record-toggle', on);
+  }, []);
+
   const askAccess = async () => {
     await api.invoke('app:askMediaAccess', 'camera');
     await api.invoke('app:askMediaAccess', 'microphone');

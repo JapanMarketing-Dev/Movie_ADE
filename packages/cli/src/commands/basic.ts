@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { SCHEMA_VERSION, emptyTimeline, summarize, validateTimeline, type Timeline } from '@solocut/core';
-import { detectAgents } from '@solocut/agents';
+import { AGENTS, detectAgents } from '@solocut/agents';
 import {
   getSetting, loadPromptsWithErrors, loadSettings, loadSettingsWithErrors, parseCliValue, renderPrompt, setSetting,
   settingsJsonSchema, settingsPath, SettingsError,
@@ -201,7 +201,11 @@ export async function cmdVersion(ctx: Ctx, args: string[]): Promise<void> {
 
 export async function cmdDoctor(ctx: Ctx, args: string[]): Promise<void> {
   opts(args, {}, { max: 0 });
-  const [tools, agents] = await Promise.all([toolStatus(), detectAgents()]);
+  // the 47-agent catalog: list what is installed plus the popular ones (the CLI's PATH: the app passes the login shell's)
+  const pathKey = Object.keys(ctx.io.env).find((k) => k.toUpperCase() === 'PATH');
+  const [tools, detected] = await Promise.all([toolStatus(), detectAgents(pathKey ? { path: ctx.io.env[pathKey] ?? '' } : {})]);
+  const popular = new Set(AGENTS.filter((a) => a.popular).map((a) => a.id));
+  const agents = detected.filter((a) => a.installed || popular.has(a.id));
   const settings = loadSettingsWithErrors();
   const prompts = loadPromptsWithErrors();
   const templates = listTemplatesWithErrors();

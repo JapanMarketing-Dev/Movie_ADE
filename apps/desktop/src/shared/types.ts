@@ -115,20 +115,7 @@ export interface ProjectSnapshot {
   errors: string[];
 }
 
-export interface PtySpawnOptions {
-  cwd: string;
-  agentId?: string;
-  command?: string;
-  cols: number;
-  rows: number;
-}
-export interface PtyInfo {
-  id: string;
-  title: string;
-  agentId?: string;
-  pid: number;
-}
-export type AgentActivity = 'starting' | 'working' | 'waiting' | 'exited';
+// terminal and agent-state types: shared/terminal.ts
 
 export interface AgentStatus {
   id: string;

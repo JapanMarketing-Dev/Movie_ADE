@@ -7,7 +7,7 @@ import { stripJsonComments } from './settings.js';
 // Ready-made prompts (docs/13_prompts_and_autopilot.md). Defaults ⊕ ~/.solocut/prompts.json ⊕ <project>/.solocut/prompts.json.
 
 const I18n = z.object({ ja: z.string().optional(), en: z.string().optional() });
-const AgentRef = z.string().regex(/^(default|claude|codex|gemini|opencode|cursor|copilot|custom:[A-Za-z0-9_.-]+)$/);
+const AgentRef = z.string().regex(/^(default|[a-z0-9][a-z0-9-]*|custom:[A-Za-z0-9_.-]+)$/);
 
 export const PromptSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),

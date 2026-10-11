@@ -96,7 +96,7 @@ export function Home({ info, onOpen, toast }: { info: AppInfo | null; onOpen: (d
         </div>
         <div className="field" style={{ marginBottom: 14 }}>
           <label>{t('home.titleLabel')}</label>
-          <input className="input" type="text" value={title} placeholder={t('home.titlePlaceholder')} onChange={(e) => setTitle(e.target.value)} />
+          <input className="input home-new-title" type="text" value={title} placeholder={t('home.titlePlaceholder')} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div className="field" style={{ marginBottom: 14 }}>
           <label>{t('home.template')}</label>

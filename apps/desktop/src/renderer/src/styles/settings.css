@@ -1,0 +1,916 @@
+/*
+ * Settings page (VS Code / Orca style): section list on the left, search + every section stacked on the right.
+ * Ported from Ferret src/renderer/styles/settings.css and the st-* controls of review.css (MIT).
+ */
+
+.rv-select {
+  position: relative;
+  display: inline-flex;
+}
+.rv-select::after {
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--color-text-muted);
+  border-bottom: 1.5px solid var(--color-text-muted);
+  content: '';
+  pointer-events: none;
+  transform: translateY(-70%) rotate(45deg);
+}
+.rv-select:has(select:disabled)::after {
+  opacity: 0.4;
+}
+.st-head {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  background: var(--color-bg-elevated);
+}
+.st-head h2 {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  gap: var(--space-4);
+}
+.st-head__icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  place-items: center;
+}
+.st-lock {
+  display: flex;
+  align-items: center;
+  margin: 0 var(--space-6) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-quiet);
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+.st-section {
+  padding: var(--space-5) var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+.st-section__title {
+  display: flex;
+  align-items: center;
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  gap: var(--space-4);
+}
+.st-section__icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  place-items: center;
+}
+.st-section__body {
+  display: grid;
+  padding-left: calc(22px + var(--space-4));
+  gap: var(--space-2);
+}
+.st-row {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+.st-row__label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  gap: var(--space-3);
+}
+.st-row[data-disabled] .st-row__label {
+  color: var(--color-text-muted);
+}
+.st-row--switch {
+  cursor: pointer;
+}
+.st-row[data-disabled] {
+  cursor: default;
+}
+.st-select {
+  width: 200px;
+  height: 28px;
+  padding: 0 var(--space-8) 0 var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  appearance: none;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+}
+.st-select:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+}
+.st-switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  flex: none;
+  margin: 0;
+  border-radius: var(--radius-pill);
+  appearance: none;
+  background: var(--color-surface-active);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+.st-switch::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--color-text-muted);
+  box-shadow: var(--shadow-sm);
+  content: '';
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.st-switch:checked {
+  background: var(--color-primary);
+}
+.st-switch:checked::before {
+  background: var(--color-text);
+  transform: translateX(12px);
+}
+.st-switch:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.st-note {
+  display: flex;
+  align-items: center;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  gap: var(--space-2);
+  line-height: var(--line-height-normal);
+}
+.st-note--ok {
+  color: var(--color-success);
+}
+.st-note--warn {
+  color: var(--color-warning);
+}
+.st-note--action {
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.st-note--action > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.st-note--progress {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.st-note--progress > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.st-note__buttons {
+  display: inline-flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.st-key {
+  margin-top: var(--space-1);
+}
+.st-key summary {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+  list-style: none;
+}
+.st-key summary::-webkit-details-marker {
+  display: none;
+}
+.st-key summary:hover {
+  color: var(--color-text);
+}
+.st-key__on {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-success);
+}
+.st-key__body {
+  display: grid;
+  margin-top: var(--space-4);
+  gap: var(--space-4);
+}
+.st-key__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+.st-endpoint,
+.st-keystep {
+  display: grid;
+  gap: var(--space-2);
+}
+.st-keystep .st-key__actions {
+  align-items: center;
+}
+.st-keystep .text-field,
+.st-endpoint > .st-row .text-field {
+  width: min(100%, 360px);
+}
+.st-row.st-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+.st-row--stack .rv-select,
+.st-row--stack .st-select {
+  width: 100%;
+  max-width: 520px;
+}
+.st-advanced__chevron {
+  transition: transform var(--duration-fast, 120ms) ease;
+}
+.st-advanced[open] .st-advanced__chevron {
+  transform: rotate(90deg);
+}
+.st-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  margin-right: auto;
+  gap: var(--space-4);
+}
+.st-links .st-link {
+  margin-right: 0;
+}
+.st-link {
+  display: inline-flex;
+  align-items: center;
+  margin-right: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.st-link:hover {
+  color: var(--color-text);
+}
+.st-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.st-check .st-note {
+  margin: 0;
+}
+.st-agent {
+  display: grid;
+  padding: var(--space-3) 0;
+  gap: var(--space-3);
+}
+.st-agent__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 5fr);
+  gap: var(--space-3);
+}
+.st-agent__reset {
+  display: flex;
+  justify-content: flex-end;
+}
+.st-prompt {
+  display: grid;
+  padding-top: var(--space-4);
+  gap: var(--space-3);
+}
+.st-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+.st-textarea:focus {
+  border-color: var(--color-border-focus);
+  outline: none;
+}
+.st-textarea::placeholder {
+  color: var(--color-text-faint);
+}
+.st-textarea--prompt {
+  min-height: calc(8lh + var(--space-3) * 2);
+  max-height: 70vh;
+  field-sizing: content;
+}
+.st-prompt__preview {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.st-layout__panel {
+  display: grid;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.st-layout__items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-5);
+}
+.st-layout__item {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+.st-page {
+  display: grid;
+  overflow: hidden;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 200px minmax(0, 1fr);
+  background: var(--color-bg-panel);
+}
+
+.st-page__nav {
+  display: flex;
+  overflow-y: auto;
+  flex-direction: column;
+  padding: var(--space-6) var(--space-4);
+  border-right: 1px solid var(--color-border);
+  gap: var(--space-1);
+}
+
+.st-page__title {
+  margin: 0 0 var(--space-4);
+  padding: 0 var(--space-4);
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+.st-page__navitem {
+  height: 28px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-md);
+  text-align: left;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.st-page__navitem:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.st-page__navitem[aria-current='true'] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  font-weight: var(--font-weight-medium);
+}
+
+/* 検索で外れた節は、一覧では薄くして押せなくする（場所は動かさない） */
+.st-page__navitem:disabled {
+  color: var(--color-text-faint);
+  cursor: default;
+  opacity: 0.5;
+}
+
+.st-page__main {
+  display: grid;
+  overflow: hidden;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.st-page__search {
+  padding: var(--space-5) var(--space-7) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.st-page__search .text-field {
+  max-width: 640px;
+}
+
+.st-page__scroll {
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-7) var(--space-9);
+}
+
+/* 本文は読みやすい幅に収める（横に広いウィンドウでも行が伸びすぎない） */
+.st-page__scroll > * {
+  max-width: 720px;
+}
+
+.st-page__autosave {
+  margin: 0 0 var(--space-2);
+}
+
+.st-page__section {
+  padding: var(--space-6) 0;
+  border-bottom: 1px solid var(--color-border);
+  scroll-margin-top: var(--space-4);
+}
+
+.st-page__section:last-child {
+  border-bottom: 0;
+}
+
+.st-page__heading {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+.st-page__body,
+.st-page__group {
+  display: grid;
+  /* 1列を親の幅に固定する。既定の auto だと、折り返さない子（コマンドの表示など）の幅まで列が広がり、右が切れる */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.st-page__section {
+  min-width: 0;
+}
+
+/* 自分で section を出す欄（アカウント・GitHub・配置）は、ページでは枠と左の字下げを外す */
+.st-page__section .st-section {
+  padding: 0;
+  border-top: 0;
+}
+
+.st-page__section .st-section__title {
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-lg);
+}
+
+.st-page__section .st-section__icon {
+  display: none;
+}
+
+.st-page__section .st-section__body {
+  padding-left: 0;
+}
+
+.st-page__empty {
+  margin: var(--space-8) 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-md);
+}
+
+.st-about__version {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* 録画中の注意は、ページの先頭で幅いっぱいに出す */
+.st-page__scroll > .st-lock {
+  margin: 0 0 var(--space-4);
+}
+
+
+/*
+ * 中央のペインは狭くなりうる（ターミナルを右に置いたとき）。
+ * 幅が足りないときは、VS Code と同じく節の一覧を上の横並びに畳み、行は折り返す。
+ */
+/* @container は子孫にしか効かないので、幅を測る器はページの親（中央のペイン）にする */
+.st-host {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  container-type: inline-size;
+}
+
+.st-page__scroll {
+  overflow-x: hidden;
+}
+
+.st-page .st-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.st-page .st-row > .st-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@container (max-width: 680px) {
+  .st-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  /* 横へ流すと右端の項目が見えなくなるので、折り返して全部見せる */
+  .st-page__nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: var(--space-3) var(--space-5);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+    scrollbar-width: none;
+  }
+
+  .st-page__title {
+    display: none;
+  }
+
+  .st-page__navitem {
+    flex: none;
+    font-size: var(--font-size-sm);
+  }
+
+  .st-page__search {
+    padding: var(--space-4) var(--space-5) var(--space-3);
+  }
+
+  .st-page__scroll {
+    padding: var(--space-3) var(--space-5) var(--space-8);
+  }
+}
+
+/* ── Agents 節（Orca の Agents 設定ページにならう）──────── */
+
+.st-page__subheading {
+  margin: var(--space-6) 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+}
+
+/* 起動するエージェント。選んだ順の番号を右に出す */
+.st-agent-startup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.st-agent-pick {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  padding: 0 var(--space-4) 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+}
+
+.st-agent-pick[data-checked] {
+  border-color: var(--color-text-muted);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.st-agent-pick > input {
+  margin: 0;
+}
+
+.st-agent-pick__order {
+  min-width: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-active);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  line-height: 16px;
+  text-align: center;
+}
+
+.st-agent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-3);
+}
+
+.st-agent-row[data-disabled] .st-agent-row__name,
+.st-agent-row[data-disabled] .st-agent-row__details {
+  opacity: 0.55;
+}
+
+.st-agent-row__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.st-agent-row__name {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+}
+
+.st-agent-row__namefield {
+  flex: 1;
+  min-width: 0;
+}
+
+/* カスタムエージェントのアイコンの文字（1〜2文字） */
+.st-agent-row__iconfield {
+  width: 3.5em;
+  flex: none;
+  text-align: center;
+}
+
+.st-agent-row__state {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.st-agent-row__state.is-missing {
+  color: var(--color-warning);
+}
+
+.st-agent-row__state a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.st-agent-row__details {
+  min-width: 0;
+}
+
+.st-agent-row__details > summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+
+.st-agent-row__details > summary > code {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-agent-row__details[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
+/* ── 設定: settings.json の欄（SettingsFileCard / SettingsJsonEditor） ── */
+
+.st-page__sections {
+  min-width: 0;
+}
+
+.st-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-4) 0 var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2);
+}
+
+.st-file__head {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  gap: var(--space-3);
+}
+
+.st-file__path,
+.st-json__path {
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-file__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.st-file__error code {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.st-file__prompt {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.st-json {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: var(--space-2);
+  gap: var(--space-2);
+}
+
+.st-json__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.st-json__editor {
+  height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* Ferret の設定を変える skill（AgentSkillCard）。設定の settings.json の欄と、初回セットアップの Agent の手順 */
+.agent-skill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.agent-skill__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.agent-skill__title {
+  font-weight: 600;
+}
+
+.agent-skill__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-success);
+}
+
+/* 拡張機能の「Chrome ウェブストアから入れる」の入力欄は、ボタンの残りの幅を使う */
+.st-page .st-row > .st-row__grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 拡張機能を足すボタンは左から並べる（折り返しても揃える） */
+.st-page .st-row.st-row--buttons {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: var(--space-2);
+}
+
+/* 設定の「Agent への依頼」（AgentRequestsSection.tsx） */
+.agent-requests__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-requests__item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.agent-requests__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+
+.agent-requests__title {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-requests__edited {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.agent-requests__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.agent-requests__text {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+.agent-requests__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.agent-requests__add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.agent-requests__item.is-hidden {
+  opacity: 0.6;
+}
+
+.agent-requests__add > summary {
+  cursor: pointer;
+}
+
+/* 設定の「ブラウザのログイン」：プロジェクトごとの組の名前 */
+.browser-profiles__field {
+  width: 200px;
+  flex: none;
+}

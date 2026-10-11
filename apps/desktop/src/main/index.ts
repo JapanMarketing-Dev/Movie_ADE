@@ -1,16 +1,21 @@
 import './env-setup';
-import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, Menu, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, Menu, session, shell, type WebContents } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AppInfo, CaptureSource, SettingsDoc } from '../shared/types';
 import { assertAllHandled, emit, handle, on, setTrustedOrigin } from './ipc';
-import { cliScript, preloadPath, rendererUrl } from './paths';
-import { cliAvailable, runCli } from './services/cli';
+import { cliBinDir, cliScript, preloadPath, rendererUrl } from './paths';
+import { cliAvailable, runCli, solocutEnv } from './services/cli';
 import { allowMediaRoot, handleMediaProtocol, registerMediaScheme } from './services/media-protocol';
 import { askMediaAccess, openScreenRecordingSettings, permissionState } from './services/permissions';
 import * as platform from './services/platform';
 import * as project from './services/project';
-import { PtyManager } from './services/pty';
+import { TerminalManager } from './terminal/terminal';
+import { setMessageLanguage } from './terminal/messages';
+import { AgentWatch } from './agent/watch';
+import { sendAgentRequest } from './agent/request';
+import { trustWorkspace } from './agentWorkspaceTrust';
+import { agentPrefsFromSettings } from '@solocut/agents';
 import * as recorder from './services/recorder';
 import { initSentry, sentryEnabled } from './services/sentry';
 import { Updater } from './update/updater';
@@ -49,11 +54,25 @@ let settingsWatcher: FSWatcher | null = null;
 
 const mainWc = (): WebContents | null => mainWindow?.webContents ?? null;
 
-const ptys = new PtyManager({
-  data: (id, d) => emit(mainWc(), 'pty:data', id, d),
-  exit: (id, code) => emit(mainWc(), 'pty:exit', id, code),
-  activity: (id, a) => emit(mainWc(), 'pty:activity', id, a),
+// Agent terminals (ported from Ferret's TerminalManager): node-pty shells with the bundled CLI first on PATH.
+const terminals = new TerminalManager(
+  (id, d) => emit(mainWc(), 'terminal:data', id, d),
+  (id, code) => {
+    agentWatch.forget(id);
+    emit(mainWc(), 'terminal:exit', id, code);
+  },
+);
+terminals.settings = () => agentPrefsFromSettings(platform.getPath(platform.settingsObject(), 'agents'));
+// only what Solocut adds (bundled CLI + login-shell PATH, SOLOCUT_*, saved keys); the inherited env is filtered there
+terminals.appEnv = () => solocutEnv({});
+terminals.cliBin = () => cliBinDir();
+terminals.isProjectDir = (dir) => existsSync(join(dir, 'solocut.json'));
+terminals.trustWorkspace = (agentId, dir, env) => trustWorkspace(agentId, dir, env);
+setMessageLanguage(() => safe(() => platform.language(), 'ja'));
+const agentWatch = new AgentWatch(terminals, (info) => emit(mainWc(), 'agent:state', info), {
+  focused: () => mainWindow?.isFocused() ?? false,
 });
+agentWatch.start();
 const analysis = new AnalysisRunner({
   emit: (st) => emit(mainWc(), 'analysis:state', st),
   createWindow: () => {
@@ -275,23 +294,36 @@ function registerIpc(): void {
 
   handle('templates:list', () => safe(() => platform.templates(), []));
 
-  handle('pty:spawn', (_e, o) => {
-    let command = o.command;
-    let title = 'shell';
-    if (o.agentId) {
-      const c = platform.agentCommand(o.agentId);
-      if (c) {
-        command = c;
-        title = o.agentId;
-      }
-    }
-    return ptys.spawn({ ...o, title, ...(command ? { command } : {}) });
+  handle('terminal:create', (_e, o) => terminals.create(o));
+  handle('terminal:close', (_e, id) => {
+    agentWatch.forget(id);
+    terminals.close(id);
   });
-  handle('pty:kill', (_e, id) => ptys.kill(id));
-  handle('pty:list', () => ptys.list());
-  on('pty:write', (_e, id, data) => ptys.write(id, data));
-  on('pty:resize', (_e, id, c, r) => ptys.resize(id, c, r));
-  on('pty:paste', (_e, id, text) => ptys.paste(id, text));
+  handle('terminal:list', () => terminals.list());
+  handle('terminal:attach', (_e, id) => terminals.attach(id));
+  handle('terminal:cwd', (_e, id) => terminals.currentCwd(id));
+  handle('terminal:agentState', (_e, id) => terminals.agentState(id));
+  handle('terminal:writeClipboard', (_e, text) => {
+    if (typeof text === 'string' && text.length <= 10 * 1024 * 1024) clipboard.writeText(text);
+  });
+  // OSC 52: a program in the terminal copies without asking; only while Solocut has focus (not a background tab
+  // writing to the clipboard while the user works elsewhere)
+  handle('terminal:programCopy', (_e, _id, text) => {
+    if (typeof text !== 'string' || text.length > 1024 * 1024 || !mainWindow?.isFocused()) return false;
+    clipboard.writeText(text);
+    return true;
+  });
+  handle('terminal:paste', (e) => {
+    e.sender.paste();
+    return true;
+  });
+  handle('agent:tabs', () => agentWatch.tabs());
+  handle('agent:send', (_e, req) => sendAgentRequest(terminals, req));
+  on('terminal:write', (_e, id, data) => terminals.write(id, data));
+  on('terminal:resize', (_e, id, size) => terminals.resize(id, size));
+  on('terminal:ack', (_e, id, chars) => terminals.ack(id, chars));
+  on('terminal:visible', (_e, ids) => terminals.setVisible(Array.isArray(ids) ? ids : []));
+  on('terminal:screen', (_e, id, text) => terminals.updateScreen(id, String(text)));
 
   handle('agents:list', () => safeAsync(() => platform.agents(), []));
   handle('prompts:list', (_e, dir) => safe(() => platform.promptButtons(dir), []));
@@ -449,8 +481,10 @@ function registerIpc(): void {
   on('project:watch', (_e, dir) => {
     if (dir) allowMediaRoot(dir);
     watcher.watch(dir);
+    terminals.setCwd(dir);
   });
-  on('renderer:ready', () => undefined);
+  // a reloaded renderer never acks what was sent to the old page: start the flow-control count over
+  on('renderer:ready', () => terminals.resetFlow());
 
   assertAllHandled();
 }
@@ -547,13 +581,27 @@ app.whenReady().then(() => {
   });
 });
 
+// End the terminals (and the agents in them) before Node's teardown, waiting for node-pty's exit callbacks: one
+// arriving during environment cleanup aborts the process (Ferret's note on node-pty's ThreadSafeFunction).
+let terminalsClosed = false;
+app.on('before-quit', (e) => {
+  if (terminalsClosed || terminals.pendingCount() === 0) return;
+  e.preventDefault();
+  agentWatch.stop();
+  void terminals.disposeAllAndWait().finally(() => {
+    terminalsClosed = true;
+    app.quit();
+  });
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
-  ptys.killAll();
+  agentWatch.stop();
+  terminals.disposeAll();
   watcher.close();
   settingsWatcher?.close();
   stopAllCursorLogs();

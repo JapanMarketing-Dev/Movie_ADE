@@ -1,6 +1,25 @@
 import { execFile } from 'node:child_process';
 import { accessSync, constants as fsc, statSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
+import {
+  AGENT_CATALOG,
+  BUILTIN_AGENTS,
+  isBuiltinAgent,
+  sanitizeAgentPreferences,
+  type AgentPreferences,
+  type BuiltinAgent,
+  type TuiAgent,
+} from './catalog';
+import { agentInstallCommand } from './install';
+import { buildAgentLaunchCommand, quoteStartupArg, type AgentStartupShell } from './launch';
+import { resolveAgentLaunchPolicy, type AgentLaunchRefusal } from './policy';
+
+export * from './catalog';
+export * from './launch';
+export * from './install';
+export * from './policy';
+export * from './shellQuote';
+export { launchError, type LaunchErrorKey } from './messages';
 
 // Agent CLI catalog (docs/04 「エージェントCLIの管理」). Arguments change between versions, so the catalog can be
 // replaced from the distribution manifest; keep everything data, not code.
@@ -25,6 +44,10 @@ export interface AgentDef {
   /** Regex sources (case-insensitive) that match a short usage-limit status line. */
   limitPatterns: string[];
   homepage?: string;
+  /** shown first in menus and onboarding (catalog `popular`) */
+  popular?: boolean;
+  /** executable name, install and arguments were checked against official docs (catalog `verified`) */
+  verified?: boolean;
 }
 
 const npmInstall = (pkg: string): Record<HostOs, string> => ({
@@ -33,7 +56,8 @@ const npmInstall = (pkg: string): Record<HostOs, string> => ({
   linux: `npm install -g ${pkg}`,
 });
 
-export const AGENTS: AgentDef[] = [
+/** Agents with hand-tuned definitions (print mode, usage-limit patterns, update commands). */
+const CORE_AGENTS: AgentDef[] = [
   {
     id: 'claude',
     label: 'Claude Code',
@@ -131,6 +155,126 @@ export const AGENTS: AgentDef[] = [
     homepage: 'https://github.com/github/copilot-cli',
   },
 ];
+
+/** AgentDef for a catalog agent without a hand-tuned definition. */
+export function catalogAgentDef(id: BuiltinAgent): AgentDef {
+  const e = AGENT_CATALOG[id];
+  const [command = e.detectCmd, ...args] = splitCommandLine(e.launchCmd ?? e.detectCmd);
+  return {
+    id,
+    label: e.label,
+    command,
+    ...(args.length ? { args } : {}),
+    detect: [e.detectCmd, ...(e.aliases ?? [])],
+    install: {
+      mac: agentInstallCommand(id, 'darwin') ?? '',
+      linux: agentInstallCommand(id, 'linux') ?? '',
+      win: agentInstallCommand(id, 'win32') ?? '',
+    },
+    versionArgs: ['--version'],
+    limitPatterns: [],
+    homepage: e.homepageUrl,
+    verified: e.verified,
+    popular: e.popular === true,
+  };
+}
+
+/**
+ * Every built-in agent (Ferret's catalog, ported from Orca's), in menu order: popular ones first. The six agents
+ * Solocut already knew keep their tuned definitions and gain the catalog's aliases, homepage and flags.
+ */
+export const AGENTS: AgentDef[] = BUILTIN_AGENTS.map((id) => {
+  const fromCatalog = catalogAgentDef(id);
+  const core = CORE_AGENTS.find((a) => a.id === id);
+  if (!core) return fromCatalog;
+  return {
+    ...core,
+    detect: [...new Set([...core.detect, ...fromCatalog.detect])],
+    homepage: core.homepage ?? fromCatalog.homepage,
+    verified: fromCatalog.verified,
+    popular: fromCatalog.popular === true,
+  } as AgentDef;
+});
+
+/**
+ * Agent preferences from Solocut's settings.json `agents` section. Accepts Ferret's shape (launch, customAgents,
+ * disabledAgents, startupAgents, skipPermissions, notify, restoreTerminals, windowsShell) and Solocut's
+ * `custom: [{ id: 'custom:x', label, command }]`.
+ */
+/**
+ * Solocut settings allow custom ids like `custom:My_Agent.v2`; the catalog's sanitizer only keeps
+ * `custom:[a-z0-9][a-z0-9-]{0,47}`. Map both sides through this so lookups by the settings id still match.
+ */
+export function catalogCustomId(id: string): string {
+  if (!id.startsWith('custom:')) return id;
+  const slug = id.slice('custom:'.length).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+/, '').slice(0, 48);
+  return `custom:${slug || 'agent'}`;
+}
+
+/**
+ * Solocut settings.json `agents` (order / custom[{id,label,command}] / failover, plus the optional
+ * `launch` overrides per agent and `skipPermissions`) → catalog AgentPreferences. Unknown or broken values fall
+ * back to the defaults (skipPermissions off).
+ */
+export function agentPrefsFromSettings(agents: unknown): AgentPreferences {
+  const a = (agents && typeof agents === 'object' ? agents : {}) as Record<string, unknown>;
+  const custom = Array.isArray(a.custom)
+    ? a.custom.flatMap((c) => {
+        if (!c || typeof c !== 'object') return [];
+        const r = c as Record<string, unknown>;
+        const [cmd = '', ...rest] = splitCommandLine(typeof r.command === 'string' ? r.command : '');
+        if (!cmd) return [];
+        return [{ id: typeof r.id === 'string' ? catalogCustomId(r.id) : r.id, name: typeof r.label === 'string' ? r.label : r.name, command: cmd, args: typeof r.args === 'string' ? r.args : rest.map((x) => quoteStartupArg(x, 'posix')).join(' ') }];
+      })
+    : [];
+  const prefs = sanitizeAgentPreferences({ ...a, customAgents: [...(Array.isArray(a.customAgents) ? a.customAgents : []), ...custom] });
+  // Ferret turns this on by default after its onboarding consent; Solocut needs an explicit `skipPermissions: true`.
+  return { ...prefs, skipPermissions: a.skipPermissions === true };
+}
+
+export type AgentLaunchLine =
+  | { ok: true; line: string; argv: string[]; trustFolder: boolean; resumed?: true }
+  | { ok: false; reason: AgentLaunchRefusal | 'unknown-agent'; error: string };
+
+/** argv → one line for the shell (PowerShell needs the call operator when the program is quoted). */
+export function argvToLine(argv: readonly string[], shell: AgentStartupShell): string {
+  const [head = '', ...rest] = argv;
+  const quotedHead = quoteStartupArg(head, shell);
+  const first = shell === 'powershell' && quotedHead !== head ? `& ${quotedHead}` : quotedHead;
+  return [first, ...rest.map((x) => quoteStartupArg(x, shell))].join(' ');
+}
+
+/**
+ * The line typed into an agent terminal to start `agent` (built-in or custom), applying the launch policy:
+ * yolo / trust arguments only when `skipPermissions` is on (and trust only inside a registered project folder),
+ * user arguments as written, disguised permission flags refused. `resume` continues the last conversation
+ * (Claude Code `--continue`, Codex `resume --last`).
+ */
+export function agentLaunchLine(
+  agent: TuiAgent | string,
+  prefs: AgentPreferences,
+  o: { shell: AgentStartupShell; projectId?: string | null; resume?: boolean },
+): AgentLaunchLine {
+  if (isBuiltinAgent(agent)) {
+    const launch = prefs.launch[agent];
+    const r = resolveAgentLaunchPolicy({
+      agent,
+      command: launch?.command ?? '',
+      args: launch?.args ?? '',
+      projectId: o.projectId ?? null,
+      skipPermissions: prefs.skipPermissions,
+      shell: o.shell,
+      ...(o.resume ? { resume: true } : {}),
+    });
+    if (!r.ok) return r;
+    return { ok: true, line: argvToLine(r.argv, o.shell), argv: r.argv, trustFolder: r.trustFolder, ...(r.resumed ? { resumed: true as const } : {}) };
+  }
+  const custom = prefs.customAgents.find((c) => c.id === catalogCustomId(agent));
+  if (!custom) return { ok: false, reason: 'unknown-agent', error: `unknown agent: ${agent}` };
+  const r = buildAgentLaunchCommand(custom.id, custom, o.shell);
+  if (!r.ok) return { ok: false, reason: 'no-command', error: r.error };
+  return { ok: true, line: r.command, argv: splitCommandLine(r.command), trustFolder: false };
+}
 
 export function getAgent(id: string, custom: { id: string; label: string; command: string; printMode?: string[] }[] = []): AgentDef | undefined {
   const builtin = AGENTS.find((a) => a.id === id);

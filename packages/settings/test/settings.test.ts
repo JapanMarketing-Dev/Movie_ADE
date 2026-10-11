@@ -146,6 +146,10 @@ describe('get/set by dot path', () => {
     expect(loadSettings().imageGen.providers.mine).toEqual({ via: 'api', apiKeyRef: 'mine' });
   });
 
+  it('agents.order accepts any catalog agent id and custom ones', () => {
+    expect(setSetting('agents.order', ['aider', 'claude', 'custom:mine']).agents.order).toEqual(['aider', 'claude', 'custom:mine']);
+  });
+
   it('decision.provider accepts auto and the agent CLIs', () => {
     for (const v of ['auto', 'claude-cli', 'codex-cli', 'gemini-cli', 'off', 'ollama']) expect(setSetting('decision.provider', v).decision.provider).toBe(v);
   });
@@ -160,7 +164,7 @@ describe('get/set by dot path', () => {
     }
     expect(() => setSetting('decision.limits.perDayUsd', -1)).toThrow(/invalid value/);
     expect(() => setSetting('language', 'de')).toThrow(SettingsError);
-    expect(() => setSetting('agents.order', ['not-an-agent'])).toThrow(SettingsError);
+    expect(() => setSetting('agents.order', ['Not An Agent!'])).toThrow(SettingsError);
     expect(() => setSetting('decision.endpoint', 'not a url')).toThrow(SettingsError);
     expect(() => setSetting('decision.provider', 'chatgpt-web')).toThrow(SettingsError);
     expect(() => setSetting('decision.limits.perProjectCalls', 1.5)).toThrow(SettingsError);

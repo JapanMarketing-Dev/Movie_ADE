@@ -19,20 +19,20 @@ describe('IPC registry', () => {
   });
 
   it('has the channels the app depends on', () => {
-    for (const c of ['project:snapshot', 'pty:spawn', 'record:append', 'settings:write', 'update:restart']) expect(isInvokeChannel(c)).toBe(true);
-    expect(isSendChannel('pty:write')).toBe(true);
-    expect(isEventChannel('pty:data')).toBe(true);
+    for (const c of ['project:snapshot', 'terminal:create', 'agent:send', 'record:append', 'settings:write', 'update:restart']) expect(isInvokeChannel(c)).toBe(true);
+    expect(isSendChannel('terminal:write')).toBe(true);
+    expect(isEventChannel('agent:state')).toBe(true);
   });
 
   it('rejects unknown, prototype and non-string names', () => {
-    for (const bad of ['', 'nope', 'pty:data', 'toString', '__proto__', 'constructor', 'hasOwnProperty', 'PROJECT:SNAPSHOT', 'project:snapshot ']) {
+    for (const bad of ['', 'nope', 'terminal:data', 'pty:spawn', 'toString', '__proto__', 'constructor', 'hasOwnProperty', 'PROJECT:SNAPSHOT', 'project:snapshot ']) {
       expect(isInvokeChannel(bad)).toBe(false);
     }
     expect(isInvokeChannel(undefined)).toBe(false);
     expect(isInvokeChannel(42)).toBe(false);
     expect(isInvokeChannel({ toString: () => 'app:info' })).toBe(false);
-    expect(isSendChannel('pty:spawn')).toBe(false); // invoke-only
-    expect(isEventChannel('pty:write')).toBe(false); // send-only
+    expect(isSendChannel('terminal:create')).toBe(false); // invoke-only
+    expect(isEventChannel('terminal:write')).toBe(false); // send-only
   });
 
   it('registry arrays are frozen', () => {

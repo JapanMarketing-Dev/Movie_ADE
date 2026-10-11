@@ -1,0 +1,206 @@
+// Ported from Ferret src/shared/agentPolicy.ts and resumeArgs of src/shared/terminalRestore.ts (MIT).
+import type { BuiltinAgent, TuiAgent } from './catalog'
+import {
+  AGENT_CATALOG,
+  BYPASS_FLAG_PREFIXES,
+  SKIP_PERMISSION_AGENTS,
+  bypassArgUnits,
+  defaultLaunchConfig,
+  permissionModeFlags,
+  trustArgUnits
+} from './catalog'
+import { tokenizeStartupWords, type AgentStartupShell, type StartupWord } from './launch'
+import { launchError } from './messages'
+
+/**
+ * 組み込みの Agent を起動するときの決まり（security-3 [1]・security-5 [2]）。main の terminal.ts とアカウントのログインが使う。
+ *
+ * 設定の command（実行ファイルとサブコマンド）と args を、シェルと同じ分け方で一度だけ語（argv）に分け、
+ * その語の並びに決まりを当て、決まりを通した argv だけから起動の1行を作る（文字列のまま決まりを当てない）。
+ *   - 権限確認を省く引数は、設定の skipPermissions が入のときに SKIP_PERMISSION_AGENTS へだけ足す。
+ *     引数で確認の仕方を選んでいれば足さない。自動起動も手で開くのも同じ
+ *   - フォルダの信頼（Claude Code / Codex の設定ファイル、Muse・Command Code の引数）は、skipPermissions が入で、
+ *     登録したプロジェクトのフォルダそのもので開くときだけ
+ *   - 利用者が引数の欄にそのまま書いた引数は、書いたとおりに使う（SECURITY.md の Agent permissions）
+ *   - 権限確認を省く引数・フォルダの信頼の引数を、コマンドの欄に書いたもの、引用符やバックスラッシュで書き換えたもの
+ *     （`"--dangerously-skip-permissions"`、`--permission-mode "bypassPermissions"` など）は起動しない
+ */
+
+export type AgentLaunchRefusal = 'no-command' | 'bad-quote' | 'flag-in-command' | 'disguised-flag'
+
+export type AgentLaunchPolicy =
+  /** resumed: 会話を続ける引数を足した（resume を頼んだときだけ付く） */
+  | { ok: true; argv: string[]; trustFolder: boolean; resumed?: true }
+  | { ok: false; reason: AgentLaunchRefusal; error: string }
+
+type MatchKind = 'bypass' | 'trust' | 'mode'
+
+interface FlagMatch {
+  kind: MatchKind
+  /** 当たった語の位置と数 */
+  start: number
+  length: number
+  flag: string
+}
+
+/** 同じ意味の長い名前（Codex の --config は -c） */
+const FLAG_ALIASES: Readonly<Record<string, string>> = { '--config': '-c' }
+
+const alias = (flag: string): string => FLAG_ALIASES[flag] ?? flag
+
+const unquote = (value: string): string => /^(["'])(.*)\1$/.exec(value)?.[2] ?? value
+
+/**
+ * 値をくらべる形にする。Codex の -c は TOML の値なので、`sandbox_mode = "danger-full-access"` も
+ * `sandbox_mode=danger-full-access` と同じ意味になる（=の前後の空白と、値・名前を囲む引用符は意味を変えない）
+ */
+function normalizeValue(value: string): string {
+  const eq = value.indexOf('=')
+  if (eq < 0) return unquote(value.trim())
+  return `${unquote(value.slice(0, eq).trim())}=${unquote(value.slice(eq + 1).trim())}`
+}
+
+interface FlagReading {
+  flag: string
+  value: string | null
+  length: number
+}
+
+/** i 番目の語をフラグとして読める形をすべて返す（`--f v`・`--f=v`・`-s v`・`-sv`・値なし） */
+function readFlag(words: readonly string[], i: number): FlagReading[] {
+  const word = words[i]!
+  if (!word.startsWith('-') || word === '-' || word === '--') return []
+  const next = i + 1 < words.length ? words[i + 1]! : null
+  const readings: FlagReading[] = []
+  if (word.startsWith('--')) {
+    const eq = word.indexOf('=')
+    if (eq > 0) return [{ flag: alias(word.slice(0, eq)), value: word.slice(eq + 1), length: 1 }]
+    readings.push({ flag: alias(word), value: null, length: 1 })
+  } else {
+    const flag = alias(word.slice(0, 2))
+    if (word.length > 2) return [{ flag, value: word.slice(2).replace(/^=/, ''), length: 1 }]
+    readings.push({ flag, value: null, length: 1 })
+  }
+  if (next !== null) readings.push({ flag: readings[0]!.flag, value: next, length: 2 })
+  return readings
+}
+
+function unitMatches(unit: readonly string[], reading: FlagReading): boolean {
+  if (alias(unit[0]!) !== reading.flag) return false
+  // 値の無い単位（--yolo）は、`--yolo=…` の形も同じとみなす
+  if (unit.length === 1) return reading.length === 1
+  return reading.value !== null && normalizeValue(reading.value) === normalizeValue(unit.slice(1).join(' '))
+}
+
+/** 語の並びから、権限確認を省く引数・フォルダの信頼の引数・確認の仕方を選ぶフラグを探す（`--` より後はプロンプトなので見ない） */
+export function findPermissionFlags(agent: BuiltinAgent, words: readonly string[]): FlagMatch[] {
+  const bypass = bypassArgUnits(agent)
+  const trust = trustArgUnits(agent)
+  const modes = permissionModeFlags(agent).map(alias)
+  const matches: FlagMatch[] = []
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '--') break
+    for (const reading of readFlag(words, i)) {
+      const at = (kind: MatchKind): FlagMatch => ({ kind, start: i, length: reading.length, flag: words.slice(i, i + reading.length).join(' ') })
+      if (BYPASS_FLAG_PREFIXES.some((prefix) => reading.flag.startsWith(prefix)) || bypass.some((unit) => unitMatches(unit, reading))) matches.push(at('bypass'))
+      else if (trust.some((unit) => unitMatches(unit, reading))) matches.push(at('trust'))
+      else if (reading.length === 1 && modes.includes(reading.flag)) matches.push(at('mode'))
+    }
+  }
+  return matches
+}
+
+const words = (args: string): string[] => args.trim().split(/\s+/).filter(Boolean)
+
+function refuse(reason: AgentLaunchRefusal, error: string): AgentLaunchPolicy {
+  return { ok: false, reason, error }
+}
+
+/**
+ * 設定のコマンドの欄を語に分ける。先頭が実行ファイル、残りはサブコマンド（acli rovodev run など）。
+ * コマンドの欄に権限確認を省く引数・フォルダの信頼の引数があれば起動しない（アカウントのログインも同じ）
+ */
+export function canonicalLaunchCommand(
+  agent: BuiltinAgent,
+  command: string,
+  shell: AgentStartupShell
+): { ok: true; words: StartupWord[] } | { ok: false; reason: AgentLaunchRefusal; error: string } {
+  const backslash = shell === 'posix' ? 'escape' : 'literal'
+  const parsed = tokenizeStartupWords(command.trim() || defaultLaunchConfig(agent).command, backslash)
+  if (!parsed.ok) return { ok: false, reason: 'bad-quote', error: launchError('badArgs', { error: parsed.error }) }
+  if (parsed.words.length === 0) return { ok: false, reason: 'no-command', error: launchError('noCommand') }
+  const tail = parsed.words.slice(1).map((word) => word.value)
+  const found = findPermissionFlags(agent, tail).find((match) => match.kind !== 'mode')
+  if (found) return { ok: false, reason: 'flag-in-command', error: launchError('flagInCommand', { flag: found.flag }) }
+  return { ok: true, words: parsed.words }
+}
+
+export function resolveAgentLaunchPolicy(input: {
+  agent: BuiltinAgent
+  /** 設定のコマンドの欄（空なら既定） */
+  command: string
+  /** 設定の引数の欄 */
+  args: string
+  /** cwd が登録済みのプロジェクトのフォルダそのものならその id。それ以外（サブフォルダ・ホーム）は null */
+  projectId: string | null
+  skipPermissions: boolean
+  /** 起動するシェル（Windows のシェルではバックスラッシュをパスの区切りとして読む） */
+  shell: AgentStartupShell
+  /** 前の会話を続けて起動する（ターミナルを戻したとき。@shared/terminalRestore の resumeArgs）。続けられなければ普通に起動する */
+  resume?: boolean
+}): AgentLaunchPolicy {
+  const { agent } = input
+  const command = canonicalLaunchCommand(agent, input.command, input.shell)
+  if (!command.ok) return refuse(command.reason, command.error)
+  const parsedArgs = tokenizeStartupWords(input.args.trim(), input.shell === 'posix' ? 'escape' : 'literal')
+  if (!parsedArgs.ok) return refuse('bad-quote', launchError('badArgs', { error: parsedArgs.error }))
+  const [head, ...tail] = command.words
+  const args = parsedArgs.words
+  // コマンドの欄の残りと引数の欄を1つの並びとして見る（欄をまたいで分けた書き方も同じに読む）
+  const all = [...tail, ...args]
+  const matches = findPermissionFlags(agent, all.map((word) => word.value))
+  for (const match of matches) {
+    if (match.kind === 'mode') continue
+    // コマンドの欄から始まるもの（`--permission-mode` をコマンドに、値を引数に書いた形など）
+    if (match.start < tail.length) return refuse('flag-in-command', launchError('flagInCommand', { flag: match.flag }))
+    // 引用符やバックスラッシュで書いたものは、利用者がそのフラグを書いたとはみなさない
+    if (all.slice(match.start, match.start + match.length).some((word) => !word.plain)) {
+      return refuse('disguised-flag', launchError('disguisedFlag', { flag: match.flag }))
+    }
+  }
+  const skip = input.skipPermissions && SKIP_PERMISSION_AGENTS.includes(agent)
+  const choosesMode = matches.some((match) => match.kind !== 'trust')
+  const yolo = skip && !choosesMode ? words(AGENT_CATALOG[agent].yoloArgs) : []
+  const inProject = input.skipPermissions && input.projectId !== null
+  const trust = inProject && !matches.some((match) => match.kind === 'trust') ? words(AGENT_CATALOG[agent].trustArgs ?? '') : []
+  const rest = [...trust, ...yolo, ...args.map((word) => word.value)]
+  const resume = input.resume ? resumeArgs(agent, tail.map((word) => word.value), rest) : null
+  const argv = [head!.value, ...(resume?.lead ?? []), ...tail.map((word) => word.value), ...rest, ...(resume?.trail ?? [])]
+  return { ok: true, argv, trustFolder: skip && input.projectId !== null, ...(resume ? { resumed: true as const } : {}) }
+}
+
+// ───────────────────────── 会話を続けて起動する（Ferret src/shared/terminalRestore.ts） ─────────────────────────
+
+const CLAUDE_SESSION_FLAGS = ['-c', '--continue', '-r', '--resume', '--session-id', '--from-pr', '-p', '--print', '--teleport']
+
+/**
+ * 会話を続けて起動するための引数（Claude Code 2.1.289 の `-c, --continue`、Codex 0.160.0 の `codex resume --last`。
+ * どちらも `--help` で確認。2026-10）。lead は実行ファイルのすぐ後ろ、trail は最後に足す。続けられなければ null
+ *
+ * @param commandTail 設定のコマンドの欄の、実行ファイルより後ろの語（サブコマンド）
+ * @param args 権限の引数を含む、残りの引数
+ */
+export function resumeArgs(agent: TuiAgent, commandTail: readonly string[], args: readonly string[]): { lead: string[]; trail: string[] } | null {
+  if (agent === 'claude') {
+    const words = [...commandTail, ...args]
+    if (words.some((word) => CLAUDE_SESSION_FLAGS.includes(word) || CLAUDE_SESSION_FLAGS.some((flag) => flag.startsWith('--') && word.startsWith(`${flag}=`)))) return null
+    return { lead: [], trail: ['--continue'] }
+  }
+  if (agent === 'codex') {
+    // サブコマンドを書いていれば（codex exec など）、resume を差し込めない
+    if (commandTail.length > 0) return null
+    if (args.some((word) => !word.startsWith('-') && ['resume', 'exec', 'e', 'fork', 'review'].includes(word))) return null
+    return { lead: ['resume', '--last'], trail: [] }
+  }
+  return null
+}

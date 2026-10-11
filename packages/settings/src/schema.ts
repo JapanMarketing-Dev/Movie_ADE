@@ -5,7 +5,8 @@ import { z } from 'zod';
 
 const Lang = z.enum(['ja', 'en']);
 
-export const AgentIdSchema = z.string().regex(/^(claude|codex|gemini|opencode|cursor|copilot|custom:[A-Za-z0-9_.-]+)$/, 'unknown agent id');
+/** Any agent of the @solocut/agents catalog (lower-case id) or custom:<name>; the app/CLI check ids against the catalog. */
+export const AgentIdSchema = z.string().regex(/^([a-z0-9][a-z0-9-]*|custom:[A-Za-z0-9_.-]+)$/, 'invalid agent id');
 
 const Appearance = z.object({
   // Theme is dark only (no choice).

@@ -1,0 +1,111 @@
+// Ported from Ferret test/unit/agent-launch.test.ts (MIT). The shell startup-file part is Ferret main code, not ported.
+/**
+ * Agent起動コマンドの組み立て（Orca由来の純粋関数）と、シェルの起動ファイルの中身。
+ * シェルもPTYも起動しない。
+ */
+import { describe, expect, it } from 'vitest'
+import {
+  buildAgentLaunchCommand,
+  quoteStartupArg,
+  startupShellForPath,
+  tokenizeStartupCommand
+} from '../src/launch'
+import { DEFAULT_AGENT_PREFERENCES } from '../src/catalog'
+
+describe('tokenizeStartupCommand', () => {
+  it('空白で区切り、クォートの中は1語にする', () => {
+    expect(tokenizeStartupCommand(`--model opus  --name "a b" 'c d'`)).toEqual({
+      ok: true,
+      tokens: ['--model', 'opus', '--name', 'a b', 'c d']
+    })
+  })
+
+  it('クォートを抜けても語は続く', () => {
+    expect(tokenizeStartupCommand(`a"b"c`)).toEqual({ ok: true, tokens: ['abc'] })
+  })
+
+  it('バックスラッシュで空白を語に含める', () => {
+    expect(tokenizeStartupCommand('a\\ b')).toEqual({ ok: true, tokens: ['a b'] })
+  })
+
+  it('閉じていないクォートは失敗にする', () => {
+    expect(tokenizeStartupCommand(`--x "abc`).ok).toBe(false)
+  })
+})
+
+describe('quoteStartupArg', () => {
+  it('posix はシングルクォートで囲み、アポストロフィとバックスラッシュは外へ出す（fishでも同じ意味）', () => {
+    // 特別な意味を持たない文字だけなら引用しない
+    expect(quoteStartupArg('plain', 'posix')).toBe('plain')
+    expect(quoteStartupArg('--mode=auto', 'posix')).toBe('--mode=auto')
+    expect(quoteStartupArg('/opt/bin/x', 'posix')).toBe('/opt/bin/x')
+    expect(quoteStartupArg('=cmd', 'posix')).toBe(`'=cmd'`)
+    expect(quoteStartupArg('a b', 'posix')).toBe(`'a b'`)
+    expect(quoteStartupArg('~/x', 'posix')).toBe(`'~/x'`)
+    expect(quoteStartupArg('%self', 'posix')).toBe(`'%self'`)
+    expect(quoteStartupArg('*', 'posix')).toBe(`'*'`)
+    expect(quoteStartupArg(`it's`, 'posix')).toBe(`'it'"'"'s'`)
+    expect(quoteStartupArg('a\\b', 'posix')).toBe(`'a'"\\\\"'b'`)
+    expect(quoteStartupArg('', 'posix')).toBe(`''`)
+    expect(quoteStartupArg('$HOME `x`', 'posix')).toBe(`'$HOME \`x\`'`)
+  })
+
+  it('PowerShell はシングルクォートを二重にする', () => {
+    expect(quoteStartupArg(`it's`, 'powershell')).toBe(`'it''s'`)
+  })
+
+  it('cmd はダブルクォートで囲む（中の ^ は普通の文字なので付けない）', () => {
+    expect(quoteStartupArg('a&b', 'cmd')).toBe(`"a&b"`)
+    expect(quoteStartupArg('C:\\Program Files (x86)\\x', 'cmd')).toBe(`"C:\\Program Files (x86)\\x"`)
+    expect(quoteStartupArg('say "hi"', 'cmd')).toBe(`"say ""hi"""`)
+    expect(quoteStartupArg('C:\\dir\\', 'cmd')).toBe(`"C:\\dir\\\\"`)
+    expect(quoteStartupArg('100%', 'cmd')).toBe(`"100"^%""`)
+  })
+
+  it('Windows のシェルではバックスラッシュをパスとして残す', () => {
+    expect(buildAgentLaunchCommand('claude', { command: 'claude', args: '--config C:\\Users\\dev\\x.toml' }, 'cmd'))
+      .toEqual({ ok: true, command: 'claude "--config" "C:\\Users\\dev\\x.toml"' })
+    expect(buildAgentLaunchCommand('claude', { command: 'claude', args: '--config "C:\\Program Files\\x.toml"' }, 'powershell'))
+      .toEqual({ ok: true, command: `claude '--config' 'C:\\Program Files\\x.toml'` })
+    expect(buildAgentLaunchCommand('claude', { command: 'claude', args: 'a\\ b' }, 'posix')).toEqual({ ok: true, command: `claude 'a b'` })
+  })
+})
+
+describe('startupShellForPath', () => {
+  it('シェルのパスから書き方を決める', () => {
+    expect(startupShellForPath('/bin/zsh')).toBe('posix')
+    expect(startupShellForPath('/opt/homebrew/bin/fish')).toBe('posix')
+    expect(startupShellForPath('C:\\Windows\\System32\\cmd.exe')).toBe('cmd')
+    expect(startupShellForPath('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe('powershell')
+  })
+})
+
+describe('buildAgentLaunchCommand', () => {
+  it('既定の設定の引数は Claude Code の --chrome だけ（権限確認を省く引数は main が起動のときに足す）', () => {
+    expect(buildAgentLaunchCommand('claude', DEFAULT_AGENT_PREFERENCES.launch.claude, 'posix')).toEqual({ ok: true, command: 'claude --chrome' })
+    expect(buildAgentLaunchCommand('codex', DEFAULT_AGENT_PREFERENCES.launch.codex, 'posix')).toEqual({ ok: true, command: 'codex' })
+  })
+
+  it('コマンド本体は書いたまま使い、引数だけクォートし直す', () => {
+    expect(
+      buildAgentLaunchCommand('claude', { command: 'npx -y claude', args: `--append "it's ok"` }, 'posix')
+    ).toEqual({ ok: true, command: `npx -y claude --append 'it'"'"'s ok'` })
+  })
+
+  it('引数が空ならコマンドだけ、コマンドが空なら既定のコマンド', () => {
+    expect(buildAgentLaunchCommand('codex', { command: 'codex', args: '' }, 'posix')).toEqual({
+      ok: true,
+      command: 'codex'
+    })
+    expect(buildAgentLaunchCommand('codex', { command: '  ', args: '' }, 'posix')).toEqual({
+      ok: true,
+      command: 'codex'
+    })
+  })
+
+  it('引数の書き方が壊れていれば理由を返す', () => {
+    const result = buildAgentLaunchCommand('claude', { command: 'claude', args: `"oops` }, 'posix')
+    expect(result.ok).toBe(false)
+  })
+})
+

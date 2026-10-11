@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  AGENTS, detectAgents, detectUsageLimit, getAgent, handoffMessage, hostOs, launchCommand, parseVersion, quoteArg, spawnSpec, splitCommandLine, which,
+  AGENTS, BUILTIN_AGENTS, detectAgents, detectUsageLimit, getAgent, handoffMessage, hostOs, launchCommand, parseVersion, quoteArg, spawnSpec, splitCommandLine, which,
 } from '../src/index.js';
 
 const WIN = process.platform === 'win32';
@@ -16,13 +16,30 @@ const posixEcho = (line: string): string[] => {
 };
 
 describe('catalog', () => {
-  it('has the six agents with ids from docs/04', () => {
-    expect(AGENTS.map((a) => a.id)).toEqual(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot']);
+  const CORE = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot'];
+
+  it('has the full catalog with the six docs/04 agents first among the popular ones', () => {
+    for (const id of CORE) expect(AGENTS.some((a) => a.id === id), id).toBe(true);
+    expect(AGENTS.length).toBe(BUILTIN_AGENTS.length);
+    expect(AGENTS.length).toBeGreaterThanOrEqual(40);
+    expect(AGENTS.slice(0, 3).map((a) => a.id)).toEqual(['claude', 'codex', 'gemini']);
     expect(getAgent('cursor')!.command).toBe('cursor-agent');
+    expect(getAgent('cursor')!.detect).toEqual(['cursor-agent', 'agent']); // the new CLI name from the catalog too
+    expect(new Set(AGENTS.map((a) => a.id)).size).toBe(AGENTS.length);
   });
 
-  it('every agent has detect, install per OS, version args, print mode and limit patterns that compile', () => {
+  it('every agent has detect commands, a homepage and version args; installs exist where the catalog has one', () => {
     for (const a of AGENTS) {
+      expect(a.detect.length, a.id).toBeGreaterThan(0);
+      expect(a.homepage, a.id).toMatch(/^https:\/\//);
+      expect(a.versionArgs).toEqual(['--version']);
+      // POSIX-only installers (curl | bash, brew) are not offered on Windows
+      if (/\|\s*(?:ba|z)?sh\b|^\s*brew\s/.test(a.install.win)) throw new Error(`${a.id}: POSIX install on Windows`);
+    }
+  });
+
+  it('the six core agents have install per OS, print mode and limit patterns that compile', () => {
+    for (const a of AGENTS.filter((x) => CORE.includes(x.id))) {
       expect(a.detect.length, a.id).toBeGreaterThan(0);
       for (const os of ['mac', 'win', 'linux'] as const) expect(a.install[os], `${a.id} ${os}`).toBeTruthy();
       expect(a.versionArgs).toEqual(['--version']);
@@ -184,7 +201,7 @@ describe('detectAgents', () => {
     expect(r.find((x) => x.id === 'claude')).toEqual({ id: 'claude', installed: true, path: claude, version: '2.1.4' });
     expect(r.find((x) => x.id === 'codex')).toEqual({ id: 'codex', installed: true, path: codex });
     expect(r.find((x) => x.id === 'gemini')!.installed).toBe(false);
-    expect(r).toHaveLength(6);
+    expect(r).toHaveLength(AGENTS.length);
   });
 
   it('Windows: finds .cmd shims under a "Path" env key and runs them via cmd.exe', () => {

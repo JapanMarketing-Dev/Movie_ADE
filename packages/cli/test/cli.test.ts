@@ -463,6 +463,11 @@ describe('media commands without media', () => {
     expect(r.json.ok).toBe(true);
     expect(r.json.project.timelineValid).toBe(true);
     expect(Array.isArray(r.json.problems)).toBe(true);
-    expect(r.json.agents).toHaveLength(6);
+    const { AGENTS } = await import('@solocut/agents');
+    const popular = new Set(AGENTS.filter((a) => a.popular).map((a) => a.id));
+    expect(r.json.agents.length).toBeGreaterThan(0);
+    expect(r.json.agents.length).toBeLessThan(AGENTS.length);
+    for (const a of r.json.agents as { id: string; installed: boolean }[]) expect(a.installed || popular.has(a.id)).toBe(true);
+    for (const id of popular) expect(r.json.agents.some((a: { id: string }) => a.id === id)).toBe(true);
   });
 });

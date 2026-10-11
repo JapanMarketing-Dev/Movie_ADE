@@ -4,8 +4,8 @@ import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, 
 import { formatFrames, progressOf, stepMark, variantArgs } from '@shared/project';
 import { LangContext, useT, type TKey } from '../i18n';
 import { api, errMsg } from '../lib/api';
-import { terminals } from '../lib/terminals';
-import { Terminals } from '../components/Terminals';
+import { TerminalPane } from '../components/TerminalPane';
+import { sendToAgent } from '../terminal/agentSend';
 import { FeedbackLayer } from '../components/Feedback';
 import { AnalysisBar } from '../components/AnalysisBar';
 
@@ -16,16 +16,39 @@ export function Workspace({
   visible,
   toast,
   onRecord,
+  variant: controlledVariant,
+  onVariantChange,
+  focus = 'edit',
+  showTerminal = true,
+  showCenter = true,
+  embedded = false,
 }: {
   project: ProjectInfo | null;
   visible: boolean;
   toast: (m: string) => void;
   onRecord: () => void;
+  /** controlled by the shell's title bar (YouTube / TikTok / Shorts); uncontrolled when omitted */
+  variant?: Variant;
+  onVariantChange?: (v: Variant) => void;
+  /** 編集 (preview + timeline + terminal) or 確認 (preview + review list first, no terminal) */
+  focus?: 'edit' | 'review';
+  showTerminal?: boolean;
+  showCenter?: boolean;
+  /** inside the shell: the title bar already has the variant switcher and the record button */
+  embedded?: boolean;
 }) {
   const t = useT();
   const lang = useContext(LangContext);
   const [fbActive, setFbActive] = useState(false);
-  const [variant, setVariant] = useState<Variant>('main');
+  const [ownVariant, setOwnVariant] = useState<Variant>('main');
+  const variant = controlledVariant ?? ownVariant;
+  const setVariant = useCallback(
+    (v: Variant) => {
+      setOwnVariant(v);
+      onVariantChange?.(v);
+    },
+    [onVariantChange],
+  );
   const [snap, setSnap] = useState<ProjectSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -52,14 +75,17 @@ export function Workspace({
   }, [dir]);
 
   useEffect(() => {
-    if (prevDir.current && prevDir.current !== dir && terminals.tabs.length > 0) terminals.closeAll();
-    if (prevDir.current !== dir) setVariant('main');
+    if (prevDir.current !== dir && controlledVariant === undefined) setVariant('main');
     prevDir.current = dir;
     setSnap(null);
     setSelected(null);
     void refresh();
     void loadPrompts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, refresh, loadPrompts]);
+
+  // xterm refits itself when the terminal column is shown again (terminalClient's ResizeObserver)
+  const termShown = showTerminal && focus === 'edit';
 
   useEffect(() => {
     const off1 = api.on('project:changed', (d) => {
@@ -73,17 +99,18 @@ export function Workspace({
   }, [dir, refresh, loadPrompts]);
 
   const sendPrompt = async (p: PromptButton) => {
-    const tab = terminals.targetFor(p.agent);
-    if (!tab) {
-      toast(t('prompts.noTerminal'));
-      return;
-    }
     try {
       const vars: Record<string, string> = {};
       if (selected) vars.selection = selected;
       const r = await api.invoke('prompts:render', p.id, dir ?? undefined, vars);
-      terminals.paste(tab, r.text);
-      toast(`${t('prompts.sent')}: ${p.label} → ${tab.title}`);
+      const agent = r.agent ?? p.agent;
+      // main picks the project's agent terminal (focused one first), pastes, checks, then presses Enter;
+      // with no agent running it opens one (the prompt's agent or the default) and sends once it is ready
+      const res = await sendToAgent(
+        { text: r.text, agent: agent && agent !== 'default' ? agent : null, projectDir: dir },
+        { launch: agent && agent !== 'default' ? agent : null },
+      );
+      toast(res.ok ? `${t('prompts.sent')}: ${p.label}` : res.message);
     } catch (e) {
       toast(errMsg(e));
     }
@@ -134,7 +161,6 @@ export function Workspace({
         localStorage.setItem(RIGHT_W_KEY, String(w));
         return w;
       });
-      terminals.fitActive();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -153,24 +179,25 @@ export function Workspace({
 
   const ov = snap?.overview;
   const style = rightW ? ({ '--right-w': `${rightW}px` } as React.CSSProperties) : undefined;
+  const wsClass = ['ws', `focus-${focus}`, termShown ? '' : 'no-terminal', showCenter || !termShown ? '' : 'no-center', embedded ? 'embedded' : ''].filter(Boolean).join(' ');
 
   return (
-    <div className="ws">
+    <div className={wsClass}>
       <div className="titlebar">
         <span className="title">{project.title}</span>
         {project.template && <span className="pill mono">{project.template.id}</span>}
         <span className="grow" />
-        <div className="segmented" title={t('ws.variantHint')}>
+        {!embedded && <div className="segmented" title={t('ws.variantHint')}>
           {(['main', 'tiktok', 'youtube-shorts'] as Variant[]).map((v) => (
             <button key={v} className={variant === v ? 'on' : ''} disabled={fbActive} onClick={() => setVariant(v)}>
               {t(v === 'main' ? 'var.main' : v === 'tiktok' ? 'var.tiktok' : 'var.shorts')}
               {snap && v !== 'main' && !snap.variants.includes(v) ? ' ·' : ''}
             </button>
           ))}
-        </div>
-        <button className="btn ghost small" onClick={onRecord}>
+        </div>}
+        {!embedded && <button className="btn ghost small" onClick={onRecord}>
           <Video size={14} /> {t('nav.record')}
-        </button>
+        </button>}
         <button className="btn ghost small" onClick={() => void api.invoke('app:showInFolder', project.dir)}>
           <FolderOpen size={14} /> {t('ws.openFolder')}
         </button>
@@ -250,7 +277,7 @@ export function Workspace({
             </div>
             {ov ? <Lanes ov={ov} selected={selected} onSelect={(id, start) => (setSelected(id), seek(start))} /> : <div className="dim">{t('ws.noTimeline')}</div>}
           </div>
-          <div className="section" style={{ borderBottom: 0 }}>
+          <div className="section review-sec" style={{ borderBottom: 0 }}>
             <div className="section-title">
               {t('ws.review')} {ov && ov.review.length > 0 && <span className="pill accent">{ov.review.length}</span>}
             </div>
@@ -287,7 +314,7 @@ export function Workspace({
         </div>
         <div className="splitter" onMouseDown={startDrag} />
         <div className="ws-right">
-          <Terminals cwd={project.dir} visible={visible} toast={toast} />
+          <TerminalPane projectDir={project.dir} visible={visible && termShown} toast={toast} />
           <div className="prompts">
             <span className="dim" style={{ fontSize: 11, paddingRight: 4, flexShrink: 0 }}>
               {t('prompts.title')}
