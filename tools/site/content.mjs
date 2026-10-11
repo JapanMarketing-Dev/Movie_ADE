@@ -184,6 +184,12 @@ export const en = {
     ],
     soon: 'Coming soon', get: 'Download', you: 'Your system',
     verify: 'Every release is signed. Checksums are published with each version on GitHub Releases.',
+    firstRun: [
+      ['macOS', 'Solocut is not notarized by Apple yet. The first time, open it, then go to System Settings → Privacy & Security and click “Open Anyway”.'],
+      ['Windows', 'If SmartScreen says it protected your PC, click “More info” → “Run anyway”.'],
+      ['Linux', 'AppImage: make it executable (chmod +x) and run it. Or install the .deb.'],
+    ],
+    firstRunTitle: 'First launch',
   },
 };
 
@@ -367,5 +373,11 @@ export const ja = {
     ],
     soon: '準備中', get: 'ダウンロード', you: 'お使いの環境',
     verify: 'すべてのリリースに署名しています。各バージョンのチェックサムは GitHub Releases に掲載します。',
+    firstRun: [
+      ['macOS', 'まだ Apple の公証を受けていないため、初回は一度開いたあと「システム設定 → プライバシーとセキュリティ」で「このまま開く」を押してください。'],
+      ['Windows', '「PC が保護されました」と表示されたら、「詳細情報」→「実行」を押してください。'],
+      ['Linux', 'AppImage は実行権限を付けて（chmod +x）起動します。.deb からもインストールできます。'],
+    ],
+    firstRunTitle: '初回の起動',
   },
 };

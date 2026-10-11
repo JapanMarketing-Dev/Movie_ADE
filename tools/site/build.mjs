@@ -406,6 +406,8 @@ ${header(t, 'download')}
       <div class="dl-grid">
       ${cards}
       </div>
+      <h2 style="font-size:22px;margin:40px 0 12px">${esc(d.firstRunTitle)}</h2>
+      <div class="dl-grid" style="margin-top:0">${d.firstRun.map(([os, txt]) => `<div class="dl-card"><h3 style="font-size:16px">${esc(os)}</h3><p>${esc(txt)}</p></div>`).join('')}</div>
       <p class="sums" style="margin-top:24px">${esc(d.verify)}</p>
     </div>
   </section>
