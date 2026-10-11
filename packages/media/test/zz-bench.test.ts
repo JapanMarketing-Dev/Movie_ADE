@@ -1,14 +1,28 @@
-import { it } from 'vitest';
-import { existsSync, writeFileSync, appendFileSync } from 'node:fs';
+import { describe, it } from 'vitest';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Segment } from '@solocut/core';
 import { applyOp, applyOps, compile, emptyTimeline } from '@solocut/core';
 import { cpuCount, executeRenderPlan, probe } from '../src/index.js';
 import { ff } from './helpers.js';
 const D = { by: 'agent' as const, reason: 'bench' };
-const log = (m: string) => appendFileSync('/private/tmp/claude-501/-Users-takumiendoh-Movie-ADE/0a19266e-cb88-4b6d-9c93-97f2759841c2/scratchpad/bench/log.txt', m + '\n');
-it('bench', async () => {
-  const dir = '/private/tmp/claude-501/-Users-takumiendoh-Movie-ADE/0a19266e-cb88-4b6d-9c93-97f2759841c2/scratchpad/bench';
+
+/**
+ * Render benchmark on a synthetic 20-minute 1080p30 timeline (120 segments, all layouts, zoom, BGM). Never part of
+ * `pnpm test` / CI: run with `SOLOCUT_BENCH=1 pnpm exec vitest run packages/media/test/zz-bench.test.ts`.
+ * Files and log.txt go to SOLOCUT_BENCH_DIR (default <tmp>/solocut-bench); the 1.2 GB source is reused across runs.
+ */
+const ENABLED = process.env.SOLOCUT_BENCH === '1';
+const dir = process.env.SOLOCUT_BENCH_DIR?.trim() || join(tmpdir(), 'solocut-bench');
+const log = (m: string) => {
+  console.log(m);
+  appendFileSync(join(dir, 'log.txt'), m + '\n');
+};
+
+describe.skipIf(!ENABLED)('render benchmark (SOLOCUT_BENCH=1 to run)', () => {
+it('20-minute 1080p timeline: preview x264 / hardware, 1 edit, final', async () => {
+  mkdirSync(dir, { recursive: true });
   const p = (n: string) => join(dir, n);
   let t0 = Date.now();
   if (!existsSync(p('src.mp4'))) {
@@ -46,3 +60,4 @@ it('bench', async () => {
   await run('preview-hw-after-1-edit', 'preview', 'cache-ph', 'auto');
   await run('final-x264', 'final', 'cache-f');
 }, 7_200_000);
+});
