@@ -183,3 +183,14 @@ describe('providers', () => {
     expect(new ThumbError('codex', 'x').message).toBe('codex: x');
   });
 });
+
+describe('ffPath (filter option paths, Windows-safe)', () => {
+  it('relative with "/" when possible, else quoted with the colon escaped', async () => {
+    const { ffPath } = await import('../src/commands/thumb.js');
+    const root = join(tmpdir(), 'ffp');
+    expect(ffPath(join(root, 'fonts'), join(root, 'p', 'renders'))).toBe('../../fonts');
+    expect(ffPath(join(root, 'p', 'f'), join(root, 'p'))).toBe('f');
+    expect(ffPath(join(root, 'a:b', 'fonts'), root)).toMatch(/^'.*a\\:b\/fonts'$/);
+    expect(ffPath(join(root, "it's"), root)).toMatch(/^'.*it'\\''s'$/);
+  });
+});

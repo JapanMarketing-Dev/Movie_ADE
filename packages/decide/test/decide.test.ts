@@ -346,3 +346,27 @@ describe('agent CLI providers (the user subscription)', () => {
     expect(missing.code).toBe(127);
   });
 });
+
+describe('claude-cli and ANTHROPIC_API_KEY', () => {
+  it('runs on the subscription first and falls back to the key only when that fails', async () => {
+    const envs: (string | undefined)[] = [];
+    const ok = JSON.stringify({ is_error: false, result: JSON.stringify(good) });
+    let first = true;
+    const runCli: DecideOptions['runCli'] = async (_f, _a, o) => {
+      envs.push(o.env?.ANTHROPIC_API_KEY);
+      if (first) {
+        first = false;
+        return { code: 1, stdout: JSON.stringify({ is_error: true, result: 'Not logged in' }), stderr: '' };
+      }
+      return { code: 0, stdout: ok, stderr: '' };
+    };
+    await decide(req, opts({ provider: 'claude-cli', runCli, env: { ANTHROPIC_API_KEY: 'sk-x', PATH: '/bin' } }));
+    expect(envs).toEqual([undefined, 'sk-x']);
+    const envs2: (string | undefined)[] = [];
+    await decide({ ...req, state: { other: 1 } }, opts({ provider: 'claude-cli', env: { ANTHROPIC_API_KEY: 'sk-x' }, runCli: async (_f, _a, o) => {
+      envs2.push(o.env?.ANTHROPIC_API_KEY);
+      return { code: 0, stdout: ok, stderr: '' };
+    } }));
+    expect(envs2).toEqual([undefined]);   // the subscription worked: the key is never used
+  });
+});

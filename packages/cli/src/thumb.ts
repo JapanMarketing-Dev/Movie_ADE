@@ -199,7 +199,9 @@ function newestImages(dir: string, since: number): string[] {
       const p = join(d, e.name);
       if (e.isDirectory() && depth < 3) walk(p, depth + 1);
       else if (e.isFile() && IMG.test(e.name)) {
-        const m = statSync(p).mtimeMs;
+        // Windows keeps a copied file's write time; its creation time is new
+        const st = statSync(p);
+        const m = Math.max(st.mtimeMs, st.birthtimeMs || 0);
         if (m >= since) out.push({ p, m });
       }
     }

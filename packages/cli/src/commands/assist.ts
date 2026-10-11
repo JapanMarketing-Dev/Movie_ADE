@@ -1,12 +1,13 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
 import {
-  applyTracks, benchmarkProfile, cameraMaterial, checkCameraSwitches, fpsValue, frameToTimecode, masksFromPii, overlaysFromInputLogs,
-  profileToTemplatePatch, sfxFromRules, takenIds, type BenchmarkSample, type LicenseRef, type Mask, type Op, type SfxLibraryItem,
+  applyTracks, benchmarkProfile, cameraMaterial, checkCameraSwitches, fpsValue, frameToTimecode, overlaysFromInputLogs,
+  profileToTemplatePatch, sfxFromRules, type BenchmarkSample, type LicenseRef, type Mask, type Op, type SfxLibraryItem,
   type StyleProfile, type Timeline,
 } from '@solocut/core';
 import { solocutHome } from '@solocut/toolchain';
 import { loadAnalysis } from '../analysis.js';
+import { piiMaskOps, type PiiFile } from '../pii.js';
 import { CliError, emit, opts, t, type Ctx } from '../ctx.js';
 import { applyEdit, openProject, projectTemplate, readJsonFile, readTimeline, setStep, writeAtomic, writeTemplateOverride, type Project } from '../project.js';
 import { media, readTranscript } from './media.js';
@@ -164,36 +165,33 @@ export async function cmdSfx(ctx: Ctx, args: string[]): Promise<void> {
 const MASK_KINDS = ['pixelate', 'blur', 'fill'] as const;
 
 async function cmdMasksFromAnalysis(ctx: Ctx, args: string[]): Promise<void> {
-  const { values } = opts(args, { source: { type: 'string' }, kinds: { type: 'string' }, kind: { type: 'string' }, pad: { type: 'string' }, 'dry-run': { type: 'boolean' }, keep: { type: 'boolean' } }, { max: 0 });
+  const { values } = opts(args, { source: { type: 'string' }, kinds: { type: 'string' }, kind: { type: 'string' }, 'dry-run': { type: 'boolean' } }, { max: 0 });
   const kind = (values.kind ?? 'pixelate') as Mask['kind'];
   if (!(MASK_KINDS as readonly string[]).includes(kind)) throw new CliError('usage', `--kind must be one of ${MASK_KINDS.join(', ')}`);
-  const pad = values.pad === undefined ? undefined : Number(values.pad);
-  if (pad !== undefined && !(pad >= 0 && pad <= 1)) throw new CliError('usage', '--pad must be between 0 and 1');
   const p = openProject(ctx);
   const tl = readTimeline(p);
   const an = loadAnalysis(p.dir, tl);
   if (values.source && !tl.sources[values.source]) throw new CliError('not-found', `unknown source: ${values.source}`);
   const ids = Object.keys(an.pii).filter((id) => !values.source || id === values.source).sort();
-  // earlier detector masks are rebuilt; masks a human touched (decided.by human) stay
-  const old = values.keep ? [] : tl.masks.filter((mk) => mk.id.startsWith('mask_pii_') && mk.decided.by !== 'human' && (!values.source || mk.source === values.source));
-  const base: Timeline = { ...tl, masks: tl.masks.filter((mk) => !old.includes(mk)) };
-  const taken = takenIds(base);
+  // same ids as the desktop app (pii.ts): masks it (or an earlier run) already added are skipped, never replaced
+  const existing = new Set(tl.masks.map((mk) => mk.id));
+  const before = existing.size;
   const added: Op[] = [];
   for (const id of ids) {
     const s = tl.sources[id]!;
     if (s.kind !== 'camera' && s.kind !== 'screen') continue;
-    added.push(...masksFromPii(an.pii[id]!, id, {
-      size: s.size, sourceFps: fpsValue(s.fps), kind, taken,
-      ...(pad !== undefined ? { pad } : {}), ...(values.kinds ? { kinds: values.kinds.split(',').map((k) => k.trim()).filter(Boolean) } : {}),
+    added.push(...piiMaskOps(an.pii[id] as PiiFile, id, existing, {
+      size: s.size, sourceFps: fpsValue(s.fps), maskKind: kind,
+      ...(values.kinds ? { kinds: values.kinds.split(',').map((k) => k.trim()).filter(Boolean) } : {}),
     }));
   }
   const dryRun = !!values['dry-run'];
-  const r = await apply(ctx, p, [...old.map((mk) => ({ op: 'removeMask' as const, id: mk.id })), ...added], 'masks from-analysis', dryRun);
+  const r = await apply(ctx, p, added, 'masks from-analysis', dryRun);
   const warnings = [...an.warnings, ...r.warnings];
   if (!ids.length) warnings.push(t(ctx, '個人情報の解析ファイル（derived/analysis/pii.<素材>.json）がありません', 'no PII analysis (derived/analysis/pii.<source>.json)'));
   if (!dryRun && !p.variant) setStep(p, 'masks', 'done', ids.length ? (added.length ? t(ctx, `${added.length} 個のモザイクは要確認`, `${added.length} mask(s) need review`) : undefined) : t(ctx, '解析ファイルなし', 'no analysis files'));
   const masks = added.flatMap((o) => (o.op === 'addMask' ? [{ id: o.mask.id, source: o.mask.source, reason: o.mask.reason, kind: o.mask.kind, from: o.mask.track[0]!.frame, to: o.mask.track.at(-1)!.frame, keyframes: o.mask.track.length }] : []));
-  emit(ctx, { variant: p.variant ?? 'main', added: masks.length, removed: old.length, masks, sources: ids, files: an.files, dryRun, changed: r.changed, warnings }, () => [
+  emit(ctx, { variant: p.variant ?? 'main', added: masks.length, existing: before, masks, sources: ids, files: an.files, dryRun, changed: r.changed, warnings }, () => [
     t(ctx, `モザイクを ${masks.length} 個入れました（要確認）`, `added ${masks.length} mask(s) (marked for review)`),
     ...masks.map((mk) => `  ${mk.id} ${mk.reason} ${mk.source} ${mk.from}–${mk.to}`),
     ...warnings.map((w) => `! ${w}`),
@@ -203,7 +201,7 @@ async function cmdMasksFromAnalysis(ctx: Ctx, args: string[]): Promise<void> {
 export async function cmdMasks(ctx: Ctx, args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   if (sub === 'from-analysis') return cmdMasksFromAnalysis(ctx, rest);
-  throw new CliError('usage', 'usage: solocut masks from-analysis [--source id] [--kinds email,token] [--kind pixelate|blur|fill] [--pad 0.15] [--keep] [--dry-run]');
+  throw new CliError('usage', 'usage: solocut masks from-analysis [--source id] [--kinds email,phone,token] [--kind pixelate|blur|fill] [--dry-run]');
 }
 
 // ---------- multicam material ----------

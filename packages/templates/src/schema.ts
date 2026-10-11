@@ -90,6 +90,8 @@ export const TemplateFileSchema = z.object({
     frameCheck: z.object({ passAbove: z.number().min(0).max(1) }),
     retakeChoice: Threshold.optional(),
   }),
+  /** Terms whisper should hear and captions should spell this way (product names, file names). */
+  glossary: z.array(z.object({ term: z.string().min(1), reading: z.string().optional() })).optional(),
   multicam: z.object({ maxShotSec: z.number().positive(), minShotSec: z.number().positive() }).optional(),
   /** docs/09 sfx rules: where effects fire (core sfxFromRules). The cap falls back to audio.sfx.maxPerMinute. */
   sfx: z.object({

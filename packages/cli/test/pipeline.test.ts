@@ -213,7 +213,7 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
     fakeNodeCli(bin, 'codex', `const fs = require('fs'), path = require('path');
 const dir = path.join(process.env.CODEX_HOME, 'generated_images', 's');
 fs.mkdirSync(dir, { recursive: true });
-fs.copyFileSync(${JSON.stringify(join(sb.root, 'gen.png'))}, path.join(dir, 'img-' + process.pid + '-' + Date.now() + '.png'));
+fs.writeFileSync(path.join(dir, 'img-' + process.pid + '-' + Date.now() + '.png'), fs.readFileSync(${JSON.stringify(join(sb.root, 'gen.png'))}));
 console.log('done');
 `);
     // fake \`claude -p --output-format json\`: organizes feedback item 1

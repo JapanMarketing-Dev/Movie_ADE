@@ -193,7 +193,7 @@ describe('ensureTool', () => {
     expect(readdirSync(join(toolsDir(), '.staging'))).toEqual([]);
     // second call: already installed, no new request; ffprobe comes from the same archive
     const probe = await ensureTool('ffprobe', { manifest: m, platform: plat });
-    expect(probe.endsWith('pkg/bin/ffprobe')).toBe(true);
+    expect(probe).toBe(join(toolsDir(), 'ffmpeg', '9.9.9', 'pkg/bin/ffprobe'));
     expect(hits.get('/ff.tar.gz')).toBe(1);
     expect(resolveToolSync('ffmpeg', { manifest: m, platform: plat })).toMatchObject({ source: 'managed', version: '9.9.9' });
   });
@@ -407,10 +407,10 @@ describe('Windows lookup rules (simulated)', () => {
     writeFileSync(join(bin, 'claude.cmd'), '');
     writeFileSync(join(bin, 'ffmpeg.exe'), '');
     const env = { Path: `C:\\nowhere;${bin}`, PATHEXT: '.EXE;.CMD' };
-    const lc = (x: string | null) => x?.toLowerCase();
-    expect(lc(whichSync('claude', env, 'win32'))).toBe(join(bin, 'claude.cmd').toLowerCase());
-    expect(lc(whichSync('ffmpeg', env, 'win32'))).toBe(join(bin, 'ffmpeg.exe').toLowerCase());
-    expect(lc(whichSync('claude.cmd', env, 'win32'))).toBe(join(bin, 'claude.cmd').toLowerCase());
+    // the lower-case spelling is tried first, so the path matches the file on any file system
+    expect(whichSync('claude', env, 'win32')).toBe(join(bin, 'claude.cmd'));
+    expect(whichSync('ffmpeg', env, 'win32')).toBe(join(bin, 'ffmpeg.exe'));
+    expect(whichSync('claude.cmd', env, 'win32')).toBe(join(bin, 'claude.cmd'));
     expect(whichSync('nothing', env, 'win32')).toBeNull();
     expect(envPath({ path: 'a' })).toBe('a');
   });

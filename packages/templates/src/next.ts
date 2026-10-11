@@ -99,10 +99,10 @@ const STEP_TEXT: Record<StepId, { do: L; commands: string[] }> = {
   },
   'rough-cut': {
     do: {
-      ja: 'カットの候補を作り、prompts/rough-cut.md に沿って残す・切るを決める。直しは solocut edit で、理由を --reason に書く',
-      en: 'Propose cuts, then decide keep/cut following prompts/rough-cut.md. Fix with solocut edit and give a --reason',
+      ja: 'カットの候補を作り、prompts/rough-cut.md に沿って残す・切るを決める。直しは solocut edit で、理由を --reason に書く。確認したら solocut step rough-cut done',
+      en: 'Propose cuts, then decide keep/cut following prompts/rough-cut.md. Fix with solocut edit and give a --reason. When checked, run solocut step rough-cut done',
     },
-    commands: ['solocut propose cuts --json', 'solocut tl summary --json', 'solocut edit <op> ... --reason "<why>"'],
+    commands: ['solocut propose cuts --json', 'solocut tl summary --json', 'solocut edit <op> ... --reason "<why>"', 'solocut step rough-cut done'],
   },
   multicam: {
     do: { ja: 'prompts/multicam.md に沿って区間ごとのカメラを決める', en: 'Choose the camera per segment following prompts/multicam.md' },

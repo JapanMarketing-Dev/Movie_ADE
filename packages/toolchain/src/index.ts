@@ -109,7 +109,9 @@ export function envPath(env: NodeJS.ProcessEnv = process.env): string {
 export function whichSync(cmd: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
   const dirs = envPath(env).split(platform === 'win32' ? ';' : delimiter).filter(Boolean);
   const pathextKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATHEXT');
-  const exts = platform === 'win32' ? ((pathextKey ? env[pathextKey] : undefined) ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  // PATHEXT is upper case but files are usually named .cmd/.exe: try the lower-case spelling first so the returned path
+  // matches the file (and a case-sensitive file system finds it at all)
+  const exts = platform === 'win32' ? [...new Set(((pathextKey ? env[pathextKey] : undefined) ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).flatMap((e) => [e.toLowerCase(), e]))] : [''];
   // a name that already has an extension (claude.cmd) is looked up as is
   const names = platform === 'win32' && /\.[A-Za-z0-9]+$/.test(cmd) ? [cmd, ...exts.map((e) => cmd + e)] : exts.map((e) => cmd + e);
   for (const d of dirs) {

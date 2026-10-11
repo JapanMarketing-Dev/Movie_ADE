@@ -17,6 +17,7 @@ import { DEFAULT_MANIFEST, ensureTool, resolveToolSync, solocutHome, toolStatus,
 import { variantInfo } from './derive.js';
 import { CLI_VERSION, CliError, emit, info, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { cameraCount } from '../analysis.js';
+import { termsFromTitle } from '../glossary.js';
 import {
   listDirs, openProject, paths, projectTemplate, readStatus, readTimeline, readTimelineRaw, setStep, writeAtomic, writeStatus,
   writeTimeline, type Project, type ProjectFile,
@@ -63,6 +64,8 @@ export async function cmdInit(ctx: Ctx, args: string[]): Promise<void> {
   };
   writeAtomic(join(dir, 'solocut.json'), JSON.stringify(file, null, 2) + '\n');
   const tl = emptyTimeline({ title, kind: tpl.kind, template: { id: tpl.id, version: tpl.version }, canvas: tpl.canvas, language: lang, targets: tpl.targets });
+  // product names in the title ("Claude Code") seed the glossary: whisper hears them better and captions get fixed
+  tl.meta.glossary = termsFromTitle(title).map((term) => ({ term }));
   writeTimeline(dir, tl);
   writeAtomic(join(dir, 'AGENTS.md'), generateAgentsMd(tpl, { dir, title, lang }));
   writeAtomic(join(dir, 'CLAUDE.md'), CLAUDE_MD);
@@ -116,8 +119,10 @@ function tryTimeline(p: Project): { tl: Timeline | null; error?: string } {
 function progressOf(ctx: Ctx, p: Project, autopilot: boolean) {
   const main: Project = { ...p, variant: null };
   const tpl = projectTemplate(main);
-  const steps = readStatus(main, tpl);
   const { tl, error } = tryTimeline(main);
+  // the desktop app adds PII masks itself after OCR: then the masks step has nothing left to run
+  const steps = readStatus(main, tpl).map((s) => (s.step === 'masks' && s.state === 'todo' && tl?.masks.some((m) => m.id.startsWith('mask_pii_'))
+    ? { ...s, state: 'done' as const, note: t(ctx, 'アプリがモザイクを入れ済み（要確認）', 'masks added by the app (review them)') } : s));
   const variants = variantInfo(main, tpl, tl);
   const next = nextStep(tpl, steps, nextContext(main, tl, { autopilot, lang: ctx.lang, variants }));
   return { tpl, steps, tl, error, variants, next };

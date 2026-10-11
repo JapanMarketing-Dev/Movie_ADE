@@ -229,7 +229,8 @@ function envValue(env: NodeJS.ProcessEnv, name: string): string | undefined {
 export function which(cmd: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
   const win = platform === 'win32';
   const dirs = (envValue(env, 'PATH') ?? '').split(win ? ';' : delimiter).filter(Boolean);
-  const exts = win ? (envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  // lower-case spelling first: the returned path matches the file, and case-sensitive file systems find it
+  const exts = win ? [...new Set((envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).flatMap((e) => [e.toLowerCase(), e]))] : [''];
   for (const d of dirs) {
     for (const ext of exts) {
       const p = join(d, cmd + ext);

@@ -459,7 +459,17 @@ async function callCli(req: DecisionRequest, o: DecideOptions & { provider: CliP
     } else {
       args = ['--output-format', 'json', ...(model ? ['--model', model] : []), '-p', `Follow the instructions on stdin and answer with the JSON object only.${images.length ? ` ${images.map((i) => `@${i.file}`).join(' ')}` : ''}`];
     }
-    const r = await (o.runCli ?? defaultCliRunner)(exe, args, { cwd: work, input: prompt, timeoutMs: o.timeoutMs ?? 300_000, ...(o.env ? { env: o.env } : {}) });
+    const run = o.runCli ?? defaultCliRunner;
+    const baseEnv = o.env ?? process.env;
+    const opts = (env: NodeJS.ProcessEnv) => ({ cwd: work, input: prompt, timeoutMs: o.timeoutMs ?? 300_000, env });
+    // claude prefers ANTHROPIC_API_KEY (pay-as-you-go) over the subscription login when the variable is set: run on the
+    // subscription first, and only fall back to the key when that fails (e.g. no login)
+    let r;
+    if (o.provider === 'claude-cli' && baseEnv.ANTHROPIC_API_KEY) {
+      const { ANTHROPIC_API_KEY: _key, ...subscription } = baseEnv;
+      r = await run(exe, args, opts(subscription));
+      if (r.code !== 0 || /"is_error"\s*:\s*true/.test(r.stdout)) r = await run(exe, args, opts(baseEnv));
+    } else r = await run(exe, args, opts(baseEnv));
     if (r.code === 127) throw new DecideError('cli', `${exe} is not installed or not runnable (${r.stderr.trim().slice(-200)})`);
     if (o.provider === 'codex-cli') {
       if (r.code !== 0) throw new DecideError('cli', `codex exec failed (${r.code}): ${r.stderr.trim().slice(-300)}`);

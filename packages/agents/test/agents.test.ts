@@ -192,7 +192,7 @@ describe('detectAgents', () => {
     writeFileSync(join(dir, 'w', 'claude.cmd'), '');
     writeFileSync(join(dir, 'w', 'claude'), '');
     const found = which('claude', { Path: `C:\\x;${join(dir, 'w')}`, PATHEXT: '.EXE;.CMD' }, 'win32');
-    expect(found?.toLowerCase()).toBe(join(dir, 'w', 'claude.cmd').toLowerCase());
+    expect(found).toBe(join(dir, 'w', 'claude.cmd'));
     const sp = spawnSpec('C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd', ['--version'], 'win32', { COMSPEC: 'cmd.exe' });
     expect(sp).toEqual({ command: 'cmd.exe', args: ['/d', '/s', '/c', '"C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd --version"'], windowsVerbatimArguments: true });
     expect(spawnSpec('/usr/local/bin/claude', ['--version'], 'linux')).toEqual({ command: '/usr/local/bin/claude', args: ['--version'] });

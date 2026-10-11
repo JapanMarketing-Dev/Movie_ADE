@@ -14,6 +14,7 @@ import { resolveTool } from '@solocut/toolchain';
 import { registerProject } from '@solocut/archive';
 import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
+import { correctText, initialPrompt, projectTerms, type Term } from '../glossary.js';
 import { cameraCount, loadAnalysis } from '../analysis.js';
 import { decisionSetup, isSkip } from '../decision.js';
 import { ensureFonts } from '../fonts.js';
@@ -332,6 +333,23 @@ const INITIAL_PROMPT: Record<'ja' | 'en', string> = {
   en: 'Um, so, uh, today I want to, you know, talk about this setting.',
 };
 
+/** Glossary terms of the project (main timeline meta.glossary, template glossary, script.md). */
+export function glossaryOf(p: Project): Term[] {
+  let meta: Term[] = [];
+  try {
+    meta = readTimeline({ dir: p.dir, variant: null }).meta.glossary;
+  } catch {
+    /* no timeline yet */
+  }
+  let tplTerms: Term[] = [];
+  try {
+    tplTerms = projectTemplate(p).glossary ?? [];
+  } catch {
+    /* template errors are reported elsewhere */
+  }
+  return projectTerms(p.dir, meta, tplTerms);
+}
+
 /** whisper.cpp word timestamps (seconds in the file) for any audio/video file. */
 export async function whisperWords(ctx: Ctx, p: Project, file: string, o: { lang: string; model?: string; threads?: string; name: string }): Promise<{ words: { w: string; start: number; end: number; conf?: number; speaker?: string }[]; model: string }> {
   const settings = loadSettings();
@@ -345,7 +363,8 @@ export async function whisperWords(ctx: Ctx, p: Project, file: string, o: { lang
   info(ctx, t(ctx, '音声を取り出しています…', 'extracting audio…'));
   await m.runFfmpeg(['-hide_banner', '-nostdin', '-y', '-i', file, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
   const outBase = join(paths(p.dir).cache, `${o.name}.whisper`);
-  const whisperArgs = ['-m', model, '-f', wav, '-l', o.lang, '-ml', '1', '-sow', '-ojf', '-of', outBase, '-np', '--prompt', INITIAL_PROMPT[p.file.language]];
+  const prompt = initialPrompt(INITIAL_PROMPT[p.file.language], glossaryOf(p), p.file.language);
+  const whisperArgs = ['-m', model, '-f', wav, '-l', o.lang, '-ml', '1', '-sow', '-ojf', '-of', outBase, '-np', '--prompt', prompt];
   if (o.threads) whisperArgs.push('-t', o.threads);
   info(ctx, t(ctx, '文字起こししています（長い素材では数分かかります）…', 'transcribing (may take minutes for long media)…'));
   const env = { ...process.env };
@@ -671,7 +690,18 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
     fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style,
     mapTime: (sec: number) => takeFrameToTimeline(tl, tr.take, secondsToFrame(sec, rate)),
   });
-  const captions: Caption[] = built.map((c) => ({ ...c, position }));
+  // glossary pass: near-misses of the project's terms are respelled; the original stays in `spoken`
+  const terms = glossaryOf(p);
+  const captions: Caption[] = built.map((c) => {
+    const fixed = terms.length ? correctText(c.text, terms) : { text: c.text, corrections: [] };
+    if (!fixed.corrections.length) return { ...c, position };
+    return {
+      ...c, position, text: fixed.text, lines: cap.layoutLines(fixed.text, maxCharsPerLine, p.file.language),
+      corrections: [...(c.corrections ?? []), ...fixed.corrections.map((x) => ({
+        from: x.from, to: x.to, decided: { by: 'rule' as const, reason: `glossary: "${x.from}" → "${x.to}"`, confidence: x.score, ruleRef: 'meta.glossary' },
+      }))],
+    };
+  });
   await applyEdit(p, [{ op: 'setCaptions', captions }], by(ctx));
   const vp = vpaths(p);
   mkdirSync(join(p.dir, 'captions'), { recursive: true });
@@ -712,6 +742,8 @@ async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 
   }
   const r = await m.executeRenderPlan(plan, {
     projectDir: p.dir, cacheDir: join('derived', 'cache', 'render'), output: o.output, ...(fontsDir ? { fontsDir } : {}),
+    // previews use the hardware H.264 encoder when there is one (settings.export.hwEncodePreview); finals stay x264
+    encoder: loadSettings().export.hwEncodePreview ? 'auto' : 'x264',
     onProgress: ({ done, total }) => progress(ctx, 'render', total ? done / total : 1, `${t(ctx, '書き出し中', 'rendering')} ${done}/${total}`),
   });
   progressDone(ctx, 'render');
@@ -811,6 +843,25 @@ export async function cmdFrame(ctx: Ctx, args: string[]): Promise<void> {
 }
 
 /**
+ * Previews render at reduced size: the spec check judges their aspect ratio, not the delivery size (that is checked on
+ * the final render with `check --input renders/<target>/final.mp4`).
+ */
+export function previewSpec(f: CheckFinding): CheckFinding {
+  if (f.check !== 'spec' || f.status !== 'fail') return f;
+  const problems = f.note.split('; ');
+  const kept = problems.filter((x) => {
+    const m = /^size (\d+)x(\d+) \(expected (\d+)x(\d+)\)$/.exec(x);
+    if (!m) return true;
+    const [w, h, ew, eh] = m.slice(1).map(Number) as [number, number, number, number];
+    return Math.abs(w / h - ew / eh) > 0.01;
+  });
+  if (kept.length === problems.length) return f;
+  return kept.length
+    ? { ...f, note: kept.join('; ') }
+    : { ...f, status: 'pass', note: 'preview: aspect ratio matches (delivery size is checked on the final render)' };
+}
+
+/**
  * Timeline-based checks the template asks for (core round 5), run when their inputs exist: caption safe area (always,
  * per target), caption/face overlap (face tracks), mosaic tracking (PII analysis), camera switches (≥ 2 cameras).
  */
@@ -838,6 +889,7 @@ async function checkOne(ctx: Ctx, p: Project, o: { input?: string; target?: stri
   const input = o.input ? resolve(ctx.io.cwd, o.input) : await freshPreview(ctx, p, tl);
   const target = (p.variant ?? o.target ?? tl.meta.targets[0]) as Target | undefined;
   let findings: CheckFinding[] = await m.runMachineChecks(input, target ? { target } : {});
+  if (!o.input) findings = findings.map(previewSpec);
   findings.push(...trackChecks(p, tl, target));
   if (o.only === 'failed' && tl.review.lastCheck) {
     const prev = readJsonFile<{ findings: { check: string; status: string }[] }>(join(p.dir, 'checks', tl.review.lastCheck.run, 'report.json'));

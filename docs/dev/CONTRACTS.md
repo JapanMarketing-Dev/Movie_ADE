@@ -118,6 +118,10 @@ export interface RenderPlan { canvas: Canvas /* render size */; quality: 'previe
   audio: { hash: string; args: string[]; measure?: { args: string[]; target: { I: number; TP: number; LRA: number } } };
     // final quality = 2-pass loudness: `args` contains LOUDNORM_TOKEN ('{LOUDNORM}') in its filter graph; the executor runs
     // measure.args (loudnorm print_format=json → stderr) and substitutes a measured linear loudnorm. Preview = single pass.
+    // fast?: FastAudio — preview only: { stems: { id /* segment id */, hash, durationSec, args }[], args, target: { I, TP } }.
+    //   One stem per segment (input-seeked `-ss/-t`, voice chain, exact length, 5 ms fades, ebur128 at the end; no voice →
+    //   lavfi anullsrc), so editing a segment changes only its stem hash. `args` = master over the stem concat list
+    //   (placeholder `{voice}`) + bgm/sfx, with LOUDNORM_TOKEN replaced by `volume=<gain>dB,alimiter=limit=<TP>:level=0`.
   writes: { path: string; content: string }[];   // generated files (overlay ASS) the executor writes first
   final: { args: string[] }; warnings: string[] }
   // Args exclude global flags (-hide_banner -nostdin -y -progress); paths are relative to the project dir (cwd).
@@ -276,6 +280,14 @@ export function renderFrame(plan: FramePlan /* from compileFrame */, o: { projec
 //   Hardware chunks have their own cache keys. Concurrency default renderConcurrency({ hardware }): ≈ cores/3 chunks
 //   (max 6; hardware max 3) with x264 `-threads` = cores/chunks. Result gains `encoder`. Abort: every worker's ffmpeg
 //   is killed, the promise rejects (AbortError) only after temp files are removed; only complete chunks are cached.
+// Fast preview audio (default; executeRenderPlan({ fastAudio: false }) = the full single-graph mix): missing stems render in
+//   parallel into <cache>/audio/stem-<key>.wav (+ .json { lufs } sidecar written after the stem; a stem without its
+//   sidecar renders again), then the master mix-<key>.wav keyed by the stem list + gain + inputs. Gain =
+//   previewGainFilter(stems, target): duration-weighted energy of the stems' integrated loudness (silent / ≤ −70 LUFS
+//   ignored) → target.I, clamped ±30 dB, limiter at target.TP. Final plans keep 2-pass loudnorm on the full graph.
+//   Also exported: parseEbur128Integrated(log) → LUFS | null, previewGainFilter. inputsOf skips `-f lavfi` inputs.
+// Benchmark (not in pnpm test / CI): SOLOCUT_BENCH=1 [SOLOCUT_BENCH_DIR=…] [SOLOCUT_BENCH_FINAL=0] pnpm exec vitest run
+//   packages/media/test/zz-bench.test.ts — synthetic 20-min 1080p30 timeline, appends timings to <dir>/log.txt.
 export function runMachineChecks(rendered: string, o?: { target?: Target }): Promise<CheckFinding[]>;
   // black-frames (≥0.5 s) and freeze (≥2 s): needs-human when found; loudness: fail outside ±1 LU or true peak > target+0.5;
   // spec: h264 / yuv420p / CFR / aac 48 kHz stereo / preset size / max duration
@@ -338,7 +350,7 @@ export function findAsset(m: ToolManifest, name: ToolName, p: Platform): { toolK
 export function currentPlatform(): Platform;
 export function envPath(env?): string;                 // PATH read case-insensitively (Windows "Path")
 export function whichSync(cmd: string, env?, platform?): string | null;
-  // Windows: tries PATHEXT extensions only (a bare file without extension is not runnable), `;` separator, case-insensitive
+  // Windows: tries PATHEXT extensions only (lower-case spelling first, so the path matches the file), `;` separator, case-insensitive PATH key
 export function spawnSpec(file: string, args: string[], platform?, env?): { file; args; options: { windowsVerbatimArguments? } };
   // .cmd/.bat on Windows → `%ComSpec% /d /s /c "<quoted cmd>"` (Node refuses to spawn them directly)
 export function fontsDir(o?): string | null;           // env SOLOCUT_FONTS (a directory) → managed tools/fonts/<ver>/ → null
@@ -454,14 +466,26 @@ export type Question = { id: string; kind: 'yesno'; text: string } | { id: strin
   | { id: string; kind: 'score'; text: string };
 export interface DecisionRequest { state: Record<string, unknown>; questions: Question[]; images?: { id: string; path: string; note?: string }[] }
 export interface DecisionAnswer { id: string; p?: number; choice?: Record<string, number> /* normalized */; score?: number }
-export function decide(req: DecisionRequest, o: { provider: 'ollama'|'openai'|'typesafe'|'custom'|'off'; model: string;
-  endpoint?: string; apiKey?: string; cacheDir: string; budget?: { remainingUsd: number };
-  onUsage?: (u: { provider; model; cached: boolean; costUsd: number; tokensIn?; tokensOut?; key }) => void;
+export function decide(req: DecisionRequest, o: { provider: 'claude-cli'|'codex-cli'|'gemini-cli'|'ollama'|'openai'|'typesafe'|'custom'|'off';
+  model: string; endpoint?: string; apiKey?: string; cacheDir: string; budget?: { remainingUsd: number };
+  callBudget?: { remaining: number } /* CLI providers: calls */; command?: string; runCli?: CliRunner; env?;
+  onUsage?: (u: { provider; model; cached: boolean; costUsd: number; tokensIn?; tokensOut?; key; calls? }) => void;
   fetch?: typeof fetch; timeoutMs?: number }): Promise<DecisionAnswer[]>;
+  // Agent CLIs = the user's own subscription (no key, cost 0, budget in calls; send many questions per call):
+  //   claude-cli: `claude -p --output-format json --strict-mcp-config --allowedTools Read --disallowedTools Bash Edit Write
+  //     NotebookEdit WebFetch WebSearch Task --max-turns N [--model m]`, prompt (with the JSON schema) on stdin, run in an
+  //     empty temp dir holding only the images (img_N.ext); result text → last JSON object.
+  //   codex-cli: `codex exec --skip-git-repo-check --sandbox read-only --output-schema schema.json --output-last-message
+  //     answer.json [--model m] --image=img_1.png … -`.   gemini-cli: `gemini --output-format json [--model m] -p "… @img_1.png"`.
+  //   `model` is passed only when it names that CLI's family (claude/opus/sonnet/haiku, gpt/o*/codex, gemini*).
+  //   claude-cli runs without ANTHROPIC_API_KEY first (the subscription login) and retries with it only when that fails.
+export const CLI_PROVIDERS: readonly ['claude-cli','codex-cli','gemini-cli']; export function isCliProvider(p): boolean;
+export function resolveProvider(setting: string, which: (cmd) => string | null): Provider;  // 'auto' → first installed of claude → codex → gemini, else 'off'
+export const defaultCliRunner: CliRunner;   // spawn, prompt on stdin, .cmd/.bat via cmd.exe on Windows; exit 127 = not runnable
   // ollama: POST /api/chat (images base64, format = JSON schema); openai: POST /v1/responses (json_schema strict);
   // custom: OpenAI-compatible /chat/completions; typesafe: stub POST <endpoint> { model, state, questions, images }.
   // Cache: <cacheDir>/<sha256(provider, model, endpoint, state, questions, image hashes)>.json.
-  // Budget is checked (estimate) before sending. DecideError.code = 'off'|'budget'|'http'|'malformed'|'config'|'image'.
+  // Budget is checked (estimate) before sending. DecideError.code = 'off'|'budget'|'http'|'malformed'|'config'|'image'|'cli'.
 export function band(p: number, t: { autoAbove: number; autoBelow: number }): 'yes'|'no'|'ask';  // ≥ autoAbove yes, ≤ autoBelow no, NaN ask
 export function parseAnswers(raw: unknown, q: Question[]): DecisionAnswer[];
 ```
@@ -578,10 +602,7 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
     Cache files are copied to `assets/library/<id><ext>` when used. Earlier template-placed sfx (`decided.by: template`)
     are replaced unless `--keep`. → `{ variant, added, removed, sfx: { id, at, timecode, trigger, asset, gainDb }[], library,
     dryRun, changed, warnings }`; no rules → error `no-rules`.
-  - `masks from-analysis [--source id] [--kinds email,token] [--kind pixelate|blur|fill] [--pad 0.15] [--keep] [--dry-run]`:
-    core masksFromPii per source with a pii file; earlier `mask_pii_*` masks not decided by a human are rebuilt; marks the
-    `masks` step done (note: how many need review / no analysis files). → `{ variant, added, removed, masks: { id, source,
-    reason, kind, from, to, keyframes }[], sources, files, dryRun, changed, warnings }`.
+  - `masks from-analysis`: see the desktop-recipe note below.
   - `multicam material` → `{ variant, cameras: { id, role, take }[], segments: SegmentMaterial[] (core cameraMaterial),
     check: CheckFinding (camera-switch), rules: { maxShotSec, minShotSec, prompt }, files, warnings }`.
     `edit split-for-switch --segment <id> --at <sourceFrame,…|[…]>` → core splitForSwitch ops (ids `<id>_s1…`); no split
@@ -599,6 +620,27 @@ managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and
     (`<project>/templates/<id>/template.yaml`, when id is the project's template) or `~/.solocut/templates/<id>/template.yaml`;
     the merged template must load or the file is restored (`invalid-template`); a hand-written override is never touched
     (`template-override`). → `{ template, scope: 'project'|'user', file, patch, dryRun }`. Errors `invalid-samples`, `invalid-profile`.
+- Decision model in the CLI (`decision.ts`): settings `decision.provider` default **`auto`** (agent CLI on PATH, else off);
+  env `SOLOCUT_DECISION_PROVIDER` overrides (tests/CI: off). Agent CLIs need no API key and no `cloudConsent`; API
+  providers keep consent + key + USD limits. CLI budget: `decision.limits.perProjectCalls` (default 200) minus the `calls`
+  logged in `.solocut/decisions.jsonl`. Batching: rough-cut judges 40 candidates per call, derive scores every segment in
+  one call, thumb candidates judge all frames in one call.
+- Glossary: `init` seeds `meta.glossary` with Latin phrases from the title ("Claude Code", "CLAUDE.md"). Terms = meta.glossary
+  + template `glossary: { term, reading? }[]` + terms in `script.md` (code spans, file names, capitalized phrases). They go
+  into whisper's `--prompt` (after the filler sentence, ≤ 160 chars of terms) and a caption pass respells near-misses by
+  reading (katakana sound key, Levenshtein similarity ≥ 0.75; exact spellings protected): `caption.text`/`lines` get the
+  term, `spoken`/words keep what was said, and `caption.corrections[] = { from, to, decided: { by: 'rule', reason:
+  'glossary: "…" → "…"', confidence, ruleRef: 'meta.glossary' } }`.
+- `check` on the preview (no `--input`): a spec failure that is only the reduced preview size with the right aspect ratio
+  passes ("delivery size is checked on the final render"; run `check --input renders/<target>/final.mp4`).
+- Render passes `encoder: settings.export.hwEncodePreview ? 'auto' : 'x264'` to executeRenderPlan (previews only).
+- `masks from-analysis` uses the desktop recipe (pii.ts = apps/desktop/src/shared/analysis.ts `piiMaskOps`): tracks of the
+  same kind link at IoU ≥ 0.3 within 2 × round(sourceFps / fps) frames; id `mask_pii_` + base-36 FNV-1a of
+  `<sourceId>:<kind>:<firstFrame>:<round(x·100)>:<round(y·100)>`; boxes in source pixels; last point held to `f + step − 1`;
+  confidence 0.8; decided `{ by: rule, reason: "OCR found <label> on screen", confidence: 0.8, needsReview: true }`.
+  Ids already in the timeline are skipped (the app owns these masks); options `--source --kinds email,phone,token
+  --kind pixelate|blur|fill --dry-run`; output `{ variant, added, existing, masks, sources, files, dryRun, changed, warnings }`.
+  `status`/`next` treat a todo `masks` step as done when the timeline already has `mask_pii_*` masks.
 History: `.solocut/history.jsonl` (main) / `.solocut/history.<variant>.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.

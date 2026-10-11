@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   durationFrames, frameToSeconds, frameToTimecode, sourceLocalSeconds, takeFrameToSeconds, timecodeToFrame, timelineFrameToTake,
   type Output, type Target, type Timeline,
@@ -182,13 +182,23 @@ function runFf(ffmpeg: string, args: string[], cwd: string): Promise<void> {
 }
 
 /** Compose one thumbnail: cover-crop the base to the format and put the title layer on top; JPEG ≤ 2 MB. */
+/**
+ * A path as a filter option value: relative to ffmpeg's cwd with "/" when possible (no drive colon to escape), else
+ * quoted with "/" and the drive colon escaped — `'C\\:/Users/…'`, the form ffmpeg parses on Windows.
+ */
+export function ffPath(p: string, cwd: string): string {
+  const rel = relative(cwd, p).split('\\').join('/');
+  if (rel && !isAbsolute(rel) && !/[:'\[\],;]/.test(rel)) return rel;
+  return `'${p.split('\\').join('/').replace(/'/g, "'\\''").replace(/:/g, '\\:')}'`;
+}
+
 async function compose(ffmpeg: string, dir: string, base: string, format: ThumbFormat, title: { svg?: string; ass?: string } | null, out: string, fontsDir?: string): Promise<void> {
   const { width: W, height: H } = THUMB_SIZES[format];
   const fit = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`;
   for (const q of [2, 4, 6, 9, 13, 18]) {
     let args: string[];
     if (title?.svg) args = ['-i', base, '-i', title.svg, '-filter_complex', `[0:v]${fit}[b];[1:v]scale=${W}:${H}[t];[b][t]overlay=0:0`, '-frames:v', '1', '-q:v', String(q), out];
-    else if (title?.ass) args = ['-i', base, '-vf', `${fit},ass=${title.ass}${fontsDir ? `:fontsdir=${fontsDir.replace(/[\\:']/g, (c) => `\\${c}`)}` : ''}`, '-frames:v', '1', '-q:v', String(q), out];
+    else if (title?.ass) args = ['-i', base, '-vf', `${fit},ass=${title.ass}${fontsDir ? `:fontsdir=${ffPath(fontsDir, dir)}` : ''}`, '-frames:v', '1', '-q:v', String(q), out];
     else args = ['-i', base, '-vf', fit, '-frames:v', '1', '-q:v', String(q), out];
     await runFf(ffmpeg, args, dir);
     if (statSync(out).size <= MAX_BYTES) return;

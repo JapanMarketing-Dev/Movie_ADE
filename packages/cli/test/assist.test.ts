@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadAnalysis } from '../src/analysis.js';
 import { trackChecks } from '../src/commands/media.js';
+import { fnv36, piiMaskId } from '../src/pii.js';
 import { createMcpServer } from '../src/mcp.js';
 import { readTimeline, type Project } from '../src/project.js';
 import { Sandbox } from './helpers.js';
@@ -131,38 +132,52 @@ describe('sfx apply', () => {
   });
 });
 
-describe('masks from-analysis', () => {
-  const pii = (frames: number[], box = { x: 0.1, y: 0.1, w: 0.2, h: 0.04 }) =>
-    ({ fps: 30, frames: frames.map((f) => ({ f, boxes: [{ ...box, kind: 'email', text: 'a@b.jp' }] })) });
+describe('masks from-analysis (same ids as the desktop app)', () => {
+  // the desktop format: f = source frame, 2 samples per second of a 30 fps source
+  const pii = (frames: number[], box = { x: 0.1, y: 0.1, w: 0.2, h: 0.04 }, kind = 'email') =>
+    ({ schema: 1, source: 'scr', fps: 2, sourceFps: 30, width: 1920, height: 1080, frames: frames.map((f) => ({ f, t: f / 30, changed: true, boxes: [{ ...box, kind, label: 'メールアドレス', text: 'a@b.jp' }] })) });
 
-  it('adds review-marked masks from pii.<source>.json, marks the step, and rebuilds on re-run', async () => {
+  it('builds masks with the app recipe, marks the step, and skips ids already in the timeline', async () => {
     await seed();
     mkdirSync(join(dir, 'derived', 'analysis'), { recursive: true });
-    writeFileSync(join(dir, 'derived', 'analysis', 'pii.scr.json'), JSON.stringify(pii([30, 40, 50, 60])));
+    writeFileSync(join(dir, 'derived', 'analysis', 'pii.scr.json'), JSON.stringify(pii([30, 45, 60, 300])));
     const r = await run(['masks', 'from-analysis']);
-    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, removed: 0, sources: ['scr'], files: ['derived/analysis/pii.scr.json'] });
-    expect(r.json.added).toBe(1);
-    expect(r.json.masks[0]).toMatchObject({ source: 'scr', reason: 'pii:email', kind: 'pixelate' });
-    const m = timeline().masks[0];
-    expect(m.id).toMatch(/^mask_pii_/);
-    expect(m.decided.needsReview).toBe(true);
+    expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true, existing: 0, sources: ['scr'], files: ['derived/analysis/pii.scr.json'] });
+    // 30 → 45 → 60 link (gap ≤ 2 × 15 frames); 300 starts a new track
+    expect(r.json.added).toBe(2);
+    const [m1, m2] = timeline().masks;
+    expect(m1.id).toBe(piiMaskId('scr', 'email', 30, { x: 0.1, y: 0.1 }));
+    expect(m1.id).toMatch(/^mask_pii_[0-9a-z]+$/);
+    expect(m1).toMatchObject({ kind: 'pixelate', source: 'scr', reason: 'pii:email', decided: { by: 'rule', reason: 'OCR found メールアドレス on screen', confidence: 0.8, needsReview: true } });
+    expect(m1.track.map((k: { frame: number }) => k.frame)).toEqual([30, 45, 60, 74]);   // held until the next sample
+    expect(m1.track[0]).toEqual({ frame: 30, box: { x: 192, y: 108, w: 384, h: 43 }, confidence: 0.8 });
+    expect(m2.track.map((k: { frame: number }) => k.frame)).toEqual([300, 314]);
     const st = JSON.parse(readFileSync(join(dir, '.solocut', 'status.json'), 'utf8'));
     expect(st.find((s: { step: string }) => s.step === 'masks').state).toBe('done');
+    // re-running (or after the app added them) adds nothing
     const again = await run(['masks', 'from-analysis', '--kind', 'blur']);
-    expect(again.json).toMatchObject({ added: 1, removed: 1 });
-    expect(timeline().masks).toHaveLength(1);
-    expect(timeline().masks[0].kind).toBe('blur');
-    // a mask a human confirmed stays
-    await run(['edit', 'setDecided', '--target', timeline().masks[0].id, '--decided', JSON.stringify({ by: 'human', reason: 'OK' })]);
-    const third = await run(['masks', 'from-analysis']);
-    expect(third.json.removed).toBe(0);
+    expect(again.json).toMatchObject({ added: 0, existing: 2 });
     expect(timeline().masks).toHaveLength(2);
+  });
+
+  it('the FNV-1a id recipe matches the desktop values', () => {
+    expect(fnv36('')).toBe((2166136261).toString(36));
+    expect(fnv36('a')).toBe((0xe40c292c).toString(36));
+    expect(piiMaskId('scr', 'email', 30, { x: 0.104, y: 0.096 })).toBe(`mask_pii_${fnv36('scr:email:30:10:10')}`);
+  });
+
+  it('status treats the step as done when the app already added PII masks', async () => {
+    await seed();
+    const mask = { id: 'mask_pii_abc', kind: 'pixelate', source: 'scr', reason: 'pii:email', track: [{ frame: 0, box: { x: 0, y: 0, w: 10, h: 10 }, confidence: 0.8 }], decided: { by: 'rule', reason: 'OCR', needsReview: true } };
+    expect((await run(['edit', 'addMask', '--mask', JSON.stringify(mask)])).json.ok).toBe(true);
+    const st = await run(['status']);
+    expect(st.json.steps.find((s: { step: string }) => s.step === 'masks')).toMatchObject({ state: 'done' });
   });
 
   it('filters, validation and missing / broken files', async () => {
     await seed();
     expect((await run(['masks', 'from-analysis', '--kind', 'emoji'])).code).toBe(2);
-    expect((await run(['masks', 'from-analysis', '--pad', '3'])).code).toBe(2);
+    expect((await run(['masks', 'from-analysis', '--pad', '0.1'])).code).toBe(2);   // not an option any more
     expect((await run(['masks', 'from-analysis', '--source', 'nope'])).json.error.code).toBe('not-found');
     const none = await run(['masks', 'from-analysis']);
     expect(none.json).toMatchObject({ ok: true, added: 0 });
@@ -173,6 +188,9 @@ describe('masks from-analysis', () => {
     const r = await run(['masks', 'from-analysis', '--kinds', 'phone']);
     expect(r.json.added).toBe(0);   // only phone numbers wanted
     expect(r.json.warnings.join(' ')).toContain('pii.cam.json');
+    writeFileSync(join(dir, 'derived', 'analysis', 'pii.scr.json'), JSON.stringify(pii([10], undefined, 'face')));
+    expect((await run(['masks', 'from-analysis'])).json.added).toBe(0);   // unknown kinds are ignored
+    writeFileSync(join(dir, 'derived', 'analysis', 'pii.scr.json'), JSON.stringify(pii([10, 20])));
     const d = await run(['masks', 'from-analysis', '--dry-run']);
     expect(d.json).toMatchObject({ dryRun: true, added: 1 });
     expect(timeline().masks).toHaveLength(0);
