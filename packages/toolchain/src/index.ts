@@ -1,9 +1,9 @@
 import { spawn, execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { accessSync, constants as fsc, createReadStream, createWriteStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { chmod, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, dirname, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { extractZip } from './zip.js';
@@ -42,6 +42,7 @@ const ENV_VARS: Record<ToolName, string> = {
   'whisper-cli': 'SOLOCUT_WHISPER_CLI',
   'whisper-model': 'SOLOCUT_WHISPER_MODEL',
   'whisper-model-small': 'SOLOCUT_WHISPER_MODEL_SMALL',
+  fonts: 'SOLOCUT_FONTS',
 };
 
 /** Executable names looked up on PATH (models are never on PATH). */
@@ -51,6 +52,7 @@ const PATH_NAMES: Record<ToolName, string[]> = {
   'whisper-cli': ['whisper-cli', 'whisper-cpp'],
   'whisper-model': [],
   'whisper-model-small': [],
+  fonts: [],
 };
 
 export interface AssetMatch { toolKey: string; version: string; asset: ToolAsset }
@@ -179,7 +181,7 @@ export function resolveToolSync(
   o: { manifest?: ToolManifest; platform?: Platform | null } = {},
 ): { path: string; source: ToolSource; version?: string } | null {
   const env = process.env[ENV_VARS[name]];
-  if (env && isFile(env)) return { path: env, source: 'env' };
+  if (env && (name === 'fonts' ? existsSync(env) : isFile(env))) return { path: env, source: 'env' };
   let plat: Platform | null = null;
   if (o.platform !== undefined) plat = o.platform;
   else {
@@ -239,8 +241,10 @@ export function ensureTool(name: ToolName, o: EnsureOptions = {}): Promise<strin
   const dir = join(toolsDir(), match.toolKey, match.version);
   const rel = match.asset.bin[name]!;
   if (readMarker(dir) && isFile(join(dir, rel))) return Promise.resolve(join(dir, rel));
-  if (!/^[0-9a-fA-F]{64}$/.test(match.asset.sha256)) {
-    return Promise.reject(new ToolchainError('checksum', `the manifest has no valid sha256 for ${match.asset.url} ("${match.asset.sha256}"); refusing to install`));
+  const hashes = match.asset.kind === 'bundle' ? (match.asset.parts ?? []).map((x) => [x.url, x.sha256] as const) : [[match.asset.url, match.asset.sha256] as const];
+  const bad = hashes.find(([, h]) => !/^[0-9a-fA-F]{64}$/.test(h));
+  if (bad || (match.asset.kind === 'bundle' && !hashes.length)) {
+    return Promise.reject(new ToolchainError('checksum', `the manifest has no valid sha256 for ${bad?.[0] ?? match.asset.url} ("${bad?.[1] ?? ''}"); refusing to install`));
   }
   const key = dir;
   let p = inflight.get(key);
@@ -306,17 +310,42 @@ async function install(m: AssetMatch, finalDir: string, o: EnsureOptions): Promi
   await mkdir(root, { recursive: true });
   try {
     const a = m.asset;
-    const file = a.kind === 'file' ? join(root, Object.values(a.bin)[0]!) : join(staging, `download.${a.kind}`);
-    const { sha256 } = await download(a.url, file, o);
-    if (sha256 !== a.sha256.toLowerCase()) {
-      throw new ToolchainError('checksum', `sha256 mismatch for ${a.url}: expected ${a.sha256}, got ${sha256}`);
+    if (a.kind === 'bundle') {
+      // several archives → one flat folder of the listed files
+      const parts = a.parts ?? [];
+      const total = parts.every((x) => x.size) ? parts.reduce((n, x) => n + x.size!, 0) : undefined;
+      let done = 0;
+      for (const [i, part] of parts.entries()) {
+        const file = join(staging, `part-${i}.${part.kind}`);
+        const { sha256, received } = await download(part.url, file, {
+          ...o, onProgress: o.onProgress ? (pr) => o.onProgress!(total === undefined ? { received: done + pr.received } : { received: done + pr.received, total }) : undefined,
+        } as EnsureOptions);
+        done += received;
+        if (sha256 !== part.sha256.toLowerCase()) throw new ToolchainError('checksum', `sha256 mismatch for ${part.url}: expected ${part.sha256}, got ${sha256}`);
+        const out = join(staging, `part-${i}`);
+        await mkdir(out, { recursive: true });
+        if (part.kind === 'zip') await extractZip(file, out);
+        else await runTar(file, out);
+        for (const [dest, src] of Object.entries(part.files)) {
+          if (dest !== basename(dest) || dest.startsWith('.')) throw new ToolchainError('extract', `invalid bundle file name: ${dest}`);
+          const from = join(out, src);
+          if (!isFile(from)) throw new ToolchainError('missing-bin', `${src} not found in ${part.url}`);
+          await copyFile(from, join(root, dest));
+        }
+      }
+    } else {
+      const file = a.kind === 'file' ? join(root, Object.values(a.bin)[0]!) : join(staging, `download.${a.kind}`);
+      const { sha256 } = await download(a.url, file, o);
+      if (sha256 !== a.sha256.toLowerCase()) {
+        throw new ToolchainError('checksum', `sha256 mismatch for ${a.url}: expected ${a.sha256}, got ${sha256}`);
+      }
+      if (a.kind === 'zip') await extractZip(file, root);
+      else if (a.kind !== 'file') await runTar(file, root);
     }
-    if (a.kind === 'zip') await extractZip(file, root);
-    else if (a.kind !== 'file') await runTar(file, root);
     for (const rel of Object.values(a.bin)) {
       const p = join(root, rel);
       if (!isFile(p)) throw new ToolchainError('missing-bin', `${rel} not found in ${a.url}`);
-      if (a.kind !== 'file' && process.platform !== 'win32') await chmod(p, 0o755);
+      if (a.kind !== 'file' && a.kind !== 'bundle' && process.platform !== 'win32') await chmod(p, 0o755);
     }
     const marker: Marker = { tool: m.toolKey, version: m.version, url: a.url, sha256: a.sha256, bins: a.bin, installedAt: new Date().toISOString() };
     await writeFile(join(root, MARKER), JSON.stringify(marker, null, 2));
@@ -343,6 +372,13 @@ function execVersion(bin: string): Promise<string | undefined> {
       res(m?.[1]);
     });
   });
+}
+
+/** Folder of the managed fonts (or $SOLOCUT_FONTS), or null when not installed. */
+export function fontsDir(): string | null {
+  const r = resolveToolSync('fonts');
+  if (!r) return null;
+  return r.source === 'env' ? r.path : dirname(r.path);
 }
 
 export async function toolStatus(o: { manifest?: ToolManifest; probeVersions?: boolean } = {}): Promise<Record<ToolName, ToolState>> {

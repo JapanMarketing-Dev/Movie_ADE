@@ -26,6 +26,11 @@ export function readFavorites(dir: string): string[] {
   }
 }
 
+/** `thumb pick` makes the image the post's thumbnail (outputs[].thumbnail); best effort. */
+export async function pick(dir: string, path: string, variant: Variant): Promise<void> {
+  await runCli(['thumb', 'pick', path, ...variantArgs(variant)], { cwd: dir }).catch(() => undefined);
+}
+
 export function setFavorite(dir: string, path: string, on: boolean): string[] {
   const rel = relative(dir, abs(dir, path)).split('\\').join('/');
   if (rel.startsWith('..')) throw new Error('not a project file');
@@ -53,7 +58,7 @@ export function parseCandidates(dir: string, data: unknown): ThumbCandidate[] {
 
 /** `thumb gen --json` → `{ thumbnails: [{ format, file, base, provider }] }` (older shape: `{ images }`). */
 export function parseImages(dir: string, data: unknown): ThumbImage[] {
-  const arr = isObj(data) && Array.isArray(data.thumbnails) ? data.thumbnails : isObj(data) && Array.isArray(data.images) ? data.images : [];
+  const arr = isObj(data) && Array.isArray(data.images) ? data.images : isObj(data) && Array.isArray(data.thumbnails) ? data.thumbnails : [];
   const favs = new Set(readFavorites(dir).map((f) => abs(dir, f)));
   return arr
     .map((x) => (typeof x === 'string' ? { path: x } : isObj(x) && typeof x.file === 'string' ? { ...x, path: x.file } : x))

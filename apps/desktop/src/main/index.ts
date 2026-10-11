@@ -354,7 +354,10 @@ function registerIpc(): void {
   handle('thumbs:candidates', (_e, dir, variant) => thumbs.candidates(dir, variant ?? 'main'));
   handle('thumbs:existing', (_e, dir) => thumbs.existing(dir));
   handle('thumbs:generate', (_e, dir, o) => thumbs.generate(dir, o));
-  handle('thumbs:favorite', (_e, dir, path, on) => thumbs.setFavorite(dir, path, on));
+  handle('thumbs:favorite', async (_e, dir, path, on, variant) => {
+    if (on) await thumbs.pick(dir, path, variant ?? 'main');
+    return thumbs.setFavorite(dir, path, on);
+  });
   handle('thumbs:providers', () => {
     const order = platform.getPath(platform.settingsObject(), 'imageGen.order');
     const list = Array.isArray(order) ? order.filter((x): x is string => typeof x === 'string') : [];
@@ -379,6 +382,7 @@ function registerIpc(): void {
     try {
       const r = await youtube.uploadToYouTube(form, (p) => emit(mainWc(), 'publish:progress', p));
       publish.appendHistory({ ...base, status: form.publishAt ? 'scheduled' : 'published', url: r.url, remoteId: r.videoId });
+      await publish.recordPublish(dir, target ?? 'youtube', form.publishAt ? 'scheduled' : 'published', r.url, r.warnings);
       return { ok: true, url: r.url, videoId: r.videoId, warnings: r.warnings };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);

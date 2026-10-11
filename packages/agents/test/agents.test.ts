@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  AGENTS, detectAgents, detectUsageLimit, getAgent, handoffMessage, hostOs, launchCommand, parseVersion, quoteArg, splitCommandLine,
+  AGENTS, detectAgents, detectUsageLimit, getAgent, handoffMessage, hostOs, launchCommand, parseVersion, quoteArg, spawnSpec, splitCommandLine, which,
 } from '../src/index.js';
+
+const WIN = process.platform === 'win32';
 
 const posixEcho = (line: string): string[] => {
   // let a real sh parse the line and print each argv on its own line
@@ -76,7 +78,7 @@ describe('launchCommand quoting', () => {
     expect(launchCommand(claude, 'cmd')).toBe('claude');
   });
 
-  it('posix: spaces, single quotes, $ and backticks survive a real shell', () => {
+  it.skipIf(WIN)('posix: spaces, single quotes, $ and backticks survive a real shell', () => {
     const prompt = `it's "done" $HOME \`id\` & ; | * ? 日本語`;
     const line = launchCommand(claude, 'posix', { prompt });
     expect(line.startsWith("claude -p --output-format json '")).toBe(true);
@@ -84,7 +86,7 @@ describe('launchCommand quoting', () => {
     expect(argv).toEqual(['-p', '--output-format', 'json', prompt]);
   });
 
-  it('posix: empty argument and a command path with spaces', () => {
+  it.skipIf(WIN)('posix: empty argument and a command path with spaces', () => {
     const def = { ...claude, command: '/Applications/My Tools/claude', printMode: [] };
     expect(launchCommand(def, 'posix', { prompt: '' })).toBe(`'/Applications/My Tools/claude' ''`);
     expect(posixEcho(`x 'a b' ''`)).toEqual(['a b', '']);
@@ -153,27 +155,47 @@ describe('detectUsageLimit', () => {
 describe('detectAgents', () => {
   let dir: string;
   const savedPath = process.env.PATH;
+  const savedPathext = process.env.PATHEXT;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'solocut-ag-'));
   });
   afterEach(() => {
     process.env.PATH = savedPath;
+    if (savedPathext === undefined) delete process.env.PATHEXT;
+    else process.env.PATHEXT = savedPathext;
     rmSync(dir, { recursive: true, force: true });
   });
 
   it('finds installed agents on PATH and reads their version', async () => {
     mkdirSync(join(dir, 'bin'));
-    writeFileSync(join(dir, 'bin', 'claude'), '#!/bin/sh\necho "2.1.4 (Claude Code)"\n');
-    chmodSync(join(dir, 'bin', 'claude'), 0o755);
-    writeFileSync(join(dir, 'bin', 'codex'), '#!/bin/sh\nexit 3\n');
-    chmodSync(join(dir, 'bin', 'codex'), 0o755);
+    // npm installs .cmd shims on Windows; elsewhere plain executables
+    const exe = (name: string, body: string) => {
+      const p = join(dir, 'bin', WIN ? `${name}.cmd` : name);
+      writeFileSync(p, WIN ? `@echo off\r\n${body}\r\n` : `#!/bin/sh\n${body}\n`);
+      if (!WIN) chmodSync(p, 0o755);
+      return p;
+    };
+    const claude = exe('claude', WIN ? 'echo 2.1.4 (Claude Code)' : 'echo "2.1.4 (Claude Code)"');
+    const codex = exe('codex', 'exit 3');
     writeFileSync(join(dir, 'bin', 'gemini'), 'not executable');
     process.env.PATH = join(dir, 'bin');
+    process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
     const r = await detectAgents();
-    expect(r.find((x) => x.id === 'claude')).toEqual({ id: 'claude', installed: true, path: join(dir, 'bin', 'claude'), version: '2.1.4' });
-    expect(r.find((x) => x.id === 'codex')).toEqual({ id: 'codex', installed: true, path: join(dir, 'bin', 'codex') });
+    expect(r.find((x) => x.id === 'claude')).toEqual({ id: 'claude', installed: true, path: claude, version: '2.1.4' });
+    expect(r.find((x) => x.id === 'codex')).toEqual({ id: 'codex', installed: true, path: codex });
     expect(r.find((x) => x.id === 'gemini')!.installed).toBe(false);
     expect(r).toHaveLength(6);
+  });
+
+  it('Windows: finds .cmd shims under a "Path" env key and runs them via cmd.exe', () => {
+    mkdirSync(join(dir, 'w'));
+    writeFileSync(join(dir, 'w', 'claude.cmd'), '');
+    writeFileSync(join(dir, 'w', 'claude'), '');
+    const found = which('claude', { Path: `C:\\x;${join(dir, 'w')}`, PATHEXT: '.EXE;.CMD' }, 'win32');
+    expect(found?.toLowerCase()).toBe(join(dir, 'w', 'claude.cmd').toLowerCase());
+    const sp = spawnSpec('C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd', ['--version'], 'win32', { COMSPEC: 'cmd.exe' });
+    expect(sp).toEqual({ command: 'cmd.exe', args: ['/d', '/s', '/c', '"C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd --version"'], windowsVerbatimArguments: true });
+    expect(spawnSpec('/usr/local/bin/claude', ['--version'], 'linux')).toEqual({ command: '/usr/local/bin/claude', args: ['--version'] });
   });
 
   it('parseVersion', () => {

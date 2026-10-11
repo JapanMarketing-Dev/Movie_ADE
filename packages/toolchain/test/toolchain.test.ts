@@ -9,7 +9,7 @@ import { crc32, deflateRawSync } from 'node:zlib';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MANIFEST, ToolchainError, currentPlatform, ensureTool, extractZip, findAsset, resolveTool, resolveToolSync, sha256File,
-  envPath, solocutHome, spawnSpec, toolStatus, toolsDir, whichSync, type ToolManifest,
+  envPath, fontsDir, solocutHome, spawnSpec, toolStatus, toolsDir, whichSync, type ToolManifest,
 } from '../src/index.js';
 
 const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
@@ -18,7 +18,7 @@ const WIN = process.platform === 'win32';
 /** Point PATH (whatever its case on this OS) at `p` only. */
 function setPath(p: string): void {
   for (const k of Object.keys(process.env)) if (k.toUpperCase() === 'PATH') delete process.env[k];
-  setPath(p);
+  process.env['PATH'] = p;
   process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
 }
 
@@ -69,7 +69,7 @@ beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'solocut-tc-'));
   process.env.SOLOCUT_HOME = join(tmp, 'home');
   // the suite may run with a managed ffmpeg in the environment; resolution-order tests need a clean slate
-  for (const k of ['SOLOCUT_FFMPEG', 'SOLOCUT_FFPROBE', 'SOLOCUT_WHISPER_CLI', 'SOLOCUT_WHISPER_MODEL', 'SOLOCUT_WHISPER_MODEL_SMALL']) delete process.env[k];
+  for (const k of ['SOLOCUT_FFMPEG', 'SOLOCUT_FFPROBE', 'SOLOCUT_WHISPER_CLI', 'SOLOCUT_WHISPER_MODEL', 'SOLOCUT_WHISPER_MODEL_SMALL', 'SOLOCUT_FONTS']) delete process.env[k];
   routes.clear();
   hits.clear();
 });
@@ -139,9 +139,11 @@ describe('DEFAULT_MANIFEST', () => {
     for (const [key, tool] of Object.entries(DEFAULT_MANIFEST.tools)) {
       expect(tool.version, key).toBeTruthy();
       for (const a of tool.assets) {
-        expect(a.sha256, a.url).toMatch(/^[0-9a-f]{64}$/);
-        expect(a.url).toMatch(/^https:\/\//);
-        expect(a.url).not.toMatch(/\/latest\//);
+        for (const x of a.kind === 'bundle' ? a.parts ?? [] : [a]) {
+          expect(x.sha256, x.url).toMatch(/^[0-9a-f]{64}$/);
+          expect(x.url).toMatch(/^https:\/\//);
+          expect(x.url).not.toMatch(/\/latest\//);
+        }
         expect(Object.keys(a.bin).length).toBeGreaterThan(0);
       }
     }
@@ -324,7 +326,7 @@ describe('toolStatus', () => {
     const fake = fakeExe(bin, 'ffmpeg', 'ffmpeg version 7.1-test Copyright');
     setPath(bin);
     const s = await toolStatus();
-    expect(Object.keys(s).sort()).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small']);
+    expect(Object.keys(s).sort()).toEqual(['ffmpeg', 'ffprobe', 'fonts', 'whisper-cli', 'whisper-model', 'whisper-model-small']);
     expect(s.ffmpeg).toEqual({ installed: true, path: fake, source: 'path', version: '7.1-test' });
     expect(s.ffprobe.installed).toBe(false);
   });
@@ -405,9 +407,10 @@ describe('Windows lookup rules (simulated)', () => {
     writeFileSync(join(bin, 'claude.cmd'), '');
     writeFileSync(join(bin, 'ffmpeg.exe'), '');
     const env = { Path: `C:\\nowhere;${bin}`, PATHEXT: '.EXE;.CMD' };
-    expect(whichSync('claude', env, 'win32')).toBe(join(bin, 'claude.cmd'));
-    expect(whichSync('ffmpeg', env, 'win32')).toBe(join(bin, 'ffmpeg.exe'));
-    expect(whichSync('claude.cmd', env, 'win32')).toBe(join(bin, 'claude.cmd'));
+    const lc = (x: string | null) => x?.toLowerCase();
+    expect(lc(whichSync('claude', env, 'win32'))).toBe(join(bin, 'claude.cmd').toLowerCase());
+    expect(lc(whichSync('ffmpeg', env, 'win32'))).toBe(join(bin, 'ffmpeg.exe').toLowerCase());
+    expect(lc(whichSync('claude.cmd', env, 'win32'))).toBe(join(bin, 'claude.cmd').toLowerCase());
     expect(whichSync('nothing', env, 'win32')).toBeNull();
     expect(envPath({ path: 'a' })).toBe('a');
   });
@@ -420,5 +423,48 @@ describe('Windows lookup rules (simulated)', () => {
     expect(sp.windowsVerbatimArguments).toBe(true);
     expect(spawnSpec('/usr/bin/codex', ['a'], 'darwin')).toEqual({ command: '/usr/bin/codex', args: ['a'] });
     expect(spawnSpec('C:\\x\\ffmpeg.exe', ['-version'], 'win32')).toEqual({ command: 'C:\\x\\ffmpeg.exe', args: ['-version'] });
+  });
+});
+
+describe('fonts bundle', () => {
+  it('pins Noto Sans JP and JetBrains Mono (OFL) for every platform', () => {
+    for (const os of ['mac', 'win', 'linux'] as const) for (const arch of ['x64', 'arm64'] as const) {
+      const m = findAsset(DEFAULT_MANIFEST, 'fonts', { os, arch })!;
+      expect(m.asset.kind).toBe('bundle');
+      const files = (m.asset.parts ?? []).flatMap((x) => Object.keys(x.files));
+      for (const f of ['NotoSansJP-Bold.otf', 'NotoSansJP-Black.otf', 'LICENSE-NotoSansJP.txt', 'JetBrainsMono-Regular.ttf', 'OFL-JetBrainsMono.txt']) expect(files).toContain(f);
+    }
+  });
+
+  it('installs several archives into one flat folder; fontsDir() and $SOLOCUT_FONTS', async () => {
+    const a = makeZip([{ name: 'NotoSansJP-Bold.otf', data: 'otf' }, { name: 'LICENSE', data: 'OFL' }]);
+    const b = makeZip([{ name: 'fonts/ttf/Mono.ttf', data: 'ttf', deflate: true }]);
+    serve('/a.zip', a);
+    serve('/b.zip', b);
+    const m: ToolManifest = { schema: 1, tools: { fonts: { version: 'v1', assets: [{ ...plat, url: 'bundle:fonts', sha256: '0'.repeat(64), kind: 'bundle', bin: { fonts: 'NotoSansJP-Bold.otf' }, parts: [
+      { url: `${base}/a.zip`, sha256: sha(a), kind: 'zip', size: a.length, files: { 'NotoSansJP-Bold.otf': 'NotoSansJP-Bold.otf', 'LICENSE-Noto.txt': 'LICENSE' } },
+      { url: `${base}/b.zip`, sha256: sha(b), kind: 'zip', size: b.length, files: { 'Mono.ttf': 'fonts/ttf/Mono.ttf' } },
+    ] }] } } };
+    const progressSeen: number[] = [];
+    const p = await ensureTool('fonts', { manifest: m, platform: plat, onProgress: (x) => progressSeen.push(x.received) });
+    const dir = join(toolsDir(), 'fonts', 'v1');
+    expect(p).toBe(join(dir, 'NotoSansJP-Bold.otf'));
+    expect(readdirSync(dir).sort()).toEqual(['.solocut-tool.json', 'LICENSE-Noto.txt', 'Mono.ttf', 'NotoSansJP-Bold.otf']);
+    expect(progressSeen.at(-1)).toBe(a.length + b.length);
+    expect(readFileSync(join(dir, 'Mono.ttf'), 'utf8')).toBe('ttf');
+    process.env.SOLOCUT_FONTS = join(tmp, 'myfonts');
+    mkdirSync(join(tmp, 'myfonts'));
+    expect(fontsDir()).toBe(join(tmp, 'myfonts'));
+  });
+
+  it('a wrong part hash installs nothing; a missing file is reported', async () => {
+    const a = makeZip([{ name: 'X.otf', data: 'x' }]);
+    serve('/a.zip', a);
+    const mk = (sha256: string, files: Record<string, string>): ToolManifest => ({ schema: 1, tools: { fonts: { version: 'v2', assets: [{ ...plat, url: 'bundle:fonts', sha256: '0'.repeat(64), kind: 'bundle', bin: { fonts: 'X.otf' }, parts: [{ url: `${base}/a.zip`, sha256, kind: 'zip', files }] }] } } });
+    await expect(ensureTool('fonts', { manifest: mk('1'.repeat(64), { 'X.otf': 'X.otf' }), platform: plat })).rejects.toMatchObject({ code: 'checksum' });
+    await expect(ensureTool('fonts', { manifest: mk(sha(a), { 'X.otf': 'Y.otf' }), platform: plat })).rejects.toMatchObject({ code: 'missing-bin' });
+    await expect(ensureTool('fonts', { manifest: mk(sha(a), { '../X.otf': 'X.otf' }), platform: plat })).rejects.toMatchObject({ code: 'extract' });
+    await expect(ensureTool('fonts', { manifest: mk('TBD', { 'X.otf': 'X.otf' }), platform: plat })).rejects.toThrow(/no valid sha256/);
+    expect(existsSync(join(toolsDir(), 'fonts', 'v2'))).toBe(false);
   });
 });

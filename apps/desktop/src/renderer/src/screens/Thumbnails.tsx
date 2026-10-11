@@ -67,7 +67,7 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
 
   const toggleFav = async (img: ThumbImage) => {
     if (!dir) return;
-    const favs = await api.invoke('thumbs:favorite', dir, img.path, !img.favorite);
+    const favs = await api.invoke('thumbs:favorite', dir, img.path, !img.favorite, variant);
     setImages((xs) => xs.map((x) => ({ ...x, favorite: favs.some((f) => x.path.endsWith(f)) })));
   };
 

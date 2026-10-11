@@ -72,12 +72,12 @@ export function safeRect(target: Target | 'preview', size: { width: number; heig
   if ('titleSafe' in sa) {
     const mx = (size.width * (1 - sa.titleSafe)) / 2;
     const my = (size.height * (1 - sa.titleSafe)) / 2;
-    return { x: mx, y: my, w: size.width - 2 * mx, h: size.height - 2 * my };
+    return { x: Math.round(mx), y: Math.round(my), w: Math.round(size.width - 2 * mx), h: Math.round(size.height - 2 * my) };
   }
   // insets are defined for 1080×1920; scale to the output
   const kx = size.width / 1080;
   const ky = size.height / 1920;
-  return { x: sa.left * kx, y: sa.top * ky, w: size.width - (sa.left + sa.right) * kx, h: size.height - (sa.top + sa.bottom) * ky };
+  return { x: Math.round(sa.left * kx), y: Math.round(sa.top * ky), w: Math.round(size.width - (sa.left + sa.right) * kx), h: Math.round(size.height - (sa.top + sa.bottom) * ky) };
 }
 
 /** caption-safe-area for one target: every caption rect (estimated) must lie inside the preset's safe area. */
@@ -207,7 +207,10 @@ export function masksFromPii(analysis: PiiAnalysis, sourceId: string, o: { size:
     const y = Math.max(0, r.y - r.h * pad);
     const x2 = Math.min(W, r.x + r.w * (1 + pad));
     const y2 = Math.min(H, r.y + r.h * (1 + pad));
-    return { x: Math.round(x), y: Math.round(y), w: Math.max(1, Math.round(x2 - x)), h: Math.max(1, Math.round(y2 - y)) };
+    // round outward but never past the frame
+    const xi = Math.max(0, Math.round(x));
+    const yi = Math.max(0, Math.round(y));
+    return { x: xi, y: yi, w: Math.max(1, Math.min(W, Math.round(x2)) - xi), h: Math.max(1, Math.min(H, Math.round(y2)) - yi) };
   };
   const taken = new Set(o.taken ?? []);
   const ops: Op[] = [];

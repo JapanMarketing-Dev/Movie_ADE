@@ -14,6 +14,7 @@ import { registerProject } from '@solocut/archive';
 import { CliError, emit, info, intOpt, opts, progress, progressDone, t, type Ctx } from '../ctx.js';
 import { alignWordsToSpeech } from '../align.js';
 import { apiKeyFor } from '../keys.js';
+import { ensureFonts } from '../fonts.js';
 import { cutCandidates, planKeeps, textIn, type Removal } from '../cuts.js';
 import {
   VARIANTS, applyEdit, listDirs, openProject, paths, projectTemplate, readJsonFile, readTimeline, setStep, variantExists, vpaths, writeAtomic, type Project,
@@ -711,9 +712,13 @@ async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 
   const m = await media();
   const tpl = projectTemplate(p);
   const ass = join(p.dir, vpaths(p).ass);
+  const fontWarnings: string[] = [];
+  const needsFonts = tl.captions.length > 0 || tl.scenes.length > 0 || tl.overlays.some((o) => o.kind === 'telop' || o.kind === 'keystroke');
+  const fontsDir = needsFonts ? await ensureFonts(ctx, fontWarnings) : null;
   let plan;
   try {
     plan = compile(tl, {
+      ...(fontsDir ? { fontsDir } : {}),
       quality: o.quality, ...(o.target ? { target: o.target } : {}), projectDir: p.dir,
       ...(tl.captions.length && (p.variant || tpl.captions.burnIn) && existsSync(ass) ? { assPath: vpaths(p).ass } : {}),
     });
@@ -721,11 +726,11 @@ async function renderTimeline(ctx: Ctx, p: Project, tl: Timeline, o: { quality: 
     throw new CliError('compile-failed', (e as Error).message);
   }
   const r = await m.executeRenderPlan(plan, {
-    projectDir: p.dir, cacheDir: join('derived', 'cache', 'render'), output: o.output,
+    projectDir: p.dir, cacheDir: join('derived', 'cache', 'render'), output: o.output, ...(fontsDir ? { fontsDir } : {}),
     onProgress: ({ done, total }) => progress(ctx, 'render', total ? done / total : 1, `${t(ctx, '書き出し中', 'rendering')} ${done}/${total}`),
   });
   progressDone(ctx, 'render');
-  return { ...r, warnings: plan.warnings };
+  return { ...r, warnings: [...fontWarnings, ...plan.warnings] };
 }
 
 /** Main + every derived variant that exists (for --all). */

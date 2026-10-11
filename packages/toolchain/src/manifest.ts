@@ -4,8 +4,8 @@
 // Hugging Face lfs.oid). Exception, hash taken from the publisher only: ggml-large-v3-turbo-q5_0.bin (HF API).
 // whisper-cli zips (Solocut CI, R2) were hashed after download on 2026-10-11.
 
-export type ToolName = 'ffmpeg' | 'ffprobe' | 'whisper-cli' | 'whisper-model' | 'whisper-model-small';
-export const TOOL_NAMES: readonly ToolName[] = ['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small'];
+export type ToolName = 'ffmpeg' | 'ffprobe' | 'whisper-cli' | 'whisper-model' | 'whisper-model-small' | 'fonts';
+export const TOOL_NAMES: readonly ToolName[] = ['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small', 'fonts'];
 
 export type ToolOs = 'mac' | 'win' | 'linux';
 export type ToolArch = 'x64' | 'arm64';
@@ -15,10 +15,12 @@ export interface ToolAsset {
   arch: ToolArch;
   url: string;
   sha256: string;
-  kind: 'zip' | 'tar.xz' | 'tar.gz' | 'file';
-  /** Tool name → path inside the extracted archive (for `file`, the file name it is saved as). */
+  kind: 'zip' | 'tar.xz' | 'tar.gz' | 'file' | 'bundle';
+  /** Tool name → path inside the extracted archive (for `file`, the file name it is saved as; for `bundle`, a file of the flat dir). */
   bin: Record<string, string>;
   size?: number;
+  /** kind 'bundle': several archives whose listed files are copied into one flat folder (fonts + their licenses). */
+  parts?: { url: string; sha256: string; kind: 'zip' | 'tar.xz' | 'tar.gz'; size?: number; files: Record<string, string> }[];
 }
 
 export interface ToolManifest {
@@ -108,6 +110,32 @@ export const DEFAULT_MANIFEST: ToolManifest = {
         sw('win', 'x64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
         sw('win', 'arm64', 'win-x64', '5060ef89a4df022aadc88b976fab56e1a89c6442032451d182fb57e18bbf9afc'),
       ],
+    },
+    // OFL fonts for captions, scenes and thumbnails (docs/06): one flat folder libass / the engine can use as fontsdir.
+    // Noto Sans JP static OTF from notofonts/noto-cjk Sans2.004 (subset per language), JetBrains Mono 2.304.
+    fonts: {
+      version: 'noto-sans-jp-2.004+jetbrains-mono-2.304',
+      license: 'OFL-1.1',
+      source: 'https://github.com/notofonts/noto-cjk, https://github.com/JetBrains/JetBrainsMono',
+      assets: everywhere({
+        url: 'bundle:fonts', sha256: '0'.repeat(64), kind: 'bundle',
+        bin: { fonts: 'NotoSansJP-Bold.otf' },
+        parts: [
+          {
+            url: 'https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/16_NotoSansJP.zip', kind: 'zip', size: 27139567,
+            sha256: '2bbdd2c20f30670b39ca735c96d75f1fdabdb348103e43b820cf17701fd22b18',
+            files: {
+              'NotoSansJP-Regular.otf': 'NotoSansJP-Regular.otf', 'NotoSansJP-Medium.otf': 'NotoSansJP-Medium.otf',
+              'NotoSansJP-Bold.otf': 'NotoSansJP-Bold.otf', 'NotoSansJP-Black.otf': 'NotoSansJP-Black.otf', 'LICENSE-NotoSansJP.txt': 'LICENSE',
+            },
+          },
+          {
+            url: 'https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip', kind: 'zip', size: 5622857,
+            sha256: '6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf',
+            files: { 'JetBrainsMono-Regular.ttf': 'fonts/ttf/JetBrainsMono-Regular.ttf', 'JetBrainsMono-Bold.ttf': 'fonts/ttf/JetBrainsMono-Bold.ttf', 'OFL-JetBrainsMono.txt': 'OFL.txt' },
+          },
+        ],
+      }),
     },
     'whisper-model': {
       version: 'large-v3-turbo-q5_0',

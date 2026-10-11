@@ -24,6 +24,7 @@
     "node-pty": "1.2.0-beta.15"
   },
   "devDependencies": {
+    "@mediapipe/tasks-vision": "1.1.0",
     "@solocut/agents": "workspace:*",
     "@solocut/archive": "workspace:*",
     "@solocut/captions": "workspace:*",
@@ -46,6 +47,8 @@
     "lucide-react": "^0.540.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0",
     "vite": "^7.0.0"
   }
 }

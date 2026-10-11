@@ -99,7 +99,7 @@ export interface InvokeMap {
   'thumbs:candidates': { args: [dir: string, variant?: Variant]; result: CliResult<ThumbCandidate[]> };
   'thumbs:existing': { args: [dir: string]; result: ThumbImage[] };
   'thumbs:generate': { args: [dir: string, o: { frame: number; n: number; provider?: string; title?: string; variant?: Variant }]; result: CliResult<ThumbImage[]> };
-  'thumbs:favorite': { args: [dir: string, path: string, on: boolean]; result: string[] };
+  'thumbs:favorite': { args: [dir: string, path: string, on: boolean, variant?: Variant]; result: string[] };
   'thumbs:providers': { args: []; result: string[] };
 
   'publish:draft': { args: [dir: string]; result: PublishDraft };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatFrames, isUnknownOpError, isVariant, previewCandidates, stepsForVariant, variantArgs, variantTarget, variantTimelinePath, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
+import { formatFrames, isUnknownOpError, isVariant, parseVariantStatus, previewCandidates, stepsForVariant, variantArgs, variantTarget, variantTimelinePath, parseCliJson, parseNext, parseSteps, progressOf, reviewOps, stepMark, timelineOverview } from '../src/shared/project';
 
 const decidedReview = { by: 'decision-model', reason: 'mid-word cut', confidence: 0.55, needsReview: true };
 
@@ -178,7 +178,9 @@ describe('variants (docs/18)', () => {
     expect(variantArgs('main')).toEqual([]);
     expect(variantArgs(undefined)).toEqual([]);
     expect(variantArgs('youtube-shorts')).toEqual(['--variant', 'youtube-shorts']);
-    expect(previewCandidates('main')[0]).toBe('renders/preview.mp4');
+    expect(previewCandidates('main').slice(0, 2)).toEqual(['renders/youtube/preview.mp4', 'renders/preview.mp4']);
+    expect(parseVariantStatus({ variants: { tiktok: { exists: true, stale: true }, bogus: {}, 'youtube-shorts': 3 } })).toEqual({ tiktok: { exists: true, stale: true } });
+    expect(parseVariantStatus(null)).toEqual({});
     expect(previewCandidates('tiktok')[0]).toBe('renders/tiktok/preview.mp4');
     expect(variantTarget('main')).toBe('youtube');
     expect(variantTarget('tiktok')).toBe('tiktok');

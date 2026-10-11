@@ -70,7 +70,7 @@ export function parseFeedbackItem(raw: unknown, i: number, dir: string, timecode
   const item: FeedbackItem = {
     n,
     frame,
-    timecode: timecode(frame),
+    timecode: typeof raw.timecode === 'string' && raw.timecode ? raw.timecode : timecode(frame),
     spoken: typeof raw.speech === 'string' ? raw.speech : typeof raw.spoken === 'string' ? raw.spoken : '',
     request: typeof raw.request === 'string' ? raw.request : typeof raw.title === 'string' ? raw.title : '',
     notes: Array.isArray(raw.notes) ? raw.notes.filter((x): x is string => typeof x === 'string') : [],
@@ -85,7 +85,7 @@ export function parseFeedbackItem(raw: unknown, i: number, dir: string, timecode
 export function parseFeedbackShow(input: unknown, timecode?: (frame: number) => string): FeedbackImport | null {
   const o = isObj(input) && isObj(input.feedback) ? input.feedback : input;
   if (!isObj(o) || typeof o.id !== 'string') return null;
-  const dir = `feedback/${o.id}`;
+  const dir = typeof o.dir === 'string' ? o.dir : `feedback/${o.id}`;
   const items = Array.isArray(o.items)
     ? o.items.map((x, i) => parseFeedbackItem(x, i, dir, timecode)).filter((x): x is FeedbackItem => x !== null)
     : [];

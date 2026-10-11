@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, promises as fsp, readFileSync, readdirSync, stat
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { CliResult, ProjectInfo, ProjectSnapshot, RecentProject, ReviewItem, Variant } from '../../shared/types';
-import { isUnknownOpError, parseNext, parseSteps, previewCandidates, reviewOps, stepsForVariant, timelineOverview, variantArgs, variantTimelinePath } from '../../shared/project';
+import { isUnknownOpError, parseNext, parseVariantStatus, parseSteps, previewCandidates, reviewOps, stepsForVariant, timelineOverview, variantArgs, variantTimelinePath } from '../../shared/project';
 import { mediaUrl } from '../../shared/ipc';
 import { runCli } from './cli';
 import { allowMediaRoot } from './media-protocol';
@@ -126,7 +126,11 @@ export async function snapshot(dir: string, variant: Variant = 'main'): Promise<
   const sd = status.data as { timelineError?: unknown } | undefined;
   if (status.ok && typeof sd?.timelineError === 'string') errors.push(`timeline.json: ${sd.timelineError}`);
 
-  const snap: ProjectSnapshot = { project, variant, variants: availableVariants(dir), steps: stepsForVariant(all, variant), errors };
+  const vs = status.ok ? parseVariantStatus(status.data) : {};
+  const variants = availableVariants(dir);
+  for (const [k, x] of Object.entries(vs)) if (x?.exists && !variants.includes(k as Variant)) variants.push(k as Variant);
+  const snap: ProjectSnapshot = { project, variant, variants, steps: stepsForVariant(all, variant), errors };
+  if (variant !== 'main' && vs[variant]?.stale) snap.stale = true;
   const n = status.ok ? parseNext(status.data) : undefined;
   if (n) snap.next = n;
 
@@ -136,9 +140,6 @@ export async function snapshot(dir: string, variant: Variant = 'main'): Promise<
     if (t === undefined) errors.push(`${variantTimelinePath(variant)}: invalid JSON`);
     else {
       snap.overview = timelineOverview(t);
-      const derived = (t as { meta?: { derivedFrom?: { mainHash?: unknown } } }).meta?.derivedFrom;
-      const flag = (t as { meta?: { stale?: unknown } }).meta?.stale;
-      if (derived && flag === true) snap.stale = true;
     }
   }
   const r = latestRender(dir, variant);

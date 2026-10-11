@@ -78,32 +78,41 @@ export function targetFrom(projectDir: string, o: Dict): PublishTarget | null {
 }
 
 const VARIANT_OF: Record<'youtube' | 'tiktok' | 'youtube-shorts', Variant> = { youtube: 'main', tiktok: 'tiktok', 'youtube-shorts': 'youtube-shorts' };
+const TARGETS = ['youtube', 'tiktok', 'youtube-shorts'] as const;
 
-/** The three posts of docs/18 (YouTube main, TikTok, Shorts): metadata from `meta show` per variant, files from the timelines. */
+/**
+ * The three posts of docs/18 (YouTube main, TikTok, Shorts). `solocut meta --json` lists every variant's output with
+ * metadata and files; without it (older CLI) the timelines are read directly.
+ */
 export async function loadDraft(projectDir: string): Promise<PublishDraft> {
-  const targets: PublishTarget[] = [];
+  const byTarget = new Map<string, PublishTarget>();
   let metaSource: PublishDraft['metaSource'] = 'timeline';
-  for (const target of ['youtube', 'tiktok', 'youtube-shorts'] as const) {
-    const v = VARIANT_OF[target];
+  const r = await runCli(['meta'], { cwd: projectDir, timeoutMs: 30_000 });
+  if (r.ok && isObj(r.data) && Array.isArray(r.data.outputs)) {
+    metaSource = 'cli';
+    for (const o of r.data.outputs.filter(isObj)) {
+      const t = targetFrom(projectDir, o);
+      if (t && !byTarget.has(t.target)) byTarget.set(t.target, t);
+    }
+  }
+  for (const target of TARGETS) {
+    if (byTarget.has(target)) continue;
     let tl: Dict = {};
     try {
-      tl = JSON.parse(readFileSync(join(projectDir, variantTimelinePath(v)), 'utf8')) as Dict;
+      tl = JSON.parse(readFileSync(join(projectDir, variantTimelinePath(VARIANT_OF[target])), 'utf8')) as Dict;
     } catch {
       /* variant not derived yet */
     }
     const outs = Array.isArray(tl.outputs) ? tl.outputs.filter(isObj) : [];
-    const fromTl = outs.find((o) => o.target === target);
-    const r = await runCli(['meta', 'show', '--target', target, ...variantArgs(v)], { cwd: projectDir, timeoutMs: 30_000 });
-    const fromCli = r.ok && isObj(r.data) && Array.isArray(r.data.outputs) ? r.data.outputs.filter(isObj).find((o) => o.target === target) : undefined;
-    if (fromCli) metaSource = 'cli';
-    const merged: Dict = { ...(fromTl ?? {}), ...(fromCli ?? {}), target };
-    const t = targetFrom(projectDir, merged) ?? { target, title: '', titleCandidates: [], description: '', tags: [] };
+    const t = targetFrom(projectDir, { ...(outs.find((o) => o.target === target) ?? {}), target }) ?? { target, title: '', titleCandidates: [], description: '', tags: [] };
     if (!t.title && isObj(tl.meta) && typeof tl.meta.title === 'string') t.title = tl.meta.title;
-    if (!t.render) {
-      const guess = files(join(projectDir, 'renders', target), /\.(mp4|mov)$/i, 1)[0];
-      if (guess) t.render = guess;
-    }
-    targets.push(t);
+    byTarget.set(target, t);
+  }
+  const targets = TARGETS.map((t) => byTarget.get(t)!);
+  for (const t of targets) {
+    if (t.render) continue;
+    const guess = files(join(projectDir, 'renders', t.target), /\.(mp4|mov)$/i, 1).find((p) => !/preview\.mp4$/.test(p));
+    if (guess) t.render = guess;
   }
   const renders = join(projectDir, 'renders');
   return {
@@ -114,6 +123,14 @@ export async function loadDraft(projectDir: string): Promise<PublishDraft> {
     history: readHistory(projectDir),
     metaSource,
   };
+}
+
+/** `solocut publish record` after a post (CONTRACTS.md): updates outputs[].publish and the publish step. Best effort. */
+export async function recordPublish(projectDir: string, target: 'youtube' | 'tiktok' | 'youtube-shorts', status: 'published' | 'scheduled' | 'failed' | 'draft', url?: string, warnings?: string[]): Promise<void> {
+  const args = ['publish', 'record', '--target', target, '--status', status];
+  if (url) args.push('--url', url);
+  const r = await runCli(args, { cwd: projectDir });
+  if (!r.ok) warnings?.push(`publish record: ${r.error ?? 'failed'}`);
 }
 
 /** Writes the approved title / description / tags back with `solocut meta set` (so the timeline matches what was posted). */

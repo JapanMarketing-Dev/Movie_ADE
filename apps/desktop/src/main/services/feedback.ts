@@ -46,7 +46,9 @@ const variantArgs = (v?: string) => (v ? ['--variant', v] : []);
 
 export async function showFeedback(projectDir: string, id: string, variant?: string): Promise<CliResult<FeedbackImport>> {
   const r = await runCli(['feedback', 'show', id, ...variantArgs(variant)], { cwd: projectDir });
-  const data = r.ok ? parseFeedbackShow(r.data, timecodeFor(projectDir, variant)) : null;
+  // `view` has the same shape as the import result; `items` is the raw items.json
+  const body = r.ok && typeof r.data === 'object' && r.data !== null && 'view' in r.data ? (r.data as { view: unknown }).view : r.data;
+  const data = r.ok ? parseFeedbackShow(body, timecodeFor(projectDir, variant)) : null;
   return data ? { ...r, data } : { ...r, ok: false, data: undefined, error: r.error ?? 'feedback show returned nothing' };
 }
 
@@ -61,7 +63,9 @@ export async function finishFeedback(projectDir: string, inboxId: string, sessio
   });
   if (!r.ok) return { ...r, data: undefined };
   const id = (r.data as { id?: unknown } | undefined)?.id;
-  const shown = await showFeedback(projectDir, typeof id === 'string' ? id : inboxId, variant);
+  // current CLIs return the items with the import; older ones only via `feedback show`
+  const direct = parseFeedbackShow(r.data, timecodeFor(projectDir, variant));
+  const shown: CliResult<FeedbackImport> = direct && direct.items.length > 0 ? { ...r, data: direct } : await showFeedback(projectDir, typeof id === 'string' ? id : inboxId, variant);
   // the CLI copied session.json and the voice into feedback/<id>/; the inbox folder is no longer needed
   if (shown.ok) await rm(dir, { recursive: true, force: true });
   return shown;
@@ -81,7 +85,10 @@ export async function updateFeedback(projectDir: string, id: string, items: Feed
   writeFileSync(file, JSON.stringify(edited));
   try {
     const r = await runCli(['feedback', 'set', id, '--items', file, ...variantArgs(variant)], { cwd: projectDir });
-    if (r.ok) return showFeedback(projectDir, id, variant);
+    if (r.ok) {
+      const direct = parseFeedbackShow(r.data, timecodeFor(projectDir, variant));
+      return direct ? { ...r, data: direct } : showFeedback(projectDir, id, variant);
+    }
     const code = (r.data as { error?: { code?: string } } | undefined)?.error?.code;
     if (code !== 'usage') return { ...r, data: undefined };
   } finally {

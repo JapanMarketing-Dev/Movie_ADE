@@ -284,7 +284,7 @@ export function variantArgs(v: Variant | undefined): string[] {
 
 /** Where `render --preview` puts each variant's preview, most likely first (project-relative). */
 export function previewCandidates(v: Variant): string[] {
-  if (v === 'main') return ['renders/preview.mp4', 'renders/preview/preview.mp4'];
+  if (v === 'main') return ['renders/youtube/preview.mp4', 'renders/preview.mp4', 'renders/preview/preview.mp4'];
   return [`renders/${v}/preview.mp4`, `variants/${v}/renders/preview.mp4`, `renders/preview-${v}.mp4`];
 }
 
@@ -301,4 +301,15 @@ export function stepsForVariant(steps: StepState[], v: Variant): StepState[] {
 /** Short label of the main/variant output for the UI. */
 export function variantTarget(v: Variant): 'youtube' | 'tiktok' | 'youtube-shorts' {
   return v === 'main' ? 'youtube' : v;
+}
+
+/** `status --json` → `variants: { tiktok: { exists, stale, lastCheckFailed }, … }` (CONTRACTS.md, docs/18). */
+export function parseVariantStatus(input: unknown): Partial<Record<Variant, { exists: boolean; stale: boolean }>> {
+  const out: Partial<Record<Variant, { exists: boolean; stale: boolean }>> = {};
+  const v = isObj(input) && isObj(input.variants) ? input.variants : {};
+  for (const [k, x] of Object.entries(v)) {
+    if (!isVariant(k) || !isObj(x)) continue;
+    out[k] = { exists: x.exists === true, stale: x.stale === true };
+  }
+  return out;
 }

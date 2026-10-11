@@ -299,6 +299,7 @@ const LIB_TOOLS: Record<string, ToolName[]> = {
   ffmpeg: ['ffmpeg', 'ffprobe'],
   whisper: ['whisper-cli', 'whisper-model'],
   'whisper-small': ['whisper-cli', 'whisper-model-small'],
+  fonts: ['fonts'],
 };
 
 export async function cmdLib(ctx: Ctx, args: string[]): Promise<void> {
@@ -314,7 +315,7 @@ export async function cmdLib(ctx: Ctx, args: string[]): Promise<void> {
   }
   if (sub === 'install') {
     const { positionals } = opts(rest, {}, { min: 1, usage: `solocut lib install ${Object.keys(LIB_TOOLS).join('|')}|all` });
-    const names = positionals.includes('all') ? ['ffmpeg', 'whisper'] : positionals;
+    const names = positionals.includes('all') ? ['ffmpeg', 'whisper', 'fonts'] : positionals;
     const installed: Record<string, string> = {};
     for (const n of names) {
       const tools = LIB_TOOLS[n];
@@ -331,7 +332,7 @@ export async function cmdLib(ctx: Ctx, args: string[]): Promise<void> {
     emit(ctx, { installed }, () => Object.entries(installed).map(([k, v]) => `✓ ${k}  ${v}`));
     return;
   }
-  throw new CliError('usage', 'usage: solocut lib list | install ffmpeg|whisper|whisper-small|all');
+  throw new CliError('usage', 'usage: solocut lib list | install ffmpeg|whisper|whisper-small|fonts|all');
 }
 
 /** `solocut templates`: list usable templates (helper for the app and agents). */

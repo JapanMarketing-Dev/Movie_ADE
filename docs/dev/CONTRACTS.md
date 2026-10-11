@@ -188,6 +188,32 @@ export function overlaysFromInputLogs(t, { cursor?, keys? }, { shortcutsOnly? = 
 // `tracks` + `smoothing`: faces drive camera crops (unless reframe 'center'), the cursor drives the split-v screen crop.
 // Bubbles: fitBubble(label, base, max, maxSize, minSize, maxLines = 3) — the largest size (explain-illust-bubbles:
 // frame height / 14) with ≤ 3 BudouX lines; the bubble grows up to max.
+// Voice: voiceChain(voice, quality) — high-pass → afftdn (light/strong; final tracks the noise floor) → [final:
+// acompressor 2.5:1 → de-ess EQ −3 dB @6.5 kHz → preset EQ]; eq 'off' drops the EQ stages. Loudness still 2-pass on the mix.
+// SFX rules (docs/09): sfxFromRules(t, { rules: { on: 'emphasis'|'section'|'cut'|'scene-in'|'caption-in', kind /* 'none' = off */,
+//   probability?, gainDb? }[], maxPerMin?, gainDb? (−8), minSpacingMs? (400), seed? }, library: { id, kind, durationMs, path?, license? }[],
+//   { words?: { start, end }[] /* timeline frames; default caption words */ }) → Op[] (addSource for missing library files + addSfx).
+//   Deterministic (seeded hash for probability and pick). Priority section > scene-in > emphasis > caption-in > cut for the
+//   per-60 s cap (existing sfx count) and spacing. With words, section/cut/scene sfx move ≤ 250 ms earlier to end before a speech
+//   onset, else −6 dB. Sfx trigger enum gains 'caption-in'. sfxEvents(t) lists the candidate moments.
+// Multicam (docs/04): cameraMaterial(t, tracks, words? /* take seconds, array or by take */) → per segment { segment, take,
+//   durationSec, current, speaking, speechRatio, words, emphasisWords, cameras: { id, role, faceVisible|null, lookingAtCamera?,
+//   sharp? }[] } (FaceTrack faces may carry gaze 0..1, frames sharp 0..1). splitForSwitch(segment, atSourceFrames, { taken? })
+//   → chained splitSegment ops (ids `${id}_s1…`); takenIds(t). checkCameraSwitches(t, { words?, maxShotSec = 8, minShotSec = 1 })
+//   → CheckFinding: fail on a shot held too long or a switch inside a word; very short shots → needs-human.
+// CheckFinding gains `items?: { frame, note, ref? }[]`. Track checks: checkCaptionFaceOverlap(t, tracks, { minOverlap = 0.15 })
+//   (needs-human), checkCaptionSafeArea(t, target) using safeRect(target, outputSize) (fail), checkMosaicTracking(t, pii:
+//   Record<sourceId, PiiAnalysis>) (fail when visible PII is not inside a mask; crops count as not visible).
+//   PiiAnalysis = derived/analysis/pii.<sourceId>.json { frames: [{ f, boxes: [{ x, y, w, h, kind, text? }] }], fps? } (normalized).
+//   masksFromPii(analysis, sourceId, { size, sourceFps?, pad = 0.15, maxGapFrames = 15, kinds?, kind = 'pixelate', taken? }) →
+//   addMask ops (tracks linked by kind/text/overlap, padded, keyframes reduced, needsReview). sourceBoxToCanvasAt(t, frame,
+//   sourceId, box) maps a source box onto the canvas (layout, focus, zoom).
+// Benchmark (docs/09): benchmarkProfile(samples: BenchmarkSample[] /* per second: captionBoxes, captionColors?, cutTimes,
+//   loudness, speechLufs?, bgmRelDb?, sfxOnsets, sfxKinds?, charsPerMin, punchIn? */, { source? }) → StyleProfile (shape of
+//   docs/09 + durationSec, captions.present); profileToTemplatePatch(profile) → TemplatePatch { captions { style, highlight,
+//   maxCharsPerLine, maxLines, position, emphasis }, cut.jumpZoom, audio { bgm.gainDb, sfx { maxPerMinute, gainDb } },
+//   sfx { rules, maxPerMin }, captionLook } — a structural subset of the templates Template (core does not import templates);
+//   the templates package deep-merges it.
 // helpers: wipeGeometry, reanchor, sha256Hex (pure), ffFilterValue (filtergraph escaping), voiceSource, assTime, assEscape, assColor, assTagColor,
 // assHeader, assStyleLine, assDialogue, overlaysToAss
 ```

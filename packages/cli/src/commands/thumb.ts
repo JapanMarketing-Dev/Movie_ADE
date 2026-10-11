@@ -15,6 +15,7 @@ import {
 } from '../thumb.js';
 import { allTimelines, captionsLib, freshPreview, media } from './media.js';
 import { apiKeyFor } from '../keys.js';
+import { ensureFonts } from '../fonts.js';
 import { emptyOutput } from './meta.js';
 
 const VERTICAL = new Set<Target>(['youtube-shorts', 'tiktok', 'instagram-reels']);
@@ -262,7 +263,7 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
   const results: { format: ThumbFormat; file: string; base: string; provider: ThumbProvider }[] = [];
   const errors: string[] = [];
   const style = DEFAULT_TITLE_STYLE;
-  const fontsDir = ctx.io.env.SOLOCUT_FONTS_DIR;
+  const fontsDir = title ? (await ensureFonts(ctx, errors)) ?? undefined : undefined;
   const features = await ffmpegFeatures(ffmpeg);
   if (title && !features.svg && !features.ass) {
     throw new CliError('ffmpeg-features', t(ctx, 'タイトルの合成には libass か librsvg 入りの ffmpeg が必要です: `solocut lib install ffmpeg`', 'typesetting needs an ffmpeg with libass or librsvg: `solocut lib install ffmpeg`'));

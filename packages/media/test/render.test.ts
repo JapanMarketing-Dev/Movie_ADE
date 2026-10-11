@@ -207,6 +207,19 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     expect(outside).toBeGreaterThan(inside + 40);
   });
 
+  it('the full voice chain (strong denoise, compressor, de-ess) still lands on the loudness target', async () => {
+    let t = applyOp(base, { op: 'setSegments', segments: [seg('seg_v', 0, 120, { layout: 'camera-full', camera: 'cam' })] }).timeline;
+    t = applyOp(t, { op: 'setVoice', patch: { denoise: 'strong', eq: 'voice-bright' } }).timeline;
+    const plan = compile(t, { quality: 'final', target: 'youtube', projectDir: dir });
+    const g = plan.audio.args[plan.audio.args.indexOf('-filter_complex') + 1]!;
+    expect(g).toContain('acompressor=');
+    expect(g).toContain('equalizer=f=6500');
+    const r = await executeRenderPlan(plan, { projectDir: dir, cacheDir: 'cache', output: 'out/voice.mp4' });
+    const l = await measureLoudness(r.output);
+    expect(Math.abs(l.integrated - -14)).toBeLessThan(1);
+    expect(l.truePeak).toBeLessThan(-0.3);
+  });
+
   it('final quality hits the loudness target with 2-pass loudnorm', async () => {
     const t = applyOp(base, { op: 'setSegments', segments: [seg('seg_l', 0, 120, { layout: 'camera-full', camera: 'cam' })] }).timeline;
     const r = await render(t, 'out/final.mp4', { quality: 'final', target: 'youtube' });

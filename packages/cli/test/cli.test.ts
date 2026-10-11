@@ -405,7 +405,7 @@ describe('config / prompts / templates / lib / past', () => {
 
   it('lib list reports every tool; install rejects unknown names', async () => {
     const r = await sb.run(['lib', 'list', '--json']);
-    expect(Object.keys(r.json.tools)).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small']);
+    expect(Object.keys(r.json.tools)).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'whisper-model', 'whisper-model-small', 'fonts']);
     expect(r.json.manifest.ffmpeg.version).toBe('9.0.2');
     expect((await sb.run(['lib', 'install', 'photoshop', '--json'])).code).toBe(2);
     expect((await sb.run(['lib', 'install', '--json'])).code).toBe(2);

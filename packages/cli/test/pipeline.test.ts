@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { whichSync } from '@solocut/toolchain';
-import { Sandbox } from './helpers.js';
+import { Sandbox, fakeNodeCli } from './helpers.js';
 
 // Synthetic media via ffmpeg lavfi. Skipped when ffmpeg is not installed (CI installs it).
 const ffmpeg = process.env.SOLOCUT_FFMPEG ?? whichSync('ffmpeg');
@@ -206,13 +206,18 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
     dir = join(sb.root, 'p');
     bin = join(sb.root, 'fakebin');
     mkdirSync(bin);
-    // fake `codex`: drops a generated image into $CODEX_HOME/generated_images
+    // fake `codex`: drops a generated image into $CODEX_HOME/generated_images (reads the prompt from stdin)
     execFileSync(ffmpeg!, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1536x1024', '-frames:v', '1', join(sb.root, 'gen.png')]);
-    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nmkdir -p "$CODEX_HOME/generated_images/s"\ncp "${join(sb.root, 'gen.png')}" "$CODEX_HOME/generated_images/s/img-$$.png"\necho done\n`);
-    // fake `claude -p --output-format json`: organizes feedback item 1
-    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho '{"type":"result","result":"{\\\\"items\\\\":[{\\\\"index\\\\":1,\\\\"title\\\\":\\\\"字幕が顔にかかっている\\\\",\\\\"request\\\\":\\\\"字幕を下へずらす\\\\"}]}"}'\n`);
-    for (const f of ['codex', 'claude']) execFileSync('chmod', ['+x', join(bin, f)]);
-    env = { PATH: `${bin}:${process.env.PATH}`, CODEX_HOME: join(sb.root, 'codexhome') };
+    fakeNodeCli(bin, 'codex', `const fs = require('fs'), path = require('path');
+const dir = path.join(process.env.CODEX_HOME, 'generated_images', 's');
+fs.mkdirSync(dir, { recursive: true });
+fs.copyFileSync(${JSON.stringify(join(sb.root, 'gen.png'))}, path.join(dir, 'img-' + process.pid + '-' + Date.now() + '.png'));
+console.log('done');
+`);
+    // fake \`claude -p --output-format json\`: organizes feedback item 1
+    fakeNodeCli(bin, 'claude', `process.stdout.write(JSON.stringify({ type: 'result', result: JSON.stringify({ items: [{ index: 1, title: '字幕が顔にかかっている', request: '字幕を下へずらす' }] }) }));
+`);
+    env = { PATH: `${bin}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`, CODEX_HOME: join(sb.root, 'codexhome') };
     await sb.run(['init', dir, '--template', 'talk-youtube', '--title', 'Thumbs', '--no-git', '--json']);
     makeClip(join(sb.root, 'cam.mp4'), { audio: true, size: '1280x720' });
     await run(['import', join(sb.root, 'cam.mp4')]);
