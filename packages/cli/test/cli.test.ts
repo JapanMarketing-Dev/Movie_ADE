@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CLI_VERSION } from '../src/ctx.js';
 import { Sandbox } from './helpers.js';
 
 let sb: Sandbox;
@@ -41,8 +42,8 @@ describe('basics', () => {
     expect(h.code).toBe(0);
     expect(h.stdout).toContain('solocut 0.1.0');
     expect(h.stdout).toContain('propose cuts');
-    expect((await sb.run(['version', '--json'])).json).toMatchObject({ ok: true, version: '0.1.0', timelineSchema: 1 });
-    expect((await sb.run(['--version'])).stdout).toBe('solocut 0.1.0\n');
+    expect((await sb.run(['version', '--json'])).json).toMatchObject({ ok: true, version: CLI_VERSION, timelineSchema: 1 });
+    expect((await sb.run(['--version'])).stdout).toBe(`solocut ${CLI_VERSION}\n`);
     expect((await sb.run(['help', '--json'])).json.commands).toContain('edit');
   });
 

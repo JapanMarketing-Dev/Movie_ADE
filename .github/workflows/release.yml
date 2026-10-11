@@ -1,5 +1,6 @@
 name: Release
-# Builds installers on each OS when a version tag is pushed and attaches them to a draft GitHub Release.
+# Builds the Windows and Linux installers when a version tag is pushed and attaches them to a draft GitHub Release.
+# macOS is built, signed and notarized on the maintainer's Mac with scripts/release-mac.sh (the Developer ID key stays there).
 # Publishing to downloads.solocut.app (signing SHA256SUMS, uploading to R2, promoting latest.json) is done
 # locally with `node scripts/release.mjs <version>`, so the signing key never leaves the maintainer's machine.
 on:
@@ -14,8 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            target: mac
           - os: windows-latest
             target: win
           - os: ubuntu-22.04

@@ -1,6 +1,12 @@
 // electron-builder configuration for Solocut (docs/07).
-// mac: ad-hoc signed (no Developer ID yet), so updates are applied by our own updater, not Squirrel.
+// mac: signed with Developer ID and notarized when SOLOCUT_MAC_IDENTITY (and the App Store Connect API key env:
+// APPLE_API_KEY = path to the .p8, APPLE_API_KEY_ID, APPLE_API_ISSUER) are set — the release machine builds mac locally
+// so the signing key never leaves it. Without them (CI, forks) the app is ad-hoc signed. Updates are applied by our own
+// updater, not Squirrel.
 // node-pty ships N-API prebuilds for mac/win; on Linux CI set SOLOCUT_REBUILD_NATIVE=1 to rebuild it.
+
+const MAC_IDENTITY = process.env.SOLOCUT_MAC_IDENTITY || null; // e.g. "takumi endoh (GP8L6J2S5L)"
+const NOTARIZE = Boolean(MAC_IDENTITY && process.env.APPLE_API_KEY && process.env.APPLE_API_KEY_ID && process.env.APPLE_API_ISSUER);
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -28,8 +34,11 @@ module.exports = {
     icon: 'build/icon.icns',
     // arch comes from the CLI (--arm64 / --x64); release CI builds both.
     target: ['dmg', 'zip'],
-    identity: null,
-    hardenedRuntime: false,
+    identity: MAC_IDENTITY,
+    hardenedRuntime: Boolean(MAC_IDENTITY),
+    entitlements: MAC_IDENTITY ? 'build/entitlements.mac.plist' : undefined,
+    entitlementsInherit: MAC_IDENTITY ? 'build/entitlements.mac.plist' : undefined,
+    notarize: NOTARIZE,
     gatekeeperAssess: false,
     darkModeSupport: true,
     minimumSystemVersion: '12.0',
@@ -42,7 +51,7 @@ module.exports = {
     },
   },
   dmg: {
-    sign: false,
+    sign: Boolean(MAC_IDENTITY),
     contents: [
       { x: 130, y: 220 },
       { x: 410, y: 220, type: 'link', path: '/Applications' },
