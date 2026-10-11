@@ -85,3 +85,39 @@ export function maxLuma(path: string, n: number): number {
   for (const b of r.stdout) if (b > m) m = b;
   return m;
 }
+
+/** RMS of the audio (mono, 8 kHz) in consecutive windows of `winSec`. */
+export function audioEnvelope(path: string, winSec = 0.05): number[] {
+  const r = spawnSync(FFMPEG!, ['-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '8000', '-f', 's16le', 'pipe:1'], { maxBuffer: 256 * 1024 * 1024 });
+  if (r.status !== 0) throw new Error(`cannot read audio of ${path}: ${r.stderr}`);
+  const n = Math.floor(r.stdout.length / 2);
+  const win = Math.max(1, Math.round(8000 * winSec));
+  const out: number[] = [];
+  for (let i = 0; i + win <= n; i += win) {
+    let s = 0;
+    for (let k = i; k < i + win; k++) {
+      const v = r.stdout.readInt16LE(k * 2) / 32768;
+      s += v * v;
+    }
+    out.push(Math.sqrt(s / win));
+  }
+  return out;
+}
+
+/** Pearson correlation of two series over their common length. */
+export function correlation(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  let ma = 0;
+  let mb = 0;
+  for (let i = 0; i < n; i++) [ma, mb] = [ma + a[i]!, mb + b[i]!];
+  [ma, mb] = [ma / n, mb / n];
+  let sab = 0;
+  let saa = 0;
+  let sbb = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a[i]! - ma;
+    const y = b[i]! - mb;
+    [sab, saa, sbb] = [sab + x * y, saa + x * x, sbb + y * y];
+  }
+  return saa > 0 && sbb > 0 ? sab / Math.sqrt(saa * sbb) : 0;
+}

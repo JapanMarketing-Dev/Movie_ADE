@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   concatLine, crossCorrelateOffset, defaultFontsDir, hwEncodeArgs, killTree, parseEncoders, renderConcurrency, withEncoder, withFontsDir, fft, inputsOf, loudnessFinding, measuredLoudnorm, nextPow2, onsetEnvelope, parseBlackLog, parseFreezeLog,
-  parseLoudnormLog, parseProbe, parseProgressLine, parseRational, parseSilenceLog, robustLine, specFinding, xcorr,
+  parseEbur128Integrated, parseLoudnormLog, parseProbe, parseProgressLine, parseRational, parseSilenceLog, previewGainFilter, robustLine, specFinding, xcorr,
 } from '../src/index.js';
 import type { ProbeResult } from '../src/index.js';
 
@@ -348,5 +348,40 @@ describe('hardware encoders', () => {
     expect(renderConcurrency({ hardware: false, cpus: 32 })).toEqual({ chunks: 6, threads: 6 });
     expect(renderConcurrency({ hardware: true, cpus: 14 })).toEqual({ chunks: 3, threads: 5 });
     expect(renderConcurrency({ hardware: false, cpus: 1 })).toEqual({ chunks: 1, threads: 1 });
+  });
+});
+
+describe('fast preview audio helpers', () => {
+  const summary = (i: string) => `[Parsed_ebur128_0 @ 0x1] Summary:\n\n  Integrated loudness:\n    I:         ${i} LUFS\n    Threshold: -31.8 LUFS\n\n  Loudness range:\n    LRA:         0.0 LU\n`;
+  it('parseEbur128Integrated reads the summary, gates silence and rejects garbage', () => {
+    expect(parseEbur128Integrated(summary('-21.8'))).toBe(-21.8);
+    expect(parseEbur128Integrated(summary('-5'))).toBe(-5);
+    expect(parseEbur128Integrated(summary('-70.0'))).toBeNull();
+    expect(parseEbur128Integrated(summary('-inf'))).toBeNull();
+    expect(parseEbur128Integrated(summary('nan'))).toBeNull();
+    expect(parseEbur128Integrated('no summary here')).toBeNull();
+    expect(parseEbur128Integrated('')).toBeNull();
+    // the last summary wins (several ebur128 instances)
+    expect(parseEbur128Integrated(summary('-30') + summary('-18.5'))).toBe(-18.5);
+  });
+  it('previewGainFilter: duration-weighted energy, silent stems ignored, clamped, limiter at TP', () => {
+    expect(previewGainFilter([{ lufs: -20, durationSec: 10 }], { I: -14, TP: -1 })).toBe('volume=6.00dB,alimiter=limit=0.8913:level=0');
+    // equal loudness → same gain regardless of split
+    expect(previewGainFilter([{ lufs: -20, durationSec: 3 }, { lufs: -20, durationSec: 7 }], { I: -14, TP: -1 })).toContain('volume=6.00dB');
+    // a long quiet stem dominates a short loud one
+    const g = Number(/volume=(-?[\d.]+)dB/.exec(previewGainFilter([{ lufs: -30, durationSec: 100 }, { lufs: -10, durationSec: 1 }], { I: -14, TP: -1 }))![1]);
+    expect(g).toBeGreaterThan(0);
+    expect(g).toBeLessThan(16);
+    expect(previewGainFilter([{ lufs: null, durationSec: 5 }, { lufs: -20, durationSec: 5 }], { I: -14, TP: -1 })).toContain('volume=6.00dB');
+    expect(previewGainFilter([{ lufs: null, durationSec: 5 }], { I: -14, TP: -1 })).toContain('volume=0.00dB');
+    expect(previewGainFilter([], { I: -14, TP: -1 })).toContain('volume=0.00dB');
+    expect(previewGainFilter([{ lufs: -20, durationSec: 0 }], { I: -14, TP: -1 })).toContain('volume=0.00dB');
+    expect(previewGainFilter([{ lufs: -69, durationSec: 1 }], { I: -14, TP: -1 })).toContain('volume=30.00dB');
+    expect(previewGainFilter([{ lufs: 0, durationSec: 1 }], { I: -40, TP: -1 })).toContain('volume=-30.00dB');
+    expect(previewGainFilter([], { I: -14, TP: 3 })).toContain('limit=1.0000');
+    expect(previewGainFilter([], { I: -14, TP: -40 })).toContain('limit=0.0625');
+  });
+  it('inputsOf skips lavfi sources', () => {
+    expect(inputsOf(['-f', 'lavfi', '-i', 'anullsrc', '-i', 'a.wav', '-f', 'concat', '-safe', '0', '-i', 'list.txt'])).toEqual(['a.wav', 'list.txt']);
   });
 });

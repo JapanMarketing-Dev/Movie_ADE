@@ -12,6 +12,7 @@ const D = { by: 'agent' as const, reason: 'bench' };
  * Render benchmark on a synthetic 20-minute 1080p30 timeline (120 segments, all layouts, zoom, BGM). Never part of
  * `pnpm test` / CI: run with `SOLOCUT_BENCH=1 pnpm exec vitest run packages/media/test/zz-bench.test.ts`.
  * Files and log.txt go to SOLOCUT_BENCH_DIR (default <tmp>/solocut-bench); the 1.2 GB source is reused across runs.
+ * SOLOCUT_BENCH_FINAL=0 skips the final render (the slow part) when only the preview edit loop matters.
  */
 const ENABLED = process.env.SOLOCUT_BENCH === '1';
 const dir = process.env.SOLOCUT_BENCH_DIR?.trim() || join(tmpdir(), 'solocut-bench');
@@ -58,6 +59,8 @@ it('20-minute 1080p timeline: preview x264 / hardware, 1 edit, final', async () 
   await run('preview-hw', 'preview', 'cache-ph', 'auto');
   t = applyOp(t, { op: 'trimSegment', id: 'seg_50', to: 50 * 300 + 200, decided: D }).timeline;
   await run('preview-hw-after-1-edit', 'preview', 'cache-ph', 'auto');
-  await run('final-x264', 'final', 'cache-f');
+  t = applyOp(t, { op: 'trimSegment', id: 'seg_90', to: 90 * 300 + 150, decided: D }).timeline;
+  await run('preview-hw-after-2nd-edit', 'preview', 'cache-ph', 'auto');
+  if (process.env.SOLOCUT_BENCH_FINAL !== '0') await run('final-x264', 'final', 'cache-f');
 }, 7_200_000);
 });

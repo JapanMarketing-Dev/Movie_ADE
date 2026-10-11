@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import type { HwEncoder } from './hwenc.js';
 import { cpuCount, detectHwEncoder, renderConcurrency, withEncoder } from './hwenc.js';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import type { FramePlan, RenderPlan } from '@solocut/core';
+import type { FastAudio, FramePlan, RenderPlan } from '@solocut/core';
 import { ffFilterValue, LOUDNORM_TOKEN } from '@solocut/core';
 import { measuredLoudnorm, parseLoudnormLog } from './analyze.js';
 import { atomicOutput } from './proxy.js';
@@ -71,6 +71,36 @@ export interface ExecuteOptions {
   signal?: AbortSignal;
   /** Fonts folder for libass when the plan has none: default `defaultFontsDir()`; false = do not add. */
   fontsDir?: string | false;
+  /** Preview audio from cached per-segment stems when the plan has them (default true); false = the full graph. */
+  fastAudio?: boolean;
+}
+
+/** Integrated loudness (LUFS) from the `ebur128` summary in an ffmpeg log, or null (no summary / below the gate). */
+export function parseEbur128Integrated(log: string): number | null {
+  const at = log.lastIndexOf('Integrated loudness:');
+  if (at < 0) return null;
+  const m = /I:\s*(-?\d+(?:\.\d+)?|-?inf|nan)\s*LUFS/.exec(log.slice(at));
+  if (!m) return null;
+  const v = Number(m[1]);
+  return Number.isFinite(v) && v > -70 ? v : null;
+}
+
+/**
+ * Gain filter for fast preview audio: the stems' loudness combined by duration-weighted energy (an approximation
+ * of the integrated loudness of the whole voice), a gain to `target.I` (clamped to ±30 dB) and a peak limiter at
+ * `target.TP`. Silent stems (null) are ignored; all silent → no gain.
+ */
+export function previewGainFilter(stems: { lufs: number | null; durationSec: number }[], target: { I: number; TP: number }): string {
+  let e = 0;
+  let d = 0;
+  for (const s of stems) {
+    if (s.lufs === null || !(s.durationSec > 0)) continue;
+    e += s.durationSec * 10 ** (s.lufs / 10);
+    d += s.durationSec;
+  }
+  const gain = d > 0 ? Math.max(-30, Math.min(30, target.I - 10 * Math.log10(e / d))) : 0;
+  const limit = Math.max(0.0625, Math.min(1, 10 ** (target.TP / 20)));
+  return `volume=${gain.toFixed(2)}dB,alimiter=limit=${limit.toFixed(4)}:level=0`;
 }
 
 function sub(args: string[], map: Record<string, string>): string[] {
@@ -80,7 +110,9 @@ function sub(args: string[], map: Record<string, string>): string[] {
 /** Values following each `-i` (input files). */
 export function inputsOf(args: string[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < args.length - 1; i++) if (args[i] === '-i') out.push(args[i + 1]!);
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] === '-i' && !(args[i - 2] === '-f' && args[i - 1] === 'lavfi')) out.push(args[i + 1]!);
+  }
   return out;
 }
 
@@ -183,7 +215,7 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
     if (existsSync(file) && statSync(file).size > 0) reused++;
     else todo.push(c);
   }
-  const audioFile = join(cacheDir, 'audio', `${cacheKey(plan.audio.hash, plan.audio.args, projectDir, [])}.wav`);
+  let audioFile = join(cacheDir, 'audio', `${cacheKey(plan.audio.hash, plan.audio.args, projectDir, [])}.wav`);
   const total = plan.chunks.length;
   let done = reused;
   if (reused) o.onProgress?.({ chunk: '(cache)', done, total });
@@ -202,7 +234,9 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
     if (!existsSync(files.get(c.id)!)) throw new MediaError(`chunk ${c.id} was not rendered`);
   }
 
-  if (!existsSync(audioFile)) {
+  const fast = plan.audio.fast && o.fastAudio !== false ? plan.audio.fast : null;
+  if (fast) audioFile = await fastAudioMix(fast, { cacheDir, projectDir, run, ...(o.signal ? { signal: o.signal } : {}) });
+  else if (!existsSync(audioFile)) {
     let args = plan.audio.args;
     const m = plan.audio.measure;
     if (m) {
@@ -219,6 +253,49 @@ export async function executeRenderPlan(plan: RenderPlan, o: ExecuteOptions): Pr
   writeFileSync(listFile, list);
   await atomicOutput(output, (tmp) => run(sub(plan.final.args, { '{concat}': listFile, '{audio}': audioFile, '{out}': tmp })));
   return { output, reused, rendered: rendering.size, encoder: hw ?? 'libx264' };
+}
+
+/**
+ * Fast preview audio: missing voice stems rendered in parallel (each cached with its loudness in a .json sidecar,
+ * written after the stem so a stem without one is rendered again), then the master mix over the concat list, cached
+ * by the list, the gain and the inputs. Returns the master file.
+ */
+async function fastAudioMix(fast: FastAudio, o: { cacheDir: string; projectDir: string; signal?: AbortSignal; run: (args: string[]) => Promise<void> }): Promise<string> {
+  const dir = join(o.cacheDir, 'audio');
+  const stems = fast.stems.map((st) => ({ ...st, file: join(dir, `stem-${cacheKey(st.hash, st.args, o.projectDir, [])}.wav`) }));
+  const meta = (file: string) => `${file}.json`;
+  const lufs = new Map<string, number | null>();
+  const todo = stems.filter((st) => {
+    if (!existsSync(st.file) || !existsSync(meta(st.file))) return true;
+    try {
+      const v = (JSON.parse(readFileSync(meta(st.file), 'utf8')) as { lufs: number | null }).lufs;
+      lufs.set(st.file, typeof v === 'number' ? v : null);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  const started = new Set<string>();
+  await pool(todo, cpuCount(), async (st) => {
+    if (started.has(st.file)) return; // identical stems
+    started.add(st.file);
+    let log = '';
+    await atomicOutput(st.file, async (tmp) => {
+      log = await ffmpegStderr(sub(st.args, { '{out}': tmp }), o.signal ? { cwd: o.projectDir, signal: o.signal } : { cwd: o.projectDir });
+    });
+    const v = parseEbur128Integrated(log);
+    lufs.set(st.file, v);
+    writeFileSync(meta(st.file), JSON.stringify({ lufs: v }));
+  }, o.signal);
+  const list = stems.map((st) => concatLine(st.file)).join('\n') + '\n';
+  const listFile = join(dir, `${createHash('sha256').update(list).digest('hex').slice(0, 16)}-voice.txt`);
+  writeFileSync(listFile, list);
+  const gain = previewGainFilter(stems.map((st) => ({ lufs: lufs.get(st.file) ?? null, durationSec: st.durationSec })), fast.target);
+  const args = fast.args.map((a) => a.replaceAll(LOUDNORM_TOKEN, gain));
+  const key = cacheKey(createHash('sha256').update(list).update('\0').update(gain).digest('hex'), args, o.projectDir, []);
+  const out = join(dir, `mix-${key}.wav`);
+  if (!existsSync(out)) await atomicOutput(out, (tmp) => o.run(sub(args, { '{voice}': listFile, '{out}': tmp })));
+  return out;
 }
 
 /**

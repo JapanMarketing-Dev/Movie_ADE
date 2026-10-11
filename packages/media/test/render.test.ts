@@ -5,7 +5,7 @@ import type { Decided, Segment, Timeline } from '@solocut/core';
 import { applyOp, applyOps, applyTracks, compile, compileFrame, deriveVariant, emptyTimeline, overlaysFromInputLogs, pickHighlights, validateTimeline } from '@solocut/core';
 import { detectHwEncoder, executeRenderPlan, measureLoudness, MediaError, probe, renderFrame } from '../src/index.js';
 import { readdirSync as listDir } from 'node:fs';
-import { countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
+import { audioEnvelope, correlation, countFrames, ff, frameLuma, gatedNoiseExpr, HAVE_FFMPEG, HAVE_LIBASS, regionLuma, tempDir } from './helpers.js';
 
 const D: Decided = { by: 'agent', reason: 'test' };
 
@@ -283,6 +283,69 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     expect(again.reused).toBe(files.length);
     expect(again.rendered).toBe(12 - files.length);
     expect(countFrames(again.output)).toBe(360);
+  });
+
+  describe('fast preview audio (per-segment stems)', () => {
+    const four = () => applyOp(base, { op: 'setSegments', segments: [
+      seg('seg_1', 0, 25, { layout: 'camera-full', camera: 'cam' }),
+      seg('seg_2', 30, 55, { layout: 'camera-full', camera: 'cam' }),
+      seg('seg_3', 60, 90, { layout: 'camera-full', camera: 'cam' }),
+      seg('seg_4', 95, 120, { layout: 'camera-full', camera: 'cam' }),
+    ] }).timeline;
+    const stems = (cache: string) => (existsSync(p(`${cache}/audio`)) ? listDir(p(`${cache}/audio`)).filter((f) => /^stem-.*\.wav$/.test(f)) : []);
+    const run = (t: Timeline, cache: string, out: string, fastAudio?: boolean) =>
+      executeRenderPlan(compile(t, { quality: 'preview', projectDir: dir }), { projectDir: dir, cacheDir: cache, output: out, ...(fastAudio === undefined ? {} : { fastAudio }) });
+
+    it('matches the full graph (same length, same envelope) and lands near the loudness target', async () => {
+      const t = four();
+      const fast = await run(t, 'cache-fa', 'out/fa-fast.mp4');
+      const full = await run(t, 'cache-fb', 'out/fa-full.mp4', false);
+      expect(stems('cache-fa')).toHaveLength(4);
+      expect(stems('cache-fb')).toHaveLength(0);
+      const [a, b] = [audioEnvelope(fast.output), audioEnvelope(full.output)];
+      expect(Math.abs(a.length - b.length)).toBeLessThanOrEqual(1);
+      expect(correlation(a, b)).toBeGreaterThan(0.9);
+      const l = await measureLoudness(fast.output);
+      expect(Math.abs(l.integrated - t.audio.voice.loudness)).toBeLessThan(2.5);
+      expect(l.truePeak).toBeLessThan(t.audio.voice.truePeak + 1);
+      expect((await probe(fast.output)).durationSec).toBeCloseTo((await probe(full.output)).durationSec, 1);
+    });
+
+    it('a one-segment edit renders exactly one new stem; an unchanged re-render renders none', async () => {
+      const t = four();
+      await run(t, 'cache-fc', 'out/fc1.mp4');
+      expect(stems('cache-fc')).toHaveLength(4);
+      await run(t, 'cache-fc', 'out/fc2.mp4');
+      expect(stems('cache-fc')).toHaveLength(4);
+      const edited = applyOp(t, { op: 'trimSegment', id: 'seg_3', to: 80, decided: D }).timeline;
+      const r = await run(edited, 'cache-fc', 'out/fc3.mp4');
+      expect(stems('cache-fc')).toHaveLength(5);
+      expect((await probe(r.output)).durationSec).toBeCloseTo(95 / 30, 1);
+    });
+
+    it('a stem without its loudness sidecar is rendered again; bgm and sfx still mix in', async () => {
+      let t = four();
+      t = applyOps(t, [
+        { op: 'setBgm', bgm: [{ id: 'bgm_1', asset: 'music', range: { start: 0, end: 100 }, gainDb: -12, duckDb: -10, fadeIn: 5, fadeOut: 5, decided: D }] },
+        { op: 'addSfx', sfx: { id: 'sfx_1', asset: 'pop', at: 10, gainDb: -6, trigger: 'manual', decided: D } },
+      ]).timeline;
+      await run(t, 'cache-fd', 'out/fd1.mp4');
+      const { rmSync } = await import('node:fs');
+      const first = stems('cache-fd')[0]!;
+      rmSync(p(`cache-fd/audio/${first}.json`));
+      const r = await run(t, 'cache-fd', 'out/fd2.mp4');
+      expect(existsSync(p(`cache-fd/audio/${first}.json`))).toBe(true);
+      expect(audioEnvelope(r.output).some((v) => v > 0.01)).toBe(true);
+    });
+
+    it('segments without a voice source become exact-length silence', async () => {
+      const f = four();
+      const { mic: _mic, ...sources } = f.sources;
+      const t = { ...f, sources: { ...sources, cam: { ...sources.cam!, audio: false } } } as Timeline;
+      const r = await run(t, 'cache-fe', 'out/fe.mp4');
+      expect((await probe(r.output)).durationSec).toBeCloseTo(105 / 30, 1);
+      expect(Math.max(...audioEnvelope(r.output))).toBeLessThan(0.001);
+    });
   });
 
   it('fails clearly on a missing input', async () => {

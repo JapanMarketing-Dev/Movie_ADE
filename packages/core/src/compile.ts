@@ -32,12 +32,24 @@ export interface RenderPlan {
    * Audio mix. With `measure` (final quality), `args` contains the token `{LOUDNORM}` inside its filter graph: the
    * executor runs `measure.args` (loudnorm print_format=json), then substitutes a measured, linear loudnorm (2-pass).
    */
-  audio: { hash: string; args: string[]; measure?: { args: string[]; target: { I: number; TP: number; LRA: number } } };
+  audio: { hash: string; args: string[]; measure?: { args: string[]; target: { I: number; TP: number; LRA: number } }; fast?: FastAudio };
   subtitles?: { assPath: string };
   /** Files the executor writes (relative to the project dir) before running anything. */
   writes: { path: string; content: string }[];
   final: { args: string[] };
   warnings: string[];
+}
+
+/**
+ * Preview audio for a fast edit loop: one cached voice stem per segment (seeked input, so a stem costs about its own
+ * length), then a cheap master pass over the stems (concat list token `{voice}`) with BGM ducking and sfx. Loudness:
+ * each stem ends in `ebur128`; the executor combines the stems' integrated loudness into one gain and substitutes
+ * `LOUDNORM_TOKEN` with `volume` + `alimiter` (no loudnorm). Only on preview plans; `args` stays the reference graph.
+ */
+export interface FastAudio {
+  stems: { id: string; hash: string; durationSec: number; args: string[] }[];
+  args: string[];
+  target: { I: number; TP: number };
 }
 
 export interface CompileOptions {
@@ -588,66 +600,13 @@ export function voiceChain(voice: Pick<Voice, 'denoise' | 'eq'>, quality: 'previ
   return out;
 }
 
-function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
-  const { t, rc, preset } = ctx;
-  const F = fpsValue(rc.fps);
-  const totalSec = total / F;
-  const g = new Graph();
-  const fmt = 'aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo';
+const AFMT = 'aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo';
 
-  // Voice: one atrim per segment from its voice source, padded/trimmed to the exact segment length.
-  const uses = new Map<string, number>();
-  const plan = t.segments.map((seg) => ({ seg, src: voiceSource(t, seg) }));
-  for (const p of plan) if (p.src) uses.set(p.src, (uses.get(p.src) ?? 0) + 1);
-  const inputLabels = new Map<string, string[]>();
-  for (const [id, count] of uses) {
-    const idx = g.addInput(['-i', argPath(t.sources[id]!.path)]);
-    if (count === 1) inputLabels.set(id, [`${idx}:a`]);
-    else {
-      const labels = Array.from({ length: count }, () => g.label('as'));
-      g.filters.push(`[${idx}:a]asplit=${count}${labels.map((l) => `[${l}]`).join('')}`);
-      inputLabels.set(id, labels);
-    }
-  }
-  const pieces: string[] = [];
-  for (const { seg, src } of plan) {
-    const d = (seg.range.end - seg.range.start) / F;
-    const out = g.label('v');
-    if (!src) {
-      g.filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${num(d)}[${out}]`);
-    } else {
-      const s = t.sources[src]!;
-      const takeSec = takeFrameToSeconds(t, seg.src.take, seg.src.from);
-      const takeEnd = takeFrameToSeconds(t, seg.src.take, seg.src.to);
-      const a = sourceLocalSeconds(t, s, takeSec);
-      const b = sourceLocalSeconds(t, s, takeEnd);
-      const drift = s.kind === 'camera' && s.drift ? s.drift : 1;
-      const chain = [`atrim=start=${num(Math.max(0, a))}:end=${num(Math.max(0, b))}`, 'asetpts=PTS-STARTPTS'];
-      chain.push(fmt);
-      // Drift: the source clock runs `drift`× the take clock. Re-time by resampling (pitch-neutral at ppm scale,
-      // sample-accurate unlike atempo): reinterpret at 192 kHz·drift, then back to 48 kHz.
-      if (drift !== 1) chain.push('aresample=192000', `asetrate=${Math.round(192000 * drift)}`, fmt);
-      if (a < 0) {
-        const ms = Math.round((-a / drift) * 1000);
-        chain.push(`adelay=${ms}|${ms}`);
-      }
-      const fadeD = Math.min(0.005, d / 4);
-      chain.push(`apad=whole_dur=${num(d)}`, `atrim=duration=${num(d)}`, `afade=t=in:d=${num(fadeD)}`,
-        `afade=t=out:st=${num(Math.max(0, d - fadeD))}:d=${num(fadeD)}`);
-      const lbl = inputLabels.get(src)!.shift()!;
-      g.filters.push(`[${lbl}]${chain.join(',')}[${out}]`);
-    }
-    pieces.push(out);
-  }
-  const voiceRaw = g.label('vc');
-  g.filters.push(`${pieces.map((p) => `[${p}]`).join('')}concat=n=${pieces.length}:v=0:a=1[${voiceRaw}]`);
-  const vchain = voiceChain(t.audio.voice, ctx.opts.quality);
-  let voice = voiceRaw;
-  if (vchain.length) {
-    voice = g.label('vf');
-    g.filters.push(`[${voiceRaw}]${vchain.join(',')}[${voice}]`);
-  }
-
+/** BGM (ducked by the voice) and sfx over `voice`; returns the labels to mix, voice (or ducked mix) first. */
+function mixLabels(ctx: Ctx, g: Graph, voice: string, total: Frame): string[] {
+  const { t } = ctx;
+  const F = fpsValue(ctx.rc.fps);
+  const fmt = AFMT;
   const mix: string[] = [];
   const bgms = t.audio.bgm.filter((b) => b.range.start < total);
   if (bgms.length) {
@@ -702,6 +661,70 @@ function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
     g.filters.push(`[${idx}:a]${fmt},volume=${num(s.gainDb)}dB${ms > 0 ? `,adelay=${ms}|${ms}` : ''}[${out}]`);
     mix.push(out);
   }
+  return mix;
+}
+
+function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
+  const { t, rc, preset } = ctx;
+  const F = fpsValue(rc.fps);
+  const totalSec = total / F;
+  const g = new Graph();
+  const fmt = AFMT;
+
+  // Voice: one atrim per segment from its voice source, padded/trimmed to the exact segment length.
+  const uses = new Map<string, number>();
+  const plan = t.segments.map((seg) => ({ seg, src: voiceSource(t, seg) }));
+  for (const p of plan) if (p.src) uses.set(p.src, (uses.get(p.src) ?? 0) + 1);
+  const inputLabels = new Map<string, string[]>();
+  for (const [id, count] of uses) {
+    const idx = g.addInput(['-i', argPath(t.sources[id]!.path)]);
+    if (count === 1) inputLabels.set(id, [`${idx}:a`]);
+    else {
+      const labels = Array.from({ length: count }, () => g.label('as'));
+      g.filters.push(`[${idx}:a]asplit=${count}${labels.map((l) => `[${l}]`).join('')}`);
+      inputLabels.set(id, labels);
+    }
+  }
+  const pieces: string[] = [];
+  for (const { seg, src } of plan) {
+    const d = (seg.range.end - seg.range.start) / F;
+    const out = g.label('v');
+    if (!src) {
+      g.filters.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${num(d)}[${out}]`);
+    } else {
+      const s = t.sources[src]!;
+      const takeSec = takeFrameToSeconds(t, seg.src.take, seg.src.from);
+      const takeEnd = takeFrameToSeconds(t, seg.src.take, seg.src.to);
+      const a = sourceLocalSeconds(t, s, takeSec);
+      const b = sourceLocalSeconds(t, s, takeEnd);
+      const drift = s.kind === 'camera' && s.drift ? s.drift : 1;
+      const chain = [`atrim=start=${num(Math.max(0, a))}:end=${num(Math.max(0, b))}`, 'asetpts=PTS-STARTPTS'];
+      chain.push(fmt);
+      // Drift: the source clock runs `drift`× the take clock. Re-time by resampling (pitch-neutral at ppm scale,
+      // sample-accurate unlike atempo): reinterpret at 192 kHz·drift, then back to 48 kHz.
+      if (drift !== 1) chain.push('aresample=192000', `asetrate=${Math.round(192000 * drift)}`, fmt);
+      if (a < 0) {
+        const ms = Math.round((-a / drift) * 1000);
+        chain.push(`adelay=${ms}|${ms}`);
+      }
+      const fadeD = Math.min(0.005, d / 4);
+      chain.push(`apad=whole_dur=${num(d)}`, `atrim=duration=${num(d)}`, `afade=t=in:d=${num(fadeD)}`,
+        `afade=t=out:st=${num(Math.max(0, d - fadeD))}:d=${num(fadeD)}`);
+      const lbl = inputLabels.get(src)!.shift()!;
+      g.filters.push(`[${lbl}]${chain.join(',')}[${out}]`);
+    }
+    pieces.push(out);
+  }
+  const voiceRaw = g.label('vc');
+  g.filters.push(`${pieces.map((p) => `[${p}]`).join('')}concat=n=${pieces.length}:v=0:a=1[${voiceRaw}]`);
+  const vchain = voiceChain(t.audio.voice, ctx.opts.quality);
+  let voice = voiceRaw;
+  if (vchain.length) {
+    voice = g.label('vf');
+    g.filters.push(`[${voiceRaw}]${vchain.join(',')}[${voice}]`);
+  }
+
+  const mix = mixLabels(ctx, g, voice, total);
   let master = mix[0]!;
   if (mix.length > 1) {
     master = g.label('mx');
@@ -714,12 +737,61 @@ function audioArgs(ctx: Ctx, total: Frame): RenderPlan['audio'] {
   const tail = `${fmt},apad=whole_dur=${num(totalSec)},atrim=duration=${num(totalSec)}[aout]`;
   const graph = (loud: string) => [...g.filters, `[${master}]${loud},${tail}`].join(';');
   const args = [...g.inputs, '-filter_complex', graph(twoPass ? LOUDNORM_TOKEN : single), '-map', '[aout]', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', '-f', 'wav', '{out}'];
-  if (!twoPass) return { hash: '', args };
+  if (!twoPass) return { hash: '', args, fast: fastAudio(ctx, total, { I: target.I, TP: target.TP }) };
   return {
     hash: '',
     args,
     measure: { args: [...g.inputs, '-filter_complex', graph(`${single}:print_format=json`), '-map', '[aout]', '-f', 'null', '-'], target },
   };
+}
+
+function fastAudio(ctx: Ctx, total: Frame, target: FastAudio['target']): FastAudio {
+  const { t } = ctx;
+  const F = fpsValue(ctx.rc.fps);
+  const totalSec = total / F;
+  const vchain = voiceChain(t.audio.voice, 'preview');
+  const out = ['-map', '0:a:0', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', '-f', 'wav', '{out}'];
+  const stems = t.segments.map((seg) => {
+    const d = (seg.range.end - seg.range.start) / F;
+    const src = voiceSource(t, seg);
+    const fadeD = Math.min(0.005, d / 4);
+    const tail = [`apad=whole_dur=${num(d)}`, `atrim=duration=${num(d)}`, `afade=t=in:d=${num(fadeD)}`,
+      `afade=t=out:st=${num(Math.max(0, d - fadeD))}:d=${num(fadeD)}`, 'ebur128=framelog=quiet'];
+    let args: string[] | null = null;
+    if (src) {
+      const s = t.sources[src]!;
+      const a = sourceLocalSeconds(t, s, takeFrameToSeconds(t, seg.src.take, seg.src.from));
+      const b = sourceLocalSeconds(t, s, takeFrameToSeconds(t, seg.src.take, seg.src.to));
+      if (b > 0 && b > a) {
+        const drift = s.kind === 'camera' && s.drift ? s.drift : 1;
+        const chain = [AFMT];
+        if (drift !== 1) chain.push('aresample=192000', `asetrate=${Math.round(192000 * drift)}`, AFMT);
+        if (a < 0) {
+          const ms = Math.round((-a / drift) * 1000);
+          chain.push(`adelay=${ms}|${ms}`);
+        }
+        chain.push(...vchain, ...tail);
+        const seek = a > 0 ? ['-ss', num(a), '-t', num(b - a)] : ['-t', num(b)];
+        args = [...seek, '-i', argPath(s.path), '-vn', '-sn', '-af', chain.join(','), ...out];
+      }
+    }
+    // no voice (or the source starts after this segment): silence of the exact length
+    args ??= ['-f', 'lavfi', '-i', `anullsrc=r=48000:cl=stereo`, '-af', [`atrim=duration=${num(d)}`, ...tail].join(','), ...out];
+    return { id: seg.id, hash: sha256Hex(`v${COMPILER_VERSION}\0stem\0${args.join('\0')}`), durationSec: d, args };
+  });
+  const g = new Graph();
+  g.addInput(['-f', 'concat', '-safe', '0', '-i', '{voice}']);
+  const voice = g.label('vc');
+  g.filters.push(`[0:a]${AFMT}[${voice}]`);
+  const mix = mixLabels(ctx, g, voice, total);
+  let master = mix[0]!;
+  if (mix.length > 1) {
+    master = g.label('mx');
+    g.filters.push(`${mix.map((l) => `[${l}]`).join('')}amix=inputs=${mix.length}:duration=first:normalize=0[${master}]`);
+  }
+  g.filters.push(`[${master}]${LOUDNORM_TOKEN},${AFMT},apad=whole_dur=${num(totalSec)},atrim=duration=${num(totalSec)}[aout]`);
+  const args = [...g.inputs, '-filter_complex', g.filters.join(';'), '-map', '[aout]', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', '-f', 'wav', '{out}'];
+  return { stems, args, target };
 }
 
 /** Placeholder for the measured loudnorm filter in 2-pass audio args. */

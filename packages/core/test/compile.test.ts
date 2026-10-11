@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Timeline } from '../src/index.js';
-import { applyOp, applyOps, assColor, assEscape, assTime, compile, emptyTimeline, ffFilterValue, overlaysToAss, PRESETS, presetBitrate, voiceSource } from '../src/index.js';
+import { applyOp, applyOps, LOUDNORM_TOKEN, assColor, assEscape, assTime, compile, emptyTimeline, ffFilterValue, overlaysToAss, PRESETS, presetBitrate, voiceSource } from '../src/index.js';
 import { D, fixture } from './fixtures.js';
 
 const fc = (args: string[]) => args[args.indexOf('-filter_complex') + 1]!;
@@ -240,6 +240,44 @@ describe('compile: audio graph', () => {
     expect(g).toContain('sidechaincompress=threshold=0.02:ratio=6');
     expect(g).toContain('adelay=3000|3000');
     expect(g).toContain('amix=inputs=3:duration=first:normalize=0');
+  });
+  it('preview carries fast audio: one seeked stem per segment and a master over the stem list', () => {
+    const p = compile(fixture(), opts);
+    const f = p.audio.fast!;
+    expect(f.stems.map((s) => s.id)).toEqual(['seg_a', 'seg_b', 'seg_c']);
+    expect(f.stems.map((s) => s.durationSec)).toEqual([3, 6, 2]);
+    expect(f.stems[0]!.args.slice(0, 3)).toEqual(['-t', '3', '-i']); // starts at 0: no -ss
+    expect(f.stems[1]!.args.slice(0, 5)).toEqual(['-ss', '4', '-t', '6', '-i']);
+    for (const s of f.stems) {
+      const af = s.args[s.args.indexOf('-af') + 1]!;
+      expect(af).toMatch(/highpass=f=80,afftdn=.*apad=whole_dur=.*,atrim=duration=.*afade=t=out.*,ebur128=framelog=quiet$/);
+      expect(s.args.at(-1)).toBe('{out}');
+      expect(s.hash).toMatch(/^[0-9a-f]{64}$/);
+    }
+    expect(f.args.slice(0, 6)).toEqual(['-f', 'concat', '-safe', '0', '-i', '{voice}']);
+    expect(fc(f.args)).toContain(LOUDNORM_TOKEN);
+    expect(fc(f.args)).not.toContain('loudnorm=');
+    expect(fc(f.args)).toMatch(/apad=whole_dur=11,atrim=duration=11\[aout\]$/);
+    expect(f.target).toEqual({ I: -14, TP: -1 });
+    expect(compile(fixture(), { quality: 'final', target: 'youtube', projectDir: '/p' }).audio.fast).toBeUndefined();
+  });
+  it('fast audio: an edit changes only that segment\'s stem hash; silence, negative offset and drift', () => {
+    const a = compile(fixture(), opts).audio.fast!;
+    const b = compile(applyOp(fixture(), { op: 'trimSegment', id: 'seg_b', to: 250, decided: D }).timeline, opts).audio.fast!;
+    expect(a.stems.map((s, i) => s.hash === b.stems[i]!.hash)).toEqual([true, false, true]);
+    expect(b.args).not.toEqual(a.args); // master length changes
+    const t = structuredClone(fixture());
+    delete (t.sources as Record<string, unknown>).mic;
+    (t.sources.cam as { offset: number }).offset = -60; // camera started 2 s into the take (source-local = take − 2 s)
+    (t.sources.cam as { drift?: number }).drift = 1.0001;
+    (t.sources.scr as { audio?: boolean }).audio = false;
+    const f = compile(t, opts).audio.fast!;
+    const af0 = f.stems[0]!.args[f.stems[0]!.args.indexOf('-af') + 1]!;
+    expect(f.stems[0]!.args.slice(0, 2)).toEqual(['-t', expect.any(String)]);
+    expect(af0).toMatch(/asetrate=192019,.*adelay=/);
+    (t.sources.cam as { audio?: boolean }).audio = false;
+    const silent = compile(t, opts).audio.fast!;
+    for (const s of silent.stems) expect(s.args.slice(0, 4)).toEqual(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo']);
   });
   it('bgm without ducking discards the sidechain', () => {
     const t = applyOp(fixture(), { op: 'setBgm', bgm: [{ id: 'bgm_1', asset: 'music', range: { start: 0, end: 330 }, gainDb: -20, duckDb: 0, fadeIn: 0, fadeOut: 0, decided: D }] }).timeline;
