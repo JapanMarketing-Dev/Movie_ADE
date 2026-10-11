@@ -104,13 +104,18 @@ describe('onboarding flow', () => {
     expect(goToStep(s, 'language').step).toBe('language');
     expect(nextStep(goToStep(s, 'language')).visited).toEqual(['language', 'agents']);
   });
-  it('shows once for new users, never after done / skipped or with projects', () => {
-    expect(shouldShowOnboarding(memStorage(), 0)).toBe(true);
-    expect(shouldShowOnboarding(memStorage(), 2)).toBe(false);
-    expect(shouldShowOnboarding(memStorage({ [ONBOARDING_KEY]: 'done' }), 0)).toBe(false);
-    expect(shouldShowOnboarding(memStorage({ [ONBOARDING_KEY]: 'skipped' }), 0)).toBe(false);
-    expect(shouldShowOnboarding(memStorage({ [ONBOARDING_KEY]: 'other' }), 0)).toBe(true);
-    expect(shouldShowOnboarding(null, 0)).toBe(true);
+  it('shows once for new users, never after completion, done / skipped or with projects', () => {
+    const show = (completedAt: unknown, storage: StorageLike | null, recentCount: number) => shouldShowOnboarding({ completedAt, storage, recentCount });
+    expect(show(null, memStorage(), 0)).toBe(true);
+    expect(show(undefined, memStorage(), 0)).toBe(true);
+    expect(show('2026-10-11T10:00:00Z', memStorage(), 0)).toBe(false);
+    expect(show('', memStorage(), 0)).toBe(true);
+    expect(show(42, memStorage(), 0)).toBe(true);
+    expect(show(null, memStorage(), 2)).toBe(false);
+    expect(show(null, memStorage({ [ONBOARDING_KEY]: 'done' }), 0)).toBe(false);
+    expect(show(null, memStorage({ [ONBOARDING_KEY]: 'skipped' }), 0)).toBe(false);
+    expect(show(null, memStorage({ [ONBOARDING_KEY]: 'other' }), 0)).toBe(true);
+    expect(show(null, null, 0)).toBe(true);
   });
   it('survives storage that throws', () => {
     const broken: StorageLike = {
@@ -121,7 +126,7 @@ describe('onboarding flow', () => {
         throw new Error('denied');
       },
     };
-    expect(shouldShowOnboarding(broken, 0)).toBe(true);
+    expect(shouldShowOnboarding({ completedAt: null, storage: broken, recentCount: 0 })).toBe(true);
     expect(() => markOnboarding(broken, 'done')).not.toThrow();
     const ok = memStorage();
     markOnboarding(ok, 'skipped');

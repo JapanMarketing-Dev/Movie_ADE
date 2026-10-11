@@ -34,6 +34,8 @@ import type {
   ValidationResult,
   Variant,
 } from './types';
+import type { AccountsEventChannel, AccountsEventMap, AccountsInvokeChannel, AccountsInvokeMap } from './ipc-accounts';
+import { ACCOUNTS_EVENT_CHANNELS, ACCOUNTS_INVOKE_CHANNELS } from './ipc-accounts';
 import type {
   AgentSendRequest,
   AgentSendResult,
@@ -47,7 +49,7 @@ import type {
 } from './terminal';
 
 /** renderer -> main, request/response (ipcRenderer.invoke / ipcMain.handle) */
-export interface InvokeMap {
+export interface InvokeMap extends AccountsInvokeMap {
   'app:info': { args: []; result: AppInfo };
   'app:openExternal': { args: [url: string]; result: void };
   'app:showInFolder': { args: [path: string]; result: void };
@@ -170,7 +172,9 @@ export interface SendMap {
 }
 
 /** main -> renderer events (webContents.send / ipcRenderer.on) */
-export interface EventMap {
+export interface EventMap extends AccountsEventMap {
+  /** a terminal opened by main (failover handover, account login): the pane adds a tab and attaches to it */
+  'terminal:adopt': [info: TerminalAttachInfo];
   'terminal:data': [id: string, data: string];
   'terminal:exit': [id: string, code: number];
   /** a tab's agent / state / title changed */
@@ -191,7 +195,11 @@ export type SendChannel = keyof SendMap;
 export type EventChannel = keyof EventMap;
 
 // Records keyed by the maps above: the compiler fails if a channel is declared but missing here (or vice versa).
+const accountsInvoke = Object.fromEntries(ACCOUNTS_INVOKE_CHANNELS.map((c) => [c, true])) as Record<AccountsInvokeChannel, true>;
+const accountsEvents = Object.fromEntries(ACCOUNTS_EVENT_CHANNELS.map((c) => [c, true])) as Record<AccountsEventChannel, true>;
+
 const invoke: Record<InvokeChannel, true> = {
+  ...accountsInvoke,
   'app:info': true, 'app:openExternal': true, 'app:showInFolder': true, 'app:chooseFolder': true,
   'app:permissions': true, 'app:askMediaAccess': true, 'app:openScreenSettings': true,
   'project:recent': true, 'project:create': true, 'project:open': true, 'project:snapshot': true,
@@ -221,6 +229,8 @@ const send: Record<SendChannel, true> = {
   'project:watch': true, 'renderer:ready': true, 'analysis:progress': true,
 };
 const events: Record<EventChannel, true> = {
+  ...accountsEvents,
+  'terminal:adopt': true,
   'terminal:data': true, 'terminal:exit': true, 'agent:state': true, 'project:changed': true, 'settings:changed': true,
   'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true, 'analysis:state': true,
 };

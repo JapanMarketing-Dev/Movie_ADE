@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { BookmarkPlus, Film, Search } from 'lucide-react';
 import type { ArchiveDetail, ArchiveListItem, ProjectInfo } from '@shared/types';
 import { useT } from '../i18n';
+import { useST } from '../shell/i18n';
+import { Button, EmptyState, Skeleton, Spinner, TextField } from '../ui';
+import { statEntries } from './parts/screenModel';
 import { api, errMsg } from '../lib/api';
 
 function fmtDur(sec?: number): string {
@@ -12,13 +15,22 @@ function fmtDur(sec?: number): string {
 
 export function ArchiveScreen({ project, toast }: { project: ProjectInfo | null; toast: (m: string) => void }) {
   const t = useT();
+  const st = useST();
   const [q, setQ] = useState('');
   const [items, setItems] = useState<ArchiveListItem[] | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [detail, setDetail] = useState<ArchiveDetail | null>(null);
 
   useEffect(() => {
-    const h = window.setTimeout(() => void api.invoke('archive:list', q).then(setItems), 200);
+    const h = window.setTimeout(
+      () =>
+        void api.invoke('archive:list', q).then((list) => {
+          setItems(list);
+          // open the newest one so the detail panel is never empty when there is something to show
+          setSel((cur) => (cur && list.some((x) => x.id === cur) ? cur : (list[0]?.id ?? null)));
+        }),
+      200,
+    );
     return () => window.clearTimeout(h);
   }, [q]);
 
@@ -37,73 +49,100 @@ export function ArchiveScreen({ project, toast }: { project: ProjectInfo | null;
     }
   };
 
+  const stats = detail ? statEntries(detail.stats) : [];
+  const ov = detail?.overview;
   return (
-    <div className="arc">
-      <div className="arc-list">
-        <h1 style={{ fontSize: 20, margin: '8px 0 14px' }}>{t('arc.title')}</h1>
-        <div className="row">
-          <Search size={15} color="#6f727a" />
-          <input className="input" style={{ flex: 1 }} type="search" placeholder={t('arc.search')} value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+    <div className="gallery">
+      <div className="gallery__main">
+        <header className="gallery__head">
+          <div>
+            <h1 className="gallery__title">{t('arc.title')}</h1>
+            <p className="gallery__sub">{st('arc.sub', { n: String(items?.length ?? 0) })}</p>
+          </div>
+          <TextField className="gallery__search" icon={<Search size={14} />} type="search" placeholder={t('arc.search')} value={q} onChange={(e) => setQ(e.target.value)} />
+        </header>
         {items === null ? (
-          <div className="empty">{t('common.loading')}</div>
+          <div className="gallery__grid">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="gallery__card is-skeleton">
+                <Skeleton height={120} />
+                <Skeleton width="70%" />
+              </div>
+            ))}
+          </div>
         ) : items.length === 0 ? (
-          <div className="empty">{t('arc.empty')}</div>
+          <EmptyState title={q ? st('arc.noMatch') : st('arc.emptyTitle')} description={q ? undefined : t('arc.empty')} />
         ) : (
-          <div className="arc-grid">
+          <div className="gallery__grid">
             {items.map((it) => (
-              <button key={it.id} className={`arc-card ${sel === it.id ? 'sel' : ''}`} onClick={() => setSel(it.id)}>
-                <div className="thumb">{it.thumbnailUrl ? <img src={it.thumbnailUrl} alt="" /> : <Film size={26} />}</div>
-                <div className="meta">
-                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.title}</div>
-                  <div className="dim row" style={{ gap: 6, fontSize: 11.5 }}>
-                    {it.kind && <span>{it.kind}</span>}
-                    {it.template && <span className="mono">{it.template}</span>}
-                    <span style={{ marginLeft: 'auto' }}>{fmtDur(it.durationSec)}</span>
-                  </div>
-                  {it.createdAt && <div className="dim" style={{ fontSize: 11 }}>{new Date(it.createdAt).toLocaleDateString()}</div>}
-                </div>
+              <button key={it.id} type="button" className={`gallery__card${sel === it.id ? ' is-selected' : ''}`} onClick={() => setSel(it.id)}>
+                <span className="gallery__thumb">
+                  {it.thumbnailUrl ? <img src={it.thumbnailUrl} alt="" loading="lazy" /> : <Film size={26} />}
+                  {it.durationSec !== undefined && <span className="gallery__dur">{fmtDur(it.durationSec)}</span>}
+                </span>
+                <span className="gallery__name">{it.title}</span>
+                <span className="gallery__meta">
+                  {it.kind && <span className="gallery__chip">{it.kind === 'tech' ? t('home.kind.tech') : it.kind === 'talk' ? t('home.kind.talk') : it.kind}</span>}
+                  {it.template && <code className="gallery__chip">{it.template}</code>}
+                  {it.createdAt && <span className="gallery__date">{new Date(it.createdAt).toLocaleDateString()}</span>}
+                </span>
               </button>
             ))}
           </div>
         )}
       </div>
-      <aside className="arc-detail">
-        {!detail ? (
-          <div className="dim">{sel ? t('common.loading') : ''}</div>
+      <aside className="gallery__detail" aria-label={t('arc.stats')}>
+        {!sel ? (
+          <EmptyState size="sm" title={st('arc.pick')} description={st('arc.pickDesc')} />
+        ) : !detail ? (
+          <Spinner />
         ) : (
           <>
-            <div className="thumb" style={{ aspectRatio: '16/9', background: '#000', borderRadius: 8, overflow: 'hidden', marginBottom: 12, display: 'grid', placeItems: 'center' }}>
-              {detail.entry.thumbnailUrl ? <img src={detail.entry.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <Film size={30} color="#6f727a" />}
+            <div className="gallery__hero">
+              {detail.entry.thumbnailUrl ? <img src={detail.entry.thumbnailUrl} alt="" /> : <Film size={30} />}
             </div>
-            <h2 style={{ margin: '0 0 4px', fontSize: 16, color: 'var(--text)' }}>{detail.entry.title}</h2>
-            <div className="dim mono" style={{ marginBottom: 14 }}>
-              {detail.entry.id}
-            </div>
-            <button className="btn primary" disabled={!project} onClick={() => void useRef_()} title={project ? project.title : t('arc.needProject')}>
-              <BookmarkPlus size={14} /> {t('arc.useRef')}
-            </button>
-            <h2>{t('arc.stats')}</h2>
-            <div className="stats">
-              {Object.entries(detail.stats).map(([k, v]) => (
-                <div key={k} style={{ display: 'contents' }}>
-                  <span className="k">{k}</span>
-                  <span className="mono">{typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
-                </div>
-              ))}
-            </div>
-            {detail.overview && (
+            <h2 className="gallery__dtitle">{detail.entry.title}</h2>
+            <code className="gallery__id">{detail.entry.id}</code>
+            <Button variant="primary" icon={<BookmarkPlus size={14} />} disabled={!project} onClick={() => void useRef_()} title={project ? project.title : t('arc.needProject')}>
+              {t('arc.useRef')}
+            </Button>
+            {!project && <p className="st-note">{t('arc.needProject')}</p>}
+            {ov && (
               <>
-                <h2>{t('ws.timeline')}</h2>
-                <div className="dim">
-                  {t('ws.lane.segments')} {detail.overview.lanes.segments.length} · {t('ws.lane.captions')} {detail.overview.lanes.captions.length} ·{' '}
-                  {t('ws.lane.scenes')} {detail.overview.lanes.scenes.length} · {t('ws.lane.sfx')} {detail.overview.lanes.sfx.length}
+                <h3 className="gallery__h3">{t('ws.timeline')}</h3>
+                <div className="stat-tiles">
+                  <StatTile label={t('ws.lane.segments')} value={ov.lanes.segments.length} />
+                  <StatTile label={t('ws.lane.captions')} value={ov.lanes.captions.length} />
+                  <StatTile label={t('ws.lane.scenes')} value={ov.lanes.scenes.length} />
+                  <StatTile label={t('ws.lane.sfx')} value={ov.lanes.sfx.length} />
                 </div>
+              </>
+            )}
+            {stats.length > 0 && (
+              <>
+                <h3 className="gallery__h3">{t('arc.stats')}</h3>
+                <dl className="gallery__stats">
+                  {stats.map(([k, v]) => (
+                    <div key={k} className="gallery__stat">
+                      <dt>{k}</dt>
+                      <dd>{v}</dd>
+                    </div>
+                  ))}
+                </dl>
               </>
             )}
           </>
         )}
       </aside>
+    </div>
+  );
+}
+
+function StatTile({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="stat-tile">
+      <span className="stat-tile__value">{value}</span>
+      <span className="stat-tile__label">{label}</span>
     </div>
   );
 }

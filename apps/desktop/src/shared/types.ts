@@ -235,6 +235,16 @@ export interface UpdateState {
   notes?: string;
   error?: string;
   progress?: number;
+  /** what kind of failure (network failures are retried with backoff; others are reported) */
+  errorKind?: 'network' | 'http' | 'too-large' | 'verify' | 'unsupported' | 'other';
+  /** epoch ms of the last finished check */
+  lastCheckedAt?: number;
+  /** epoch ms of the next scheduled background check (absent when background checks are off) */
+  nextCheckAt?: number;
+  /** a ready update will be installed when the app quits (background updates on, or restart pressed) */
+  installOnQuit?: boolean;
+  /** "restart to update" was refused: a recording / render is running */
+  blockedBy?: 'busy';
 }
 
 export interface MediaPermissionState {

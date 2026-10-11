@@ -40,7 +40,8 @@ export function goToStep(s: OnboardingState, step: OnboardingStep): OnboardingSt
 }
 
 // ---- "done" flag ----
-// TODO(settings): move to settings.json once @solocut/settings has an `onboarding` key; localStorage until then.
+// The source of truth is settings.json `onboarding.completedAt` (set when the flow is finished or skipped).
+// The old localStorage flag of the first shell port is still honoured so nobody sees the flow twice.
 export const ONBOARDING_KEY = 'solocut.onboarding.v1';
 
 export interface StorageLike {
@@ -48,23 +49,31 @@ export interface StorageLike {
   setItem(k: string, v: string): void;
 }
 
-/** Should the flow open at start? Not when it was finished or skipped, and not when the user already has projects. */
-export function shouldShowOnboarding(storage: StorageLike | null, recentCount: number): boolean {
-  let flag: string | null = null;
+function legacyFlag(storage: StorageLike | null): string | null {
   try {
-    flag = storage?.getItem(ONBOARDING_KEY) ?? null;
+    return storage?.getItem(ONBOARDING_KEY) ?? null;
   } catch {
-    flag = null;
+    return null;
   }
-  if (flag === 'done' || flag === 'skipped') return false;
-  return recentCount === 0;
 }
 
+/**
+ * Should the flow open at start? Not when settings.json says it was completed, not when the legacy flag says done /
+ * skipped, and not when the user already has projects.
+ */
+export function shouldShowOnboarding(o: { completedAt: unknown; storage: StorageLike | null; recentCount: number }): boolean {
+  if (typeof o.completedAt === 'string' && o.completedAt) return false;
+  const flag = legacyFlag(o.storage);
+  if (flag === 'done' || flag === 'skipped') return false;
+  return o.recentCount === 0;
+}
+
+/** Remember locally too (settings.json is written by the caller through settings:set). */
 export function markOnboarding(storage: StorageLike | null, how: 'done' | 'skipped'): void {
   try {
     storage?.setItem(ONBOARDING_KEY, how);
   } catch {
-    // storage unavailable: the flow may show again next time
+    // storage unavailable: settings.json still has completedAt
   }
 }
 

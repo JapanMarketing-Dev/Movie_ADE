@@ -1,20 +1,11 @@
-// Removes file paths and the home directory from crash reports (docs/07: no paths, media or transcripts).
+// Removes file paths, the home directory, URLs, emails, IPs and API keys from crash reports (docs/07: no paths,
+// media or transcripts). The rules live in src/shared/telemetry.ts (ported from Ferret); these two helpers keep the
+// older (string, homeDir) shape.
+import { scrubString as scrubText } from '../../shared/telemetry';
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** Replaces the home dir with "~" and any remaining absolute path with "<path>/<basename>". */
+/** Scrubs one string. Not truncated (the caller decides); see scrubText for the rules. */
 export function scrubString(s: string, homeDir: string): string {
-  let out = s;
-  if (homeDir && homeDir.length > 1) {
-    out = out.replace(new RegExp(escapeRe(homeDir), 'g'), '~');
-    out = out.replace(new RegExp(escapeRe(homeDir.replace(/\\/g, '/')), 'g'), '~');
-  }
-  // Windows drive paths and POSIX paths with at least two segments (keep app-internal names readable)
-  out = out.replace(/[A-Za-z]:[\\/](?:[^\\/\s:"'<>|]+[\\/])+([^\\/\s:"'<>|]+)/g, '<path>/$1');
-  out = out.replace(/(^|[\s"'(=])(?:~|\/(?:Users|home|Volumes|private|tmp|var|mnt|media))(?:\/[^/\s"')]+)+\/([^/\s"')]+)/g, '$1<path>/$2');
-  return out;
+  return scrubText(s, { homeDir }, Number.MAX_SAFE_INTEGER);
 }
 
 /** Deep-scrubs every string in a JSON-like value (events, breadcrumbs). Limits depth to stay cheap. */

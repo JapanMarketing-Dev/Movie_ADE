@@ -346,7 +346,8 @@ describe('hardware encoders', () => {
   it('renderConcurrency splits cores between chunks and threads', () => {
     expect(renderConcurrency({ hardware: false, cpus: 14 })).toEqual({ chunks: 4, threads: 4 });
     expect(renderConcurrency({ hardware: false, cpus: 32 })).toEqual({ chunks: 6, threads: 6 });
-    expect(renderConcurrency({ hardware: true, cpus: 14 })).toEqual({ chunks: 3, threads: 5 });
+    expect(renderConcurrency({ hardware: true, cpus: 14 })).toEqual({ chunks: 4, threads: 4 });
+    expect(renderConcurrency({ hardware: true, cpus: 32 })).toEqual({ chunks: 4, threads: 8 });
     expect(renderConcurrency({ hardware: false, cpus: 1 })).toEqual({ chunks: 1, threads: 1 });
   });
 });

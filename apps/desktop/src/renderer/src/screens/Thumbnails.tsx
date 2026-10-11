@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ImagePlus, RefreshCw, Sparkles, Star } from 'lucide-react';
+import { Check, ImagePlus, RefreshCw, Sparkles, Star } from 'lucide-react';
+import { Button, Segmented, Select, SettingRow, Skeleton } from '../ui';
+import { useST } from '../shell/i18n';
 import type { ProjectInfo, ThumbCandidate, ThumbImage, Variant } from '@shared/types';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
 
 export function Thumbnails({ project, toast }: { project: ProjectInfo | null; toast: (m: string) => void }) {
   const t = useT();
+  const st = useST();
   const [cands, setCands] = useState<ThumbCandidate[] | null>(null);
   const [candErr, setCandErr] = useState<string | null>(null);
   const [frame, setFrame] = useState<number | null>(null);
@@ -82,97 +85,120 @@ export function Thumbnails({ project, toast }: { project: ProjectInfo | null; to
     );
   }
 
+  const picked = cands?.find((c) => c.frame === frame);
+  const vertical = variant !== 'main';
   return (
-    <div className="ws">
+    <div className="ws thumbs">
       <div className="titlebar">
         <span className="title">{t('nav.thumbnails')}</span>
         <span className="dim">{project.title}</span>
         <span className="grow" />
-        <div className="segmented">
-          <button className={variant === 'main' ? 'on' : ''} onClick={() => setVariant('main')}>
-            {t('var.main')} 16:9
-          </button>
-          <button className={variant === 'youtube-shorts' ? 'on' : ''} onClick={() => setVariant('youtube-shorts')}>
-            {t('var.shorts')} 9:16
-          </button>
-        </div>
-        <button className="btn ghost small" disabled={busy !== null} onClick={() => void loadCands()}>
-          <RefreshCw size={13} className={busy === 'cands' ? 'spin' : ''} /> {t('thumb.candidates')}
-        </button>
+        <Segmented
+          ariaLabel={st('thumb.size')}
+          size="sm"
+          value={variant}
+          onChange={setVariant}
+          options={[
+            { value: 'main', label: `${t('var.main')} 16:9` },
+            { value: 'youtube-shorts', label: `${t('var.shorts')} 9:16` },
+          ]}
+        />
+        <Button size="sm" variant="ghost" icon={<RefreshCw size={13} className={busy === 'cands' ? 'spin' : ''} />} disabled={busy !== null} onClick={() => void loadCands()}>
+          {t('thumb.candidates')}
+        </Button>
       </div>
-      <div className="thumb-layout">
-        <section className="thumb-main">
-          <h2 style={{ marginTop: 0 }}>{t('thumb.candidates')}</h2>
+      <div className="thumbs__body">
+        <section className="thumbs__main">
+          <div className="thumbs__step">
+            <span className="thumbs__num">1</span>
+            <h2 className="thumbs__h">{st('thumb.pickFrame')}</h2>
+            <span className="thumbs__hint">{st('thumb.pickHint')}</span>
+          </div>
           {cands === null ? (
-            <div className="dim">{t('common.loading')}</div>
+            <div className={`thumbs__grid${vertical ? ' is-vertical' : ''}`}>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} height={vertical ? 200 : 110} />
+              ))}
+            </div>
           ) : cands.length === 0 ? (
             <div className="notice">{candErr ?? t('thumb.noCandidates')}</div>
           ) : (
-            <div className="thumb-grid">
+            <div className={`thumbs__grid${vertical ? ' is-vertical' : ''}`}>
               {cands.map((c) => (
-                <button key={c.frame} className={`thumb-card ${frame === c.frame ? 'sel' : ''}`} onClick={() => setFrame(c.frame)}>
-                  <img src={api.mediaUrl(c.image)} alt="" />
-                  <span className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="mono dim">{c.timecode || c.frame}</span>
-                    {c.score !== undefined && <span className="pill">{Math.round(c.score * 100)}</span>}
+                <button key={c.frame} type="button" className={`thumbs__card${frame === c.frame ? ' is-selected' : ''}`} onClick={() => setFrame(c.frame)}>
+                  <span className="thumbs__img">
+                    <img src={api.mediaUrl(c.image)} alt="" loading="lazy" />
+                    <span className="thumbs__tc">{c.timecode || c.frame}</span>
+                    {frame === c.frame && <Check size={14} className="thumbs__check" aria-hidden="true" />}
                   </span>
+                  {c.score !== undefined && (
+                    <span className="thumbs__score" title={st('thumb.score')}>
+                      <span className="thumbs__score-bar" style={{ transform: `scaleX(${Math.max(0, Math.min(1, c.score))})` }} />
+                      <span className="thumbs__score-num">{Math.round(c.score * 100)}</span>
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
           )}
-          <h2>{t('thumb.results')}</h2>
+          <div className="thumbs__step">
+            <span className="thumbs__num">2</span>
+            <h2 className="thumbs__h">{t('thumb.results')}</h2>
+            <span className="thumbs__hint">{st('thumb.resultsHint')}</span>
+          </div>
           {images.length === 0 ? (
-            <div className="dim">{t('thumb.noResults')}</div>
+            <div className="thumbs__empty">{t('thumb.noResults')}</div>
           ) : (
-            <div className="thumb-grid large">
+            <div className={`thumbs__grid thumbs__grid--large${vertical ? ' is-vertical' : ''}`}>
               {images.map((img) => (
-                <div key={img.path} className={`thumb-card ${img.favorite ? 'fav' : ''}`}>
-                  <img src={api.mediaUrl(img.path)} alt="" />
-                  <span className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="dim" style={{ fontSize: 11 }}>{img.provider ?? img.path.split(/[\\/]/).pop()}</span>
-                    <button className="btn ghost small icon" title={t('thumb.favorite')} onClick={() => void toggleFav(img)}>
-                      <Star size={14} fill={img.favorite ? '#ff4a3d' : 'none'} color={img.favorite ? '#ff4a3d' : 'currentColor'} />
+                <div key={img.path} className={`thumbs__card thumbs__card--result${img.favorite ? ' is-fav' : ''}`}>
+                  <span className="thumbs__img">
+                    <img src={api.mediaUrl(img.path)} alt="" loading="lazy" />
+                    <button type="button" className={`thumbs__fav${img.favorite ? ' is-on' : ''}`} title={t('thumb.favorite')} aria-pressed={img.favorite} onClick={() => void toggleFav(img)}>
+                      <Star size={14} fill={img.favorite ? 'currentColor' : 'none'} />
                     </button>
                   </span>
+                  <span className="thumbs__provider">{img.provider ?? img.path.split(/[\\/]/).pop()}</span>
                 </div>
               ))}
             </div>
           )}
         </section>
-        <aside className="rec-side">
-          <div className="field">
-            <label>{t('thumb.frame')}</label>
-            <div className="mono">{frame ?? '—'}</div>
+        <aside className="thumbs__side">
+          <h2 className="thumbs__h">{st('thumb.generate')}</h2>
+          <div className="thumbs__picked">
+            {picked ? <img src={api.mediaUrl(picked.image)} alt="" /> : <span>{st('thumb.noFrame')}</span>}
           </div>
-          <div className="field">
-            <label>{t('thumb.provider')}</label>
-            <select className="input" value={provider} onChange={(e) => setProvider(e.target.value)}>
-              {providers.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t('thumb.title')}</label>
+          <SettingRow label={t('thumb.frame')}>
+            <code className="st-value st-value--mono">{picked?.timecode || frame || '—'}</code>
+          </SettingRow>
+          <SettingRow label={t('thumb.provider')}>
+            <Select ariaLabel={t('thumb.provider')} value={provider} options={providers.map((p) => ({ value: p, label: p }))} onChange={setProvider} />
+          </SettingRow>
+          <label className="thumbs__field">
+            <span className="st-row__label">{t('thumb.title')}</span>
             <input className="input" type="text" value={title} placeholder={t('thumb.titlePlaceholder')} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="field">
-            <label>{t('thumb.count')}</label>
-            <select className="input" value={n} onChange={(e) => setN(Number(e.target.value))}>
-              {[1, 2, 3, 4].map((x) => (
-                <option key={x}>{x}</option>
-              ))}
-            </select>
-          </div>
-          <div className="dim" style={{ fontSize: 12 }}>
-            {t('thumb.note')}
-          </div>
-          <div style={{ flex: 1 }} />
-          <button className="recbtn" disabled={busy !== null || frame === null} onClick={() => void generate()}>
-            {busy === 'gen' ? <Sparkles size={16} className="spin" /> : <ImagePlus size={16} />} {busy === 'gen' ? t('thumb.generating') : t('thumb.generate')}
-          </button>
+          </label>
+          <SettingRow label={t('thumb.count')}>
+            <Segmented
+              ariaLabel={t('thumb.count')}
+              size="sm"
+              value={String(n) as '1' | '2' | '3' | '4'}
+              onChange={(v) => setN(Number(v))}
+              options={(['1', '2', '3', '4'] as const).map((x) => ({ value: x, label: x }))}
+            />
+          </SettingRow>
+          <p className="st-note">{t('thumb.note')}</p>
+          <span className="thumbs__grow" />
+          <Button
+            variant="primary"
+            className="thumbs__go"
+            icon={busy === 'gen' ? <Sparkles size={15} className="spin" /> : <ImagePlus size={15} />}
+            disabled={busy !== null || frame === null}
+            onClick={() => void generate()}
+          >
+            {busy === 'gen' ? t('thumb.generating') : t('thumb.generate')}
+          </Button>
         </aside>
       </div>
     </div>

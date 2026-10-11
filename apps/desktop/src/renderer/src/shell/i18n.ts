@@ -4,6 +4,7 @@
 import { useCallback, useContext } from 'react';
 import type { Lang } from '@shared/types';
 import { LangContext } from '../i18n';
+import { SCREENS_EN, SCREENS_JA } from './i18nScreens';
 
 const ja = {
   'common.settings': '設定',
@@ -393,6 +394,7 @@ const ja = {
   'onb.project.f1': '撮影: 画面・カメラ・マイクを同時に録ります',
   'onb.project.f2': '編集: ターミナルのエージェントに「動画を完成させて」と頼みます',
   'onb.project.f3': '確認と投稿: プレビューを見て、喋って囲んで直し、3本を投稿します',
+  ...SCREENS_JA,
 } as const;
 
 export type SKey = keyof typeof ja;
@@ -785,6 +787,7 @@ const en: Record<SKey, string> = {
   'onb.project.f1': 'Record: screen, camera and mic at once',
   'onb.project.f2': 'Edit: ask the agent in the terminal to “finish the video”',
   'onb.project.f3': 'Review and publish: watch, talk and circle fixes, then publish all three',
+  ...SCREENS_EN,
 };
 
 export const SHELL_DICT: Record<Lang, Record<SKey, string>> = { ja, en };

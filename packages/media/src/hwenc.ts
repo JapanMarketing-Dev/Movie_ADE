@@ -133,11 +133,11 @@ export function cpuCount(): number {
 
 /**
  * Default chunk parallelism and x264 threads per chunk: about a third of the cores run chunks in parallel (each
- * chunk also decodes and filters), the rest is shared as encoder threads. Hardware encoders: at most 3 sessions.
+ * chunk also decodes and filters), the rest is shared as encoder threads. Hardware encoders: at most 4 sessions (consumer NVENC allows 5–8).
  */
 export function renderConcurrency(o: { hardware: boolean; cpus?: number }): { chunks: number; threads: number } {
   const n = Math.max(1, o.cpus ?? cpuCount());
-  const chunks = o.hardware ? Math.max(1, Math.min(3, Math.floor(n / 3))) : Math.max(1, Math.min(6, Math.floor(n / 3)));
+  const chunks = o.hardware ? Math.max(1, Math.min(4, Math.floor(n / 3))) : Math.max(1, Math.min(6, Math.floor(n / 3)));
   return { chunks, threads: Math.max(1, Math.ceil(n / chunks)) };
 }
 

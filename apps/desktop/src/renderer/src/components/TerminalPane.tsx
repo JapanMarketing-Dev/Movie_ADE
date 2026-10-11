@@ -564,6 +564,22 @@ export function TerminalPane({ projectDir, visible, toast }: { projectDir: strin
     });
   }, []);
   useEffect(() => api.on('agent:state', applyAgentState), [applyAgentState]);
+
+  // a terminal opened by main (failover handover, account login): add it as a tab of its folder and attach
+  useEffect(
+    () =>
+      api.on('terminal:adopt', (info) => {
+        const pane: Pane = { key: `pane${++paneSeq}`, title: info.title, state: null, launch: info.agent, cwd: info.cwd };
+        const handle = acquireTerminal(pane.key);
+        spawnedRef.current.add(pane.key);
+        handle.reattach(info.id, info.history, info.size);
+        const key = `tab${++tabSeq}`;
+        setPanes((prev) => ({ ...prev, [pane.key]: pane }));
+        setTabs((prev) => [...prev, { key, projectId: info.cwd, layout: leaf(pane.key), activePane: pane.key }]);
+        if ((info.cwd ?? '') === projectKey) setActiveKey(key);
+      }),
+    [projectKey, setActiveKey],
+  );
   useEffect(() => {
     if (!restored) return;
     void api

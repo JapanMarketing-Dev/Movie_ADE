@@ -36,6 +36,10 @@ export interface TerminalCreateOptions {
   title?: string | null;
   /** Start the agent continuing its previous conversation (Claude Code --continue, Codex resume --last). */
   resume?: boolean;
+  /** Claude Code / Codex account (null = system default; omitted = the selected account). Set by main only. */
+  accountId?: string | null;
+  /** Extra environment (account login tabs). Set by main only; stripped from renderer requests. */
+  env?: Record<string, string>;
 }
 
 export interface TerminalTabInfo {
@@ -52,6 +56,8 @@ export interface TerminalSessionInfo {
   cwd: string;
   title: string;
   agent: string | null;
+  /** account the agent was launched with (Claude Code / Codex) */
+  accountId?: string | null;
 }
 
 /** Returned when the renderer re-attaches to a live terminal after a reload. */

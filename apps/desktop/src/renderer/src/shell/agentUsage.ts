@@ -1,11 +1,11 @@
 // Agent accounts / usage / failover state for the status bar and Settings → Accounts.
 //
-// TODO(desktop IPC): the main-process side (usage polling, account detection, failover) is being added by the desktop
-// worker. Until its channels are declared in @shared/ipc, calls go through `invokeOptional`, which the preload rejects
-// for unknown channels; the UI then falls back to what `agents:list` knows (installed / version) and hides meters.
+// Channels from the desktop worker (shared/ipc-accounts.ts): usage:state + usage:meters, failover:status, and the
+// events usage:changed / accounts:changed / failover:status / failover:notice. They are called through
+// `invokeOptional` so a build where the registry is not merged yet degrades to what `agents:list` knows.
 import { useSyncExternalStore } from 'react';
 import { api } from '../lib/api';
-import { parseFailover, parseUsage, type UsageSnapshot } from './usageModel';
+import { failoverFromStatus, parseFailover, parseUsage, usageFromDesktop, type UsageSnapshot } from './usageModel';
 
 export { resetIn, tightestWindow, usageTone, type AgentUsage, type FailoverState, type UsageSnapshot, type UsageWindow } from './usageModel';
 
@@ -38,17 +38,36 @@ function emit(next: UsageSnapshot) {
   for (const l of listeners) l();
 }
 
-export async function refreshUsage(): Promise<void> {
-  const [u, f] = await Promise.all([invokeOptional('usage:state'), invokeOptional('failover:state')]);
-  emit({ available: u !== undefined, usage: parseUsage(u), failover: parseFailover(f) });
+export async function refreshUsage(force = false): Promise<void> {
+  const [state, meters, fo] = await Promise.all([
+    invokeOptional(force ? 'usage:refresh' : 'usage:state', ...(force ? [true] : [])),
+    invokeOptional('usage:meters'),
+    invokeOptional('failover:status'),
+  ]);
+  const usage = Array.isArray(state) ? parseUsage(state) : usageFromDesktop(state, meters);
+  emit({ available: state !== undefined || meters !== undefined, usage, failover: failoverFromStatus(fo) ?? parseFailover(fo) });
+}
+
+const noticeListeners = new Set<(message: string) => void>();
+/** failover:notice (a switch finished or failed): the App shows it as a toast. */
+export function onFailoverNotice(l: (message: string) => void): () => void {
+  noticeListeners.add(l);
+  return () => noticeListeners.delete(l);
 }
 
 function start() {
   if (started) return;
   started = true;
-  void refreshUsage();
+  // the first usage:refresh starts main's polling (5-minute debounce there)
+  void refreshUsage(true);
   onOptional('usage:changed', () => void refreshUsage());
-  onOptional('failover:changed', () => void refreshUsage());
+  onOptional('accounts:changed', () => void refreshUsage());
+  onOptional('failover:status', () => void refreshUsage());
+  onOptional('failover:notice', (n) => {
+    const m = n && typeof n === 'object' && typeof (n as { message?: unknown }).message === 'string' ? (n as { message: string }).message : null;
+    if (m) for (const l of noticeListeners) l(m);
+    void refreshUsage();
+  });
   // usage moves slowly; a minute is enough while nothing pushes
   window.setInterval(() => void refreshUsage(), 60_000);
 }

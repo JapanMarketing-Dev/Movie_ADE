@@ -1,5 +1,5 @@
 import './env-setup';
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, Menu, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, globalShortcut, Menu, powerMonitor, session, shell, type WebContents } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AppInfo, CaptureSource, SettingsDoc } from '../shared/types';
@@ -11,6 +11,12 @@ import { askMediaAccess, openScreenRecordingSettings, permissionState } from './
 import * as platform from './services/platform';
 import * as project from './services/project';
 import { TerminalManager } from './terminal/terminal';
+import { createAccountsStack } from './accounts';
+import type { FailoverHost } from './failover/service';
+import { registerAccountsIpc } from './ipc-accounts';
+import { argvToLine } from '@solocut/agents';
+import type { TerminalCreateOptions } from '../shared/terminal';
+import type { AccountsEventChannel, AccountsEventMap } from '../shared/ipc-accounts';
 import { setMessageLanguage } from './terminal/messages';
 import { AgentWatch } from './agent/watch';
 import { sendAgentRequest } from './agent/request';
@@ -26,6 +32,7 @@ import * as publish from './publish/publish';
 import * as youtube from './publish/youtube';
 import { AnalysisRunner } from './services/analysis';
 import { warmLoginShellPath } from './shellPath';
+import { reportHandled } from '../shared/report';
 import { startCursorLog, stopAllCursorLogs, stopCursorLog } from './services/cursor';
 import { intentUrl, libNameFor, parseProgress, UPLOAD_PAGES } from '../shared/publish';
 
@@ -38,11 +45,15 @@ try {
 } catch (e) {
   log(`settings unavailable: ${e instanceof Error ? e.message : String(e)}`);
 }
-initSentry(crashReports);
 registerMediaScheme();
 app.setName('Solocut');
 // test aid: a separate profile (and single-instance lock) so a running Solocut is not disturbed
 if (process.env.SOLOCUT_USER_DATA) app.setPath('userData', process.env.SOLOCUT_USER_DATA);
+// after the userData path is final (the install id lives there); before ready (minidump capture)
+initSentry(crashReports, {
+  isEnabled: () => platform.crashReportsEnabled(),
+  projectPaths: () => project.recentProjects().map((r) => r.dir),
+});
 // login shell PATH (remembered from the last launch, refreshed in the background) for agents and CLI children
 void warmLoginShellPath(join(app.getPath('userData'), 'shell-path.json'));
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -55,11 +66,13 @@ let settingsWatcher: FSWatcher | null = null;
 const mainWc = (): WebContents | null => mainWindow?.webContents ?? null;
 
 // Agent terminals (ported from Ferret's TerminalManager): node-pty shells with the bundled CLI first on PATH.
+const terminalClosedListeners = new Set<(id: string) => void>();
 const terminals = new TerminalManager(
   (id, d) => emit(mainWc(), 'terminal:data', id, d),
   (id, code) => {
     agentWatch.forget(id);
     emit(mainWc(), 'terminal:exit', id, code);
+    for (const l of terminalClosedListeners) l(id);
   },
 );
 terminals.settings = () => agentPrefsFromSettings(platform.getPath(platform.settingsObject(), 'agents'));
@@ -69,6 +82,53 @@ terminals.cliBin = () => cliBinDir();
 terminals.isProjectDir = (dir) => existsSync(join(dir, 'solocut.json'));
 terminals.trustWorkspace = (agentId, dir, env) => trustWorkspace(agentId, dir, env);
 setMessageLanguage(() => safe(() => platform.language(), 'ja'));
+// ---- accounts / usage / failover (ported from Ferret), glued to the TerminalManager ----
+/** Accounts events are a subset of EventMap; generic tuples do not narrow, so this forwards them untyped. */
+function emitAccounts<C extends AccountsEventChannel>(channel: C, ...args: AccountsEventMap[C]): void {
+  (emit as (wc: WebContents | null, c: string, ...a: unknown[]) => void)(mainWc(), channel, ...args);
+}
+/** Opens a terminal from main (failover handover, account login) and tells the pane to adopt it as a tab. */
+async function openMainTerminal(opts: TerminalCreateOptions): Promise<string> {
+  const tab = await terminals.create(opts);
+  const info = terminals.attach(tab.id);
+  if (info) emit(mainWc(), 'terminal:adopt', info);
+  return tab.id;
+}
+const failoverHost: FailoverHost = {
+  tabs: () =>
+    terminals
+      .list()
+      .filter((t) => t.agent)
+      .map((t) => ({ id: t.id, agentId: t.agent!, projectDir: t.cwd, ...(t.accountId !== undefined ? { accountId: t.accountId } : {}) })),
+  agentState: async (id) => (await terminals.agentState(id)).state,
+  screenText: (id) => terminals.screenText(id),
+  onOutput: (cb) => {
+    terminals.outputListeners.add(cb);
+    return () => terminals.outputListeners.delete(cb);
+  },
+  onClosed: (cb) => {
+    terminalClosedListeners.add(cb);
+    return () => terminalClosedListeners.delete(cb);
+  },
+  spawnAgent: (projectDir, agentId, o) =>
+    openMainTerminal({ size: { cols: 120, rows: 32 }, cwd: projectDir, agent: agentId, ...(o.accountId !== undefined ? { accountId: o.accountId } : {}) }),
+  send: async (id, text) => (await terminals.sendText(id, text)).ok,
+  closeTab: (id) => terminals.close(id),
+  installedAgents: async () => new Set((await safeAsync(() => platform.agents(), [])).filter((a) => a.installed).map((a) => a.id)),
+};
+const accountsStack = createAccountsStack({
+  emit: (channel, ...args) => emitAccounts(channel, ...args),
+  host: failoverHost,
+  isWindowActive: () => Boolean(mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()),
+  openLoginTab: async (launch) =>
+    safeAsync(
+      () => openMainTerminal({ size: { cols: 120, rows: 32 }, command: argvToLine(launch.argv, process.platform === 'win32' ? 'powershell' : 'posix'), title: launch.title, env: launch.env }),
+      null,
+    ),
+});
+terminals.resolveAgentEnv = (agentId, env, accountId) => accountsStack.resolveAgentEnv(agentId, env, accountId);
+terminals.tabAccountId = (agentId, requested) => accountsStack.accounts.tabAccountId(agentId, requested);
+
 const agentWatch = new AgentWatch(terminals, (info) => emit(mainWc(), 'agent:state', info), {
   focused: () => mainWindow?.isFocused() ?? false,
 });
@@ -96,6 +156,7 @@ const updater = new Updater({
   onState: (s) => emit(mainWc(), 'update:state', s),
   isBusy: () => recorder.activeTakes() > 0,
   log,
+  report: (err, op) => reportHandled(err, { area: 'update', op }),
 });
 
 function isTrustedUrl(url: string): boolean {
@@ -147,6 +208,8 @@ function createMainWindow(): void {
   });
   lockNavigation(mainWindow);
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // usage meters refresh when the window comes back (ported policy: no polling while hidden)
+  for (const ev of ['focus', 'show', 'restore'] as const) mainWindow.on(ev as 'focus', () => accountsStack.usage.windowActivated());
   mainWindow.webContents.once('did-finish-load', () => {
     const dir = projectArg(process.argv);
     if (dir) setTimeout(() => emit(mainWc(), 'project:openRequest', dir), 300);
@@ -294,7 +357,16 @@ function registerIpc(): void {
 
   handle('templates:list', () => safe(() => platform.templates(), []));
 
-  handle('terminal:create', (_e, o) => terminals.create(o));
+  // accountId / env are main-only options (failover, account login); never taken from the renderer
+  handle('terminal:create', (_e, o) => {
+    const { accountId: _a, env: _env, ...safeOpts } = o;
+    return terminals.create(safeOpts);
+  });
+  registerAccountsIpc({
+    handle: (channel, fn) => handle(channel, (_e, ...args) => fn(...(args as Parameters<typeof fn>))),
+    emit: (channel, ...args) => emitAccounts(channel, ...args),
+    ...accountsStack,
+  });
   handle('terminal:close', (_e, id) => {
     agentWatch.forget(id);
     terminals.close(id);
@@ -576,6 +648,9 @@ app.whenReady().then(() => {
   createMainWindow();
   watchSettings();
   updater.start(safe(() => platform.updatesEnabled(), true));
+  // update checks: wait for the network after sleep; re-check on focus when the last check is old
+  powerMonitor.on('resume', () => updater.resumed());
+  app.on('browser-window-focus', () => updater.windowActivated());
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
@@ -607,6 +682,7 @@ app.on('will-quit', () => {
   stopAllCursorLogs();
   recorder.endAll();
   analysis.cancel();
+  accountsStack.dispose();
   updater.stop();
   updater.applyOnQuit();
 });

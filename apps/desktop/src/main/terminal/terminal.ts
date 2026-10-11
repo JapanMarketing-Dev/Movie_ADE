@@ -254,7 +254,11 @@ export class TerminalManager {
   /** cwd が Solocut のプロジェクトのフォルダか（フォルダの信頼と、権限確認を省く決まりの projectId に使う） */
   isProjectDir: (dir: string) => boolean = () => false
   /** アカウントの切り替えなど、Agent ごとに環境変数を変える（accounts が設定する） */
-  resolveAgentEnv: ((agentId: string, env: Record<string, string>) => Record<string, string>) | null = null
+  resolveAgentEnv: ((agentId: string, env: Record<string, string>, accountId?: string | null) => Record<string, string>) | null = null
+  /** the account a new agent tab opens with (accounts.tabAccountId); undefined = agent without accounts */
+  tabAccountId: ((agentId: string, requested: string | null | undefined) => string | null | undefined) | null = null
+  /** output listeners besides the renderer (failover watches for usage-limit messages) */
+  readonly outputListeners = new Set<(id: string, data: string) => void>()
 
   constructor(
     private readonly onData: (id: string, data: string) => void,
@@ -313,7 +317,10 @@ export class TerminalManager {
     const pendingWrite = delivery.kind === 'write' ? startupCommand : null
     const id = `t${++this.seq}`
     let env = this.ptyEnv(delivery.env)
-    if (agent && this.resolveAgentEnv) env = this.resolveAgentEnv(agent, env)
+    const accountId = agent && this.tabAccountId ? this.tabAccountId(agent, options.accountId) : undefined
+    // accounts: CLAUDE_CONFIG_DIR / CODEX_HOME of the tab's account (throws when that account's folder is unusable)
+    if (agent && this.resolveAgentEnv) env = { ...env, ...this.resolveAgentEnv(agent, env, accountId) }
+    if (options.env) env = { ...env, ...options.env }
     let pty: IPty
     try {
       pty = nodePty.spawn(shell.file, shell.args, {
@@ -331,7 +338,7 @@ export class TerminalManager {
     const title = options.title?.trim() || (agent ? labelOf(agent, prefs) : `${id.slice(1)}: ${shellLabel(shell.file)}`)
     const session: Session = { id, pty, buffer: [], bufferBytes: 0, timer: null,
       tail: '', readiness: new ComposerReadiness(), sending: false,
-      info: { id, pid: pty.pid, cwd, title, agent: agent ?? null }, history: new TerminalHistory(), unacked: 0, paused: false }
+      info: { id, pid: pty.pid, cwd, title, agent: agent ?? null, ...(accountId !== undefined ? { accountId } : {}) }, history: new TerminalHistory(), unacked: 0, paused: false }
     this.sessions.set(id, session)
     this.wirePty(session, pendingWrite, agent ?? null)
     flow('terminal create', { kind: agent ? 'agent' : options.command ? 'command' : 'shell' })
@@ -345,6 +352,13 @@ export class TerminalManager {
     pty.onData((data) => {
       stopStartupWrite?.touch()
       this.enqueue(session, data)
+      for (const l of this.outputListeners) {
+        try {
+          l(id, data)
+        } catch (err) {
+          reportHandled(err, { area: 'terminal', op: 'output listener' })
+        }
+      }
     })
     pty.onExit(({ exitCode }) => {
       // パンくず：Agent の異常終了（exit code≠0）が、このあとの失敗の手がかりになる

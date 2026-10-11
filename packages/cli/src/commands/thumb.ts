@@ -13,7 +13,7 @@ import {
   DEFAULT_TITLE_STYLE, THUMB_SIZES, generateBases, layoutTitle, pickCandidates, scoreGray, titleAss, titleSvg,
   type GenContext, type ThumbFormat, type ThumbProvider,
 } from '../thumb.js';
-import { allTimelines, captionsLib, freshPreview, media } from './media.js';
+import { allTimelines, captionsLib, freshPreview, glossaryOf, media } from './media.js';
 import { apiKeyFor } from '../keys.js';
 import { ensureFonts } from '../fonts.js';
 import { decisionSetup, isSkip } from '../decision.js';
@@ -278,7 +278,7 @@ async function cmdGen(ctx: Ctx, args: string[]): Promise<void> {
   }
   let lines: string[] = [];
   if (title) {
-    lines = title.includes('\n') ? title.split('\n') : (await captionsLib()).layoutLines(title, p.file.language === 'ja' ? 9 : 18, p.file.language);
+    lines = title.includes('\n') ? title.split('\n') : (await captionsLib()).layoutLines(title, p.file.language === 'ja' ? 9 : 18, p.file.language, glossaryOf(p).map((x) => x.term));
   }
   for (const format of formats) {
     const references = values.reference ? [resolve(ctx.io.cwd, values.reference.replace(/^~(?=\/)/, ctx.io.env.HOME ?? '~'))] : [];

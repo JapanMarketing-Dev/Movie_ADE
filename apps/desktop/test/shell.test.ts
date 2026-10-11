@@ -340,3 +340,42 @@ describe('usage model', () => {
     expect(parseFailover({ enabled: false, last: { from: 1 } })).toEqual({ enabled: false });
   });
 });
+
+describe('usage from the desktop IPC shapes', () => {
+  it('merges usage:state windows with usage:meters accounts', async () => {
+    const { usageFromDesktop, failoverFromStatus } = await import('../src/renderer/src/shell/usageModel');
+    const at = Date.parse('2026-10-11T20:00:00Z');
+    const u = usageFromDesktop(
+      {
+        claude: { provider: 'claude', session: { usedPercent: 42, windowMinutes: 300, resetsAt: at }, weekly: { usedPercent: 120, windowMinutes: 10080, resetsAt: null }, status: 'ok', error: null, updatedAt: 0 },
+        codex: null,
+      },
+      [
+        { agent: 'claude', accountLabel: 'me@example.com', plan: 'Max', percent: 42, windowLabel: '5h', resetsAt: at, status: 'ok', statusLabel: null },
+        { agent: 'codex', accountLabel: 'System default', plan: null, percent: 10, windowLabel: 'wk', resetsAt: null, status: 'ok', statusLabel: null },
+        { agent: 'gemini', percent: null, statusLabel: 'Not signed in', status: 'unavailable' },
+        'junk',
+      ],
+    );
+    expect(u.find((x) => x.agent === 'claude')).toEqual({
+      agent: 'claude',
+      status: 'ok',
+      windows: [
+        { label: '5h', usedPercent: 42, resetsAt: '2026-10-11T20:00:00.000Z' },
+        { label: 'week', usedPercent: 100 },
+      ],
+      account: 'me@example.com',
+      plan: 'Max',
+    });
+    expect(u.find((x) => x.agent === 'codex')).toMatchObject({ status: 'ok', windows: [{ label: 'wk', usedPercent: 10 }], account: 'System default' });
+    expect(u.find((x) => x.agent === 'gemini')).toMatchObject({ status: 'unavailable', windows: [], error: 'Not signed in' });
+    expect(usageFromDesktop(undefined, undefined)).toEqual([]);
+    expect(failoverFromStatus({ enabled: true, last: { fromAgent: 'claude', toAgent: 'codex', at, message: 'switched' } })).toEqual({
+      enabled: true,
+      current: 'codex',
+      last: { from: 'claude', to: 'codex', at: '2026-10-11T20:00:00.000Z', reason: 'switched' },
+    });
+    expect(failoverFromStatus({ enabled: false, last: null })).toEqual({ enabled: false });
+    expect(failoverFromStatus('x')).toBeNull();
+  });
+});

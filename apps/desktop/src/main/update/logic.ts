@@ -203,3 +203,86 @@ export function appBundleOf(execPath: string): string | null {
 
 export const CHECK_DELAY_MS = 20_000;
 export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * After waking from sleep, wait this long before checking: Wi-Fi / DNS are often not back yet and an immediate check
+ * fails with net::ERR_NAME_NOT_RESOLVED (Ferret src/shared/appUpdate.ts AUTO_UPDATE_RESUME_DELAY_MS, Sentry FERRET-1N).
+ */
+export const RESUME_DELAY_MS = 30_000;
+/** while recording / rendering, a scheduled check is postponed by this much (no downloads or prompts mid-take) */
+export const BUSY_RETRY_MS = 5 * 60 * 1000;
+/** retries after a network failure (offline, DNS, reset), capped by CHECK_INTERVAL_MS */
+export const NETWORK_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000] as const;
+/** window focus re-checks when the last check is older than this (an app left open for days misses releases) */
+export const STALE_CHECK_MS = CHECK_INTERVAL_MS;
+
+/** size limits for the small update documents (bounded reads; a hijacked origin cannot exhaust memory) */
+export const MANIFEST_MAX_BYTES = 256 * 1024;
+export const SUMS_MAX_BYTES = 64 * 1024;
+export const SIG_MAX_BYTES = 4 * 1024;
+
+export function networkBackoffMs(failures: number): number {
+  const i = Math.max(0, Math.min(failures - 1, NETWORK_BACKOFF_MS.length - 1));
+  return Math.min(NETWORK_BACKOFF_MS[i]!, CHECK_INTERVAL_MS);
+}
+
+export type UpdateErrorKind = 'network' | 'http' | 'too-large' | 'verify' | 'unsupported' | 'other';
+
+/** an update failure with a kind (shown and reported by kind, never with the URL or path) */
+export class UpdateError extends Error {
+  constructor(
+    readonly kind: UpdateErrorKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'UpdateError';
+  }
+}
+
+const NETWORK_ERROR = /\b(?:net::ERR_[A-Z_]+|ERR_NETWORK_CHANGED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|network error)\b/i;
+
+/** network failures are retried with backoff and not reported to Sentry; others are */
+export function classifyUpdateError(err: unknown): UpdateErrorKind {
+  if (err instanceof UpdateError) return err.kind;
+  const name = (err as { name?: unknown } | null)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return 'network';
+  const code = (err as { code?: unknown } | null)?.code;
+  const text = `${err instanceof Error ? err.message : String(err)} ${typeof code === 'string' ? code : ''}`;
+  return NETWORK_ERROR.test(text) ? 'network' : 'other';
+}
+
+/**
+ * The file must carry the version it is offered for ("Solocut-0.2.0-mac-arm64.zip" for 0.2.0), so a signed sums file
+ * of one release cannot be replayed to install another release's file (Ferret src/main/releaseSignature.ts).
+ */
+export function fileMatchesVersion(file: Pick<ManifestFile, 'name'>, version: string): boolean {
+  const v = version.replace(/^v/, '');
+  return parseVersion(v) !== null && file.name.includes(`-${v}-`);
+}
+
+/** what survives a restart so an already verified download is not fetched again */
+export interface ReadyRecord {
+  version: string;
+  flavor: InstallFlavor;
+  name: string;
+  sha256: string;
+}
+
+export function parseReadyRecord(input: unknown): ReadyRecord | null {
+  if (typeof input !== 'object' || input === null) return null;
+  const o = input as Record<string, unknown>;
+  if (typeof o.version !== 'string' || !parseVersion(o.version)) return null;
+  if (!['mac-zip', 'win-nsis', 'linux-appimage'].includes(String(o.flavor))) return null;
+  if (typeof o.name !== 'string' || !isSafeFileName(o.name)) return null;
+  if (typeof o.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(o.sha256)) return null;
+  return { version: o.version, flavor: o.flavor as InstallFlavor, name: o.name, sha256: o.sha256 };
+}
+
+export const READY_FILE = 'ready.json';
+
+/**
+ * Entries of userData/updates to delete: every version folder except the one being kept, partial downloads and
+ * unknown files. The ready record is kept only while a version is kept.
+ */
+export function staleUpdateEntries(entries: readonly string[], keepVersion: string | null): string[] {
+  return entries.filter((e) => !(keepVersion !== null && (e === keepVersion || e === READY_FILE)));
+}

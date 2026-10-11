@@ -2,7 +2,10 @@
 // Mic goes to feedback/inbox/<id>/mic.wav (PCM), pen/play/seek events to session.json; then
 // `solocut feedback import` splits them into items that the user checks before sending them to the agent.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, PenLine, Send, Square, Trash2, Type, X, Save } from 'lucide-react';
+import { Mic, PenLine, Send, Square, Type, X, Save } from 'lucide-react';
+import { Button, IconButton, RecordDot, Segmented } from '../ui';
+import { FindingCard } from '../screens/parts/Findings';
+import { useST } from '../shell/i18n';
 import type { FeedbackImport, FeedbackItem, FeedbackSession, Variant } from '@shared/types';
 import { boxFrom, boxPoints, contentRect, feedbackAgentMessage, frameAt, normalizePoint, simplifyStroke } from '@shared/feedback';
 import { useT } from '../i18n';
@@ -284,28 +287,33 @@ export function FeedbackLayer({ dir, variant, videoRef, previewPath, fpsNum, fps
           onBlur={(e) => commitText(e.currentTarget.value)}
         />
       )}
-      <div className="fb-bar">
+      <div className={`fb-bar${active ? ' is-active' : ''}`}>
         {!active ? (
-          <button className="btn small" disabled={busy} onClick={() => void start()} title={t('fb.hint')}>
-            <Mic size={13} /> {busy ? t('fb.processing') : t('fb.start')}
-          </button>
+          <Button size="sm" icon={<Mic size={13} />} busy={busy} onClick={() => void start()} title={t('fb.hint')}>
+            {busy ? t('fb.processing') : t('fb.start')}
+          </Button>
         ) : (
           <>
-            <span className="pill accent">● {mmss(elapsed)}</span>
-            <div className="segmented">
-              <button className={tool === 'pen' ? 'on' : ''} onClick={() => setTool('pen')} title={t('fb.pen')}>
-                <PenLine size={13} />
-              </button>
-              <button className={tool === 'box' ? 'on' : ''} onClick={() => setTool('box')} title={t('fb.box')}>
-                <Square size={13} />
-              </button>
-              <button className={tool === 'text' ? 'on' : ''} onClick={() => setTool('text')} title={t('fb.text')}>
-                <Type size={13} />
-              </button>
-            </div>
-            <button className="btn small primary" onClick={() => void stop()}>
-              <Square size={12} fill="currentColor" /> {t('fb.stop')}
-            </button>
+            <span className="fb-bar__rec">
+              <RecordDot active size={7} />
+              <span className="fb-bar__time">{mmss(elapsed)}</span>
+            </span>
+            <span className="fb-bar__sep" aria-hidden="true" />
+            <Segmented
+              ariaLabel={t('fb.pen')}
+              size="sm"
+              value={tool}
+              onChange={setTool}
+              options={[
+                { value: 'pen', label: t('fb.pen'), icon: <PenLine size={13} /> },
+                { value: 'box', label: t('fb.box'), icon: <Square size={13} /> },
+                { value: 'text', label: t('fb.text'), icon: <Type size={13} /> },
+              ]}
+            />
+            <span className="fb-bar__sep" aria-hidden="true" />
+            <Button size="sm" variant="record" selected icon={<Square size={11} fill="currentColor" />} onClick={() => void stop()}>
+              {t('fb.stop')}
+            </Button>
           </>
         )}
       </div>
@@ -316,6 +324,7 @@ export function FeedbackLayer({ dir, variant, videoRef, previewPath, fpsNum, fps
 
 export function FeedbackReview({ dir, variant, data, lang, toast, onClose }: { dir: string; variant: Variant; data: FeedbackImport; lang: 'ja' | 'en'; toast: (m: string) => void; onClose: () => void }) {
   const t = useT();
+  const st = useST();
   const [items, setItems] = useState<FeedbackItem[]>(data.items);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -357,59 +366,33 @@ export function FeedbackReview({ dir, variant, data, lang, toast, onClose }: { d
     setItems((xs) => xs.filter((_, k) => k !== i)); // numbers are reassigned when saved
     setDirty(true);
   };
-  const imgUrl = (p: string) => api.mediaUrl(/^([A-Za-z]:)?[\\/]/.test(p) ? p : `${dir}/${p}`);
 
   return (
     <div className="modal-back" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-          <strong>
-            {t('fb.items')} <span className="pill">{items.length}</span> <span className="dim mono">{data.dir}</span>
-          </strong>
-          <button className="btn ghost small icon" onClick={onClose} aria-label={t('common.close')}>
-            <X size={15} />
-          </button>
-        </div>
-        <div className="fb-items">
+      <div className="modal fb-modal" onClick={(e) => e.stopPropagation()}>
+        <header className="fb-modal__head">
+          <div className="findings__count">
+            <strong>{items.length}</strong>
+            <span>{t('fb.items')}</span>
+          </div>
+          <code className="fb-modal__dir">{data.dir}</code>
+          <IconButton label={t('common.close')} icon={<X size={15} />} onClick={onClose} />
+        </header>
+        <p className="findings__help">{st('fd.checkHelp')}</p>
+        <div className="fb-modal__list">
           {items.length === 0 && <div className="empty">{t('fb.noItems')}</div>}
           {items.map((it, i) => (
-            <div key={`${it.n}-${it.frame}`} className="fb-item">
-              <div className="fb-img">{it.image ? <img src={imgUrl(it.image)} alt="" /> : null}</div>
-              <div className="fb-body">
-                <div className="row">
-                  <span className="pill mono">
-                    {i + 1}. {it.timecode || it.frame}
-                  </span>
-                  {it.title && <strong style={{ fontSize: 12.5 }}>{it.title}</strong>}
-                  {it.targets.map((tg) => (
-                    <span key={tg.id} className="pill" title={tg.label}>
-                      {tg.kind} {tg.id}
-                    </span>
-                  ))}
-                  <span style={{ flex: 1 }} />
-                  <button className="btn ghost small icon" title={t('fb.delete')} onClick={() => remove(i)}>
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-                <textarea className="input" rows={2} value={it.request} onChange={(e) => edit(i, e.target.value)} />
-                {it.spoken && <div className="dim" style={{ fontSize: 12 }}>「{it.spoken}」</div>}
-                {it.notes.map((n) => (
-                  <div key={n} className="dim" style={{ fontSize: 12 }}>
-                    ✎ {n}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <FindingCard key={`${it.n}-${it.frame}`} item={it} index={i} dir={dir} onRequestChange={(r) => edit(i, r)} onDelete={() => remove(i)} />
           ))}
         </div>
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-          <button className="btn" disabled={!dirty || saving} onClick={() => void save()}>
-            <Save size={13} /> {t('set.save')}
-          </button>
-          <button className="btn primary" disabled={items.length === 0 || saving} onClick={() => void send()}>
-            <Send size={13} /> {t('fb.send')}
-          </button>
-        </div>
+        <footer className="fb-modal__foot">
+          <Button icon={<Save size={13} />} disabled={!dirty || saving} onClick={() => void save()}>
+            {t('set.save')}
+          </Button>
+          <Button variant="primary" icon={<Send size={13} />} disabled={items.length === 0 || saving} onClick={() => void send()}>
+            {t('fb.send')}
+          </Button>
+        </footer>
       </div>
     </div>
   );

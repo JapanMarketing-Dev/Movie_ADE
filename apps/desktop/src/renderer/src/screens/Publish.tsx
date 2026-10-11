@@ -1,7 +1,10 @@
 // Publish (docs/14, docs/18). One take → three posts (YouTube main, TikTok, YouTube Shorts) on one approval screen;
 // nothing is posted until the person checks "I reviewed these". Announcements follow once URLs exist.
 import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ExternalLink, Link2, Link2Off, Loader2, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Link2, Link2Off, ListChecks, Loader2, Upload, XCircle } from 'lucide-react';
+import { Button } from '../ui';
+import { useST, type SKey } from '../shell/i18n';
+import { publishChecklist } from './parts/screenModel';
 import type { ProjectInfo, PublishDraft, PublishTarget, YouTubeForm, YouTubeProgress } from '@shared/types';
 import {
   ANNOUNCE_LIMITS,
@@ -142,6 +145,7 @@ function VideosPanel({
   onFinished: (mainUrl?: string) => void;
 }) {
   const t = useT();
+  const st = useST();
   const meta = (id: PostId) => draft.targets.find((x) => x.target === id);
   const [acct, setAcct] = useState<{ clientSet: boolean; connected: boolean } | null>(null);
   const [include, setInclude] = useState<Record<PostId, boolean>>({
@@ -177,6 +181,14 @@ function VideosPanel({
   const ttReady = !include.tiktok || (Boolean(tiktok.file) && TIKTOK_CHECKS.every((k) => ttChecks[k]));
   const needsYouTube = include.youtube || include['youtube-shorts'];
   const blocked = mainIssues.length > 0 || shortsIssues.length > 0 || !ttReady || (needsYouTube && !acct?.connected) || !POSTS.some((p) => include[p]);
+  const checklist = publishChecklist({
+    include,
+    mainIssues: mainIssues.length,
+    shortsIssues: shortsIssues.length,
+    tiktokFile: Boolean(tiktok.file),
+    tiktokChecks: TIKTOK_CHECKS.every((k) => ttChecks[k]),
+    connected: Boolean(acct?.connected),
+  });
 
   const connect = async () => {
     const r = await api.invoke('publish:youtubeConnect');
@@ -288,17 +300,45 @@ function VideosPanel({
         </PostCard>
       </div>
 
-      <div className="card approve-bar">
-        <label className="check">
-          <input type="checkbox" checked={approved} disabled={blocked || running} onChange={(e) => setApproved(e.target.checked)} />
-          <strong>{t('pub.approveAll')}</strong>
-        </label>
-        {needsYouTube && !acct?.connected && <span className="error" style={{ fontSize: 12 }}>{t('pub.needAccount')}</span>}
-        <span style={{ flex: 1 }} />
-        <button className="btn primary" disabled={!approved || blocked || running} onClick={() => void postAll()}>
-          {running ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} {t('pub.postAll')}
-        </button>
-      </div>
+      <section className="approve" data-testid="publish-checklist">
+        <header className="approve__head">
+          <ListChecks size={15} aria-hidden="true" />
+          <h3 className="approve__title">{st('pub.checklist.title')}</h3>
+          <span className="approve__count">
+            {checklist.filter((c) => c.ok).length}/{checklist.length}
+          </span>
+        </header>
+        <ul className="approve__list">
+          {checklist.map((c) => (
+            <li key={c.id} className={`approve__item${c.ok ? ' is-ok' : ''}`}>
+              {c.ok ? <CheckCircle2 size={15} aria-hidden="true" /> : <XCircle size={15} aria-hidden="true" />}
+              <span>{st(`pub.check.${c.id}` as SKey, { n: String(c.issues ?? 0) })}</span>
+              {c.id === 'account' && !c.ok && acct?.clientSet && (
+                <Button size="sm" icon={<Link2 size={13} />} onClick={() => void connect()}>
+                  {t('pub.connect')}
+                </Button>
+              )}
+              {c.id === 'account' && !c.ok && !acct?.clientSet && (
+                <Button size="sm" onClick={onOpenSettings}>
+                  {t('pub.setClient')}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+        <footer className="approve__foot">
+          <label className={`approve__confirm${blocked ? ' is-disabled' : ''}`}>
+            <input type="checkbox" checked={approved} disabled={blocked || running} onChange={(e) => setApproved(e.target.checked)} />
+            <span>
+              <strong>{t('pub.approveAll')}</strong>
+              <span className="approve__note">{st('pub.approveNote')}</span>
+            </span>
+          </label>
+          <Button variant="primary" icon={running ? <Loader2 size={14} className="spin" /> : <Upload size={14} />} disabled={!approved || blocked || running} onClick={() => void postAll()} data-testid="publish-post-all">
+            {t('pub.postAll')}
+          </Button>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -307,9 +347,10 @@ function PostCard({ id, title, include, onInclude, state, children }: { id: Post
   const t = useT();
   return (
     <div className={`card form post ${include ? '' : 'off'}`} data-post={id}>
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <label className="check">
+      <div className="post__head">
+        <label className="check post__include">
           <input type="checkbox" checked={include} onChange={(e) => onInclude(e.target.checked)} />
+          <span className={`post__shape post__shape--${id === 'youtube' ? 'h' : 'v'}`} aria-hidden="true" />
           <strong>{title}</strong>
         </label>
         <PostStatus s={state} />

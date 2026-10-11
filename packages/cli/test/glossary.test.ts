@@ -101,3 +101,85 @@ describe('init seeds meta.glossary from the title', () => {
     }
   });
 });
+
+describe('glossary terms stay whole through the CLI caption paths', () => {
+  const decided = { by: 'agent', reason: 't' };
+  const fps = { num: 30, den: 1 };
+  // ~0.3 s per word; long sentences so captions must break somewhere near the terms
+  const sentence = ['今日は', 'とても', '大事な', '話で', 'まず', 'CLAUDE', '.', 'md', 'という', 'ファイルを', '開いて', 'から', '設定を', '書いて', 'いきます', 'そして',
+    'クロード', '、', 'M', '、', 'P', 'を', 'もう一度', '確認して', 'Claude', 'Code', 'で', '読み込みます', '最後に', 'CLAUDE', '.', 'md', 'を', '保存します'];
+  const words = sentence.map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.28 }));
+
+  async function project(sb: { run: (a: string[], o?: { cwd?: string }) => Promise<{ code: number; json: any; stdout: string; stderr: string }>; root: string }, maxChars?: number) {
+    const dir = join(sb.root, 'p');
+    expect((await sb.run(['init', dir, '--template', 'talk', '--title', 'CLAUDE.md と Claude Code', '--no-git', '--json'])).code).toBe(0);
+    const { mkdirSync, writeFileSync: wf } = await import('node:fs');
+    if (maxChars) {
+      mkdirSync(join(dir, 'templates', 'talk'), { recursive: true });
+      wf(join(dir, 'templates', 'talk', 'template.yaml'), JSON.stringify({ id: 'talk', extends: 'talk', captions: { maxCharsPerLine: maxChars, maxLines: 1 } }));
+    }
+    const cam = { kind: 'camera', path: 'media/a.mp4', take: 'take_1', role: 'front', fps, size: { width: 1920, height: 1080 }, offset: 0 };
+    const ops = [
+      { op: 'addSource', id: 'cam', source: cam },
+      { op: 'setOutline', outline: [{ id: 'ch_1', title: 'a', start: 0, end: 330, points: [], importance: 'core' }] },
+      { op: 'addSegment', segment: { id: 'seg_1', range: { start: 0, end: 0 }, src: { from: 0, to: 330, take: 'take_1' }, text: 'x', chapter: 'ch_1', role: 'explain', video: { layout: 'camera-full', camera: 'cam' }, decided } },
+    ];
+    expect((await sb.run(['edit', '--ops', JSON.stringify(ops), '--json'], { cwd: dir })).json.ok).toBe(true);
+    mkdirSync(join(dir, 'derived', 'transcripts'), { recursive: true });
+    wf(join(dir, 'derived', 'transcripts', 'main.json'), JSON.stringify({ schema: 1, engine: 'whisper.cpp', model: 'x', language: 'ja', take: 'take_1', source: 'cam', words, createdAt: '' }));
+    return dir;
+  }
+
+  const assertWhole = (caps: { text: string; lines: string[] }[]) => {
+    const all = caps.map((c) => c.text).join('|');
+    // never split across captions or lines
+    for (const c of caps) {
+      for (const l of c.lines) expect(l, all).not.toMatch(/^\.?md|CLAUDE\.?$|^Code|Claude$|^、?[MP]/);
+      expect(c.text, all).not.toMatch(/^\.?md|CLAUDE\.?$|^Code\b|Claude $/);
+    }
+    expect(all.match(/CLAUDE\.md/g)?.length, all).toBe(3);   // two spoken right + the respelled クロード、M、P
+    expect(all, all).toContain('Claude Code');
+  };
+
+  it.each([undefined, 6, 10])('captions build (main), maxCharsPerLine %s', async (maxChars) => {
+    const { Sandbox } = await import('./helpers.js');
+    const { readFileSync } = await import('node:fs');
+    const sb = new Sandbox();
+    try {
+      const dir = await project(sb, maxChars);
+      const r = await sb.run(['captions', 'build', '--json'], { cwd: dir });
+      expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
+      const caps = JSON.parse(readFileSync(join(dir, 'timeline.json'), 'utf8')).captions;
+      assertWhole(caps);
+      // the misheard span was kept in one caption and respelled
+      const fixed = caps.find((c: { corrections?: { from: string }[] }) => c.corrections?.some((x) => x.from === 'クロード、M、P'));
+      expect(fixed?.text).toContain('CLAUDE.md');
+      expect(readFileSync(join(dir, 'captions', 'main.srt'), 'utf8')).not.toMatch(/CLAUDE\.\s*\n\s*md/);
+    } finally {
+      sb.dispose();
+    }
+  });
+
+  it('derive (vertical variant captions) keeps the terms whole too', async () => {
+    const { Sandbox } = await import('./helpers.js');
+    const { readFileSync } = await import('node:fs');
+    const sb = new Sandbox();
+    try {
+      const dir = await project(sb);
+      expect((await sb.run(['captions', 'build', '--json'], { cwd: dir })).json.ok).toBe(true);
+      const r = await sb.run(['derive', '--target', 'tiktok', '--selection', 'seg_1', '--json'], { cwd: dir });
+      expect(r.json, r.stdout + r.stderr).toMatchObject({ ok: true });
+      expect(r.json.captions).toBeGreaterThan(0);
+      assertWhole(JSON.parse(readFileSync(join(dir, 'variants', 'tiktok', 'timeline.json'), 'utf8')).captions);
+    } finally {
+      sb.dispose();
+    }
+  });
+
+  it('captionGlossary: the terms plus the misheard spans to keep whole', async () => {
+    const { captionGlossary } = await import('../src/commands/media.js');
+    expect(captionGlossary(['まず', 'クロード', '、', 'M', '、', 'P', 'を'], [{ term: 'CLAUDE.md' }], 'ja')).toEqual(['CLAUDE.md', 'クロード、M、P']);
+    expect(captionGlossary(['a'], [], 'ja')).toEqual([]);
+    expect(captionGlossary(['open', 'claude', 'code', 'now'], [{ term: 'Claude Code' }], 'en')).toEqual(['Claude Code']);
+  });
+});

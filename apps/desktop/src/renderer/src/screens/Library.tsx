@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, RefreshCw, TerminalSquare } from 'lucide-react';
+import { CircleCheck, Download, RefreshCw, TerminalSquare, Wrench } from 'lucide-react';
+import { Badge, Button, IconTile, Progress, Skeleton } from '../ui';
+import { useST } from '../shell/i18n';
 import type { AgentStatus, AppInfo, ToolState } from '@shared/types';
 import { useT } from '../i18n';
 import { api } from '../lib/api';
 
 export function Library({ toast, onRunInTerminal }: { info: AppInfo | null; toast: (m: string) => void; onRunInTerminal: (cmd: string) => void }) {
   const t = useT();
+  const st = useST();
   const [tools, setTools] = useState<ToolState[] | null>(null);
   const [agents, setAgents] = useState<AgentStatus[] | null>(null);
   const [progress, setProgress] = useState<Record<string, number | null>>({});
@@ -35,88 +38,84 @@ export function Library({ toast, onRunInTerminal }: { info: AppInfo | null; toas
     void load();
   };
 
+  const missing = tools?.filter((x) => !x.installed).length ?? 0;
   return (
-    <div className="page">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <h1>{t('lib.title')}</h1>
-        <button className="btn ghost small" onClick={() => void load()}>
-          <RefreshCw size={13} />
-        </button>
-      </div>
-      <h2>{t('lib.tools')}</h2>
-      <div className="card" style={{ padding: 0 }}>
-        <table className="table">
-          <tbody>
-            {tools === null && (
-              <tr>
-                <td className="dim">{t('common.loading')}</td>
-              </tr>
-            )}
-            {tools?.map((tool) => (
-              <tr key={tool.name}>
-                <td style={{ width: 160 }}>
-                  <strong>{tool.name}</strong>
-                </td>
-                <td>{tool.installed ? <span className="pill okp">{t('lib.installed')}</span> : <span className="pill warnp">{t('lib.missing')}</span>}</td>
-                <td className="mono dim">{tool.version ?? ''}</td>
-                <td className="mono dim" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tool.path}>
-                  {tool.path ?? ''}
-                </td>
-                <td style={{ width: 150, textAlign: 'right' }}>
-                  {tool.name in progress ? (
-                    <div className="progress" style={{ marginLeft: 'auto' }}>
-                      <div style={{ width: `${(progress[tool.name] ?? 0.05) * 100}%` }} />
-                    </div>
-                  ) : (
-                    !tool.installed && (
-                      <button className="btn small" onClick={() => void install(tool.name)}>
-                        <Download size={13} /> {t('lib.install')}
-                      </button>
-                    )
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <h2>{t('lib.agents')}</h2>
-      <div className="card" style={{ padding: 0 }}>
-        <table className="table">
-          <tbody>
-            {agents === null && (
-              <tr>
-                <td className="dim">{t('common.loading')}</td>
-              </tr>
-            )}
-            {agents?.map((a) => (
-              <tr key={a.id}>
-                <td style={{ width: 160 }}>
-                  <strong>{a.label}</strong>
-                  <div className="dim mono">{a.command}</div>
-                </td>
-                <td>{a.installed ? <span className="pill okp">{t('lib.installed')}</span> : <span className="pill warnp">{t('lib.missing')}</span>}</td>
-                <td className="mono dim">{a.version ?? ''}</td>
-                <td className="mono dim" style={{ fontSize: 11 }}>
-                  {a.installed ? (a.update ?? '') : a.install}
-                </td>
-                <td style={{ width: 150, textAlign: 'right' }}>
-                  {a.installed && a.update && (
-                    <button className="btn small" title={t('lib.runInTerminal')} onClick={() => onRunInTerminal(a.update!)}>
-                      <TerminalSquare size={13} /> {t('lib.update')}
-                    </button>
-                  )}
-                  {!a.installed && (
-                    <button className="btn small" title={t('lib.runInTerminal')} onClick={() => onRunInTerminal(a.install)}>
-                      <TerminalSquare size={13} /> {t('lib.installCmd')}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="page lib">
+      <header className="lib__head">
+        <div>
+          <h1>{t('lib.title')}</h1>
+          <p className="lib__sub">{st('lib.sub')}</p>
+        </div>
+        <Button variant="ghost" icon={<RefreshCw size={14} />} onClick={() => void load()}>
+          {st('common.refresh')}
+        </Button>
+      </header>
+
+      <section className="lib__section">
+        <div className="lib__section-head">
+          <h2 className="lib__h">{t('lib.tools')}</h2>
+          {tools && (missing === 0 ? <Badge tone="success">{st('lib.allInstalled')}</Badge> : <Badge tone="warning">{st('lib.missingN', { n: String(missing) })}</Badge>)}
+        </div>
+        <div className="lib__list">
+          {tools === null && <Skeleton height={44} />}
+          {tools?.map((tool) => (
+            <div key={tool.name} className={`lib__row${tool.installed ? '' : ' is-missing'}`}>
+              <IconTile>{tool.installed ? <CircleCheck size={15} /> : <Wrench size={15} />}</IconTile>
+              <div className="lib__body">
+                <span className="lib__name">{tool.name}</span>
+                <span className="lib__desc" title={tool.path}>
+                  {tool.installed ? (tool.path ?? '') : st('lib.notInstalledDesc')}
+                </span>
+              </div>
+              {tool.version && <code className="lib__ver">{tool.version}</code>}
+              {tool.name in progress ? (
+                <span className="lib__progress">
+                  <Progress {...(progress[tool.name] != null ? { value: progress[tool.name]! } : {})} label={tool.name} />
+                </span>
+              ) : tool.installed ? (
+                <Badge tone="success">{t('lib.installed')}</Badge>
+              ) : (
+                <Button size="sm" icon={<Download size={13} />} onClick={() => void install(tool.name)}>
+                  {t('lib.install')}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="lib__section">
+        <div className="lib__section-head">
+          <h2 className="lib__h">{t('lib.agents')}</h2>
+          <span className="lib__note">{st('lib.agentsNote')}</span>
+        </div>
+        <div className="lib__list">
+          {agents === null && <Skeleton height={44} />}
+          {agents?.map((a) => (
+            <div key={a.id} className={`lib__row${a.installed ? '' : ' is-missing'}`}>
+              <span className={`agent-glyph agent-glyph--lg agent-glyph--${a.id.replace(/[^a-z0-9-]/gi, '')}`} aria-hidden="true">
+                {(a.label[0] ?? '?').toUpperCase()}
+              </span>
+              <div className="lib__body">
+                <span className="lib__name lib__name--ui">{a.label}</span>
+                <code className="lib__desc">{a.installed ? (a.update ?? a.command) : a.install}</code>
+              </div>
+              {a.version && <code className="lib__ver">{a.version}</code>}
+              {a.installed ? <Badge tone="success">{t('lib.installed')}</Badge> : <Badge tone="warning">{t('lib.missing')}</Badge>}
+              {a.installed && a.update && (
+                <Button size="sm" variant="ghost" icon={<TerminalSquare size={13} />} title={t('lib.runInTerminal')} onClick={() => onRunInTerminal(a.update!)}>
+                  {t('lib.update')}
+                </Button>
+              )}
+              {!a.installed && (
+                <Button size="sm" icon={<TerminalSquare size={13} />} title={t('lib.runInTerminal')} onClick={() => onRunInTerminal(a.install)}>
+                  {t('lib.installCmd')}
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

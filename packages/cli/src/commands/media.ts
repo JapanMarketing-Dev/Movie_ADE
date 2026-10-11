@@ -672,6 +672,19 @@ export async function cmdPropose(ctx: Ctx, args: string[]): Promise<void> {
 // ---------- captions ----------
 
 /** Build captions for the opened timeline (main or variant) from the transcript, and write its ASS/SRT. */
+/**
+ * Strings buildCaptions / layoutLines must keep whole: the glossary terms plus every misheard span of the transcript
+ * that the glossary pass will respell (found on the joined text, so a span across words is caught too).
+ */
+export function captionGlossary(words: string[], terms: Term[], language: 'ja' | 'en'): string[] {
+  if (!terms.length) return [];
+  const text = words.join(language === 'ja' ? '' : ' ');
+  const misheard = correctText(text, terms).corrections.map((c) => c.from);
+  const out = new Map<string, string>();   // glossary matching is case-insensitive: one entry per spelling
+  for (const x of [...terms.map((t) => t.term), ...misheard]) if (!out.has(x.toLowerCase())) out.set(x.toLowerCase(), x);
+  return [...out.values()];
+}
+
 export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string } = {}): Promise<{ captions: number; style: string; files: string[] }> {
   const tl = readTimeline(p);
   const tpl = projectTemplate(p);
@@ -698,17 +711,19 @@ export async function buildCaptionsFor(ctx: Ctx, p: Project, o: { style?: string
     const start = Math.min(Math.max(w.start, r[0]), r[1] - 1e-6);
     return [{ ...w, start, end: Math.max(start, Math.min(w.end, r[1] - 1e-6)) }];
   });
+  const terms = glossaryOf(p);
+  // glossary terms (and the misheard spans that will be respelled as them) are never split across captions or lines
+  const glossary = captionGlossary(words.map((w) => w.w), terms, p.file.language);
   const built = cap.buildCaptions(words, {
-    fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style,
+    fps: tl.canvas.fps, maxCharsPerLine, maxLines, language: p.file.language, style, glossary,
     mapTime: (sec: number) => takeFrameToTimeline(tl, tr.take, secondsToFrame(sec, rate)),
   });
   // glossary pass: near-misses of the project's terms are respelled; the original stays in `spoken`
-  const terms = glossaryOf(p);
   const captions: Caption[] = built.map((c) => {
     const fixed = terms.length ? correctText(c.text, terms) : { text: c.text, corrections: [] };
     if (!fixed.corrections.length) return { ...c, position };
     return {
-      ...c, position, text: fixed.text, lines: cap.layoutLines(fixed.text, maxCharsPerLine, p.file.language),
+      ...c, position, text: fixed.text, lines: cap.layoutLines(fixed.text, maxCharsPerLine, p.file.language, glossary),
       corrections: [...(c.corrections ?? []), ...fixed.corrections.map((x) => ({
         from: x.from, to: x.to, decided: { by: 'rule' as const, reason: `glossary: "${x.from}" → "${x.to}"`, confidence: x.score, ruleRef: 'meta.glossary' },
       }))],

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Circle, FileText, Monitor, RefreshCw, Square } from 'lucide-react';
+import { AppWindow, Camera, Check, Circle, FileText, Flag, Monitor, MonitorOff, RefreshCw, ShieldAlert, Square, Star, Timer, Video } from 'lucide-react';
+import { Badge, Button, IconButton, RecordDot, Select, SettingRow, Switch, Tooltip } from '../ui';
+import { useST } from '../shell/i18n';
 import type { AppInfo, CaptureSource, MediaPermissionState, ProjectInfo } from '@shared/types';
 import { useT } from '../i18n';
 import { api, errMsg } from '../lib/api';
@@ -77,6 +79,9 @@ export function Record({
   onIngested: () => void;
 }) {
   const t = useT();
+  const st = useST();
+  const [tele, setTele] = useState(false);
+  const permLabel = (x: string) => (x === 'granted' ? st('rec.perm.granted') : x === 'denied' ? st('rec.perm.denied') : st('rec.perm.unknown'));
   const [status, setStatus] = useState<RecStatus>(recorder.get());
   const [perm, setPerm] = useState<MediaPermissionState | null>(null);
   const [sources, setSources] = useState<CaptureSource[]>([]);
@@ -289,35 +294,87 @@ export function Record({
   };
   const mod = info?.os === 'mac' ? '⌘⇧' : 'Ctrl+Shift+';
 
+  const ngCount = status.markers.filter((m) => m.kind === 'ng').length;
+  const impCount = status.markers.filter((m) => m.kind === 'important').length;
+  const canStart = !ingesting && count === null && Boolean(screenStream || camStreams.length > 0 || micStream);
+  const toggleTele = () => {
+    const next = !tele;
+    setTele(next);
+    void api.invoke('record:teleprompter', next ? project.dir : null);
+  };
+
   return (
-    <div className="ws">
-      <div className="titlebar">
-        <span className="title">{t('rec.title')}</span>
-        <span className="dim">{project.title}</span>
-        <span className="grow" />
-        {recording && <span className="pill accent">● {t('rec.recording')}</span>}
+    <div className={`ws recx${recording ? ' is-recording' : ''}`}>
+      <div className="recx__bar-wrap">
+        <div className={`recx__bar${recording ? ' is-recording' : ''}`} role="toolbar" aria-label={t('rec.title')}>
+          <span className="recx__timer">
+            <RecordDot active={status.state === 'recording'} size={8} />
+            <span>{mmss(recording ? elapsed : 0)}</span>
+          </span>
+          <LevelBars level={level.level} clip={level.clip} off={!micStream} />
+          <span className="recx__sep" aria-hidden="true" />
+          {recording ? (
+            <button type="button" className="recx__go is-stop" disabled={status.state === 'stopping'} onClick={() => void stop()}>
+              <Square size={11} fill="currentColor" /> {status.state === 'stopping' ? st('rec.saving') : t('rec.stop')}
+            </button>
+          ) : (
+            <button type="button" className="recx__go" disabled={!canStart} onClick={() => void start()} data-testid="record-start">
+              <Circle size={11} fill="currentColor" /> {ingesting ? t('rec.ingesting') : t('rec.start')}
+            </button>
+          )}
+          <span className="recx__sep" aria-hidden="true" />
+          <Tooltip label={st('rec.markNg', { key: `${mod}N` })}>
+            <button type="button" className="recx__mark" disabled={!recording} onClick={() => recorder.mark('ng')}>
+              <Flag size={13} /> NG <span className="recx__n">{ngCount}</span>
+            </button>
+          </Tooltip>
+          <Tooltip label={st('rec.markImportant', { key: `${mod}M` })}>
+            <button type="button" className="recx__mark" disabled={!recording} onClick={() => recorder.mark('important')}>
+              <Star size={13} /> <span className="recx__n">{impCount}</span>
+            </button>
+          </Tooltip>
+          <span className="recx__sep" aria-hidden="true" />
+          <Tooltip label={t('rec.countdown')}>
+            <span className="recx__count">
+              <Timer size={13} aria-hidden="true" />
+              <select value={countdownSec} disabled={recording} aria-label={t('rec.countdown')} onChange={(e) => setCountdownSec(Number(e.target.value))}>
+                {[0, 3, 5, 10].map((x) => (
+                  <option key={x} value={x}>
+                    {x}s
+                  </option>
+                ))}
+              </select>
+            </span>
+          </Tooltip>
+          <Tooltip label={t('rec.teleprompter')} align="end">
+            <IconButton label={t('rec.teleprompter')} icon={<FileText size={14} />} selected={tele} onClick={toggleTele} />
+          </Tooltip>
+          {recording && <span className="recx__size">{(status.bytes / 1e6).toFixed(1)} MB</span>}
+        </div>
       </div>
-      <div className="rec" style={{ flex: 1, minHeight: 0 }}>
-        <div className={`rec-stage ${status.state === 'recording' ? 'live' : ''}`}>
+      <div className="recx__body">
+        <div className="recx__stage">
           {perm && perm.screen !== 'granted' && perm.screen !== 'not-determined' && (
-            <div className="notice err row" style={{ justifyContent: 'space-between' }}>
+            <div className="recx__banner is-warn">
+              <ShieldAlert size={14} aria-hidden="true" />
               <span>{t('rec.permScreen')}</span>
-              <button className="btn small" onClick={() => void api.invoke('app:openScreenSettings')}>
+              <Button size="sm" onClick={() => void api.invoke('app:openScreenSettings')}>
                 {t('rec.permOpen')}
-              </button>
+              </Button>
             </div>
           )}
           {perm && (perm.camera === 'not-determined' || perm.microphone === 'not-determined') && (
-            <div className="notice row" style={{ justifyContent: 'space-between' }}>
-              <span>camera: {perm.camera} / mic: {perm.microphone}</span>
-              <button className="btn small" onClick={() => void askAccess()}>
+            <div className="recx__banner">
+              <Camera size={14} aria-hidden="true" />
+              <span>{st('rec.permState', { camera: permLabel(perm.camera), mic: permLabel(perm.microphone) })}</span>
+              <Button size="sm" onClick={() => void askAccess()}>
                 {t('rec.permCamera')}
-              </button>
+              </Button>
             </div>
           )}
-          <div className="previews">
+          <div className={`recx__previews${camStreams.length > 0 ? '' : ' no-cam'}`}>
             <Preview stream={screenStream} label={t('rec.screen')} />
-            <div className="cams">
+            <div className="recx__cams">
               {camStreams.length === 0 ? (
                 <Preview stream={null} label={t('rec.cameras')} />
               ) : (
@@ -325,127 +382,99 @@ export function Record({
               )}
             </div>
           </div>
-          <div className="field">
-            <label>
-              {t('rec.screen')}{' '}
-              <button className="btn ghost small" onClick={() => void loadSources()} disabled={recording}>
-                <RefreshCw size={12} /> {t('rec.refresh')}
+          <div className="recx__sources">
+            <div className="recx__sources-head">
+              <span className="recx__h">{t('rec.screen')}</span>
+              <Button size="sm" variant="ghost" icon={<RefreshCw size={12} />} disabled={recording} onClick={() => void loadSources()}>
+                {t('rec.refresh')}
+              </Button>
+            </div>
+            <div className="recx__source-grid">
+              <button type="button" className={`recx__source${sourceId === null ? ' is-selected' : ''}`} disabled={recording} onClick={() => setSourceId(null)}>
+                <span className="recx__source-img is-none">
+                  <MonitorOff size={20} />
+                </span>
+                <span className="recx__source-name">{t('rec.noScreen')}</span>
               </button>
-            </label>
-            <div className="sources">
-              <button className={`source ${sourceId === null ? 'selected' : ''}`} disabled={recording} onClick={() => setSourceId(null)}>
-                <div style={{ aspectRatio: '16/9', display: 'grid', placeItems: 'center', background: '#000', borderRadius: 4 }}>
-                  <Monitor size={22} color="#6f727a" />
-                </div>
-                <div className="n">{t('rec.noScreen')}</div>
-              </button>
-              {sources.map((s) => (
-                <button key={s.id} className={`source ${sourceId === s.id ? 'selected' : ''}`} disabled={recording} onClick={() => setSourceId(s.id)}>
-                  <img src={s.thumbnail} alt="" />
-                  <div className="n">{s.name}</div>
+              {sources.map((src) => (
+                <button key={src.id} type="button" className={`recx__source${sourceId === src.id ? ' is-selected' : ''}`} disabled={recording} onClick={() => setSourceId(src.id)}>
+                  <span className="recx__source-img">
+                    <img src={src.thumbnail} alt="" />
+                    <span className="recx__source-kind">{src.kind === 'screen' ? <Monitor size={11} /> : <AppWindow size={11} />}</span>
+                  </span>
+                  <span className="recx__source-name" title={src.name}>
+                    {src.name}
+                  </span>
                 </button>
               ))}
             </div>
           </div>
         </div>
-        <aside className="rec-side">
-          <div className="field">
-            <label>{t('rec.cameras')}</label>
-            {cams.length === 0 && <span className="dim">—</span>}
-            {cams.map((d) => (
-              <label key={d.deviceId} className="check">
-                <input
-                  type="checkbox"
+        <aside className="recx__side">
+          <h3 className="recx__h">{t('rec.cameras')}</h3>
+          {cams.length === 0 && <p className="st-note">{st('rec.noCameras')}</p>}
+          <div className="recx__chips">
+            {cams.map((d) => {
+              const on = camIds.includes(d.deviceId);
+              return (
+                <button
+                  key={d.deviceId}
+                  type="button"
+                  className={`recx__chip${on ? ' is-on' : ''}`}
+                  aria-pressed={on}
                   disabled={recording}
-                  checked={camIds.includes(d.deviceId)}
-                  onChange={(e) => setCamIds((ids) => (e.target.checked ? [...ids, d.deviceId] : ids.filter((x) => x !== d.deviceId)))}
-                />
-                {d.label || d.deviceId.slice(0, 8)}
-              </label>
-            ))}
-            <div className="row">
-              <select className="input" value={res} disabled={recording} onChange={(e) => setRes(e.target.value)}>
-                {RESOLUTIONS.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.id}
-                  </option>
-                ))}
-              </select>
-              <select className="input" value={fps} disabled={recording} onChange={(e) => setFps(Number(e.target.value))}>
-                {[24, 30, 60].map((f) => (
-                  <option key={f} value={f}>
-                    {f} fps
-                  </option>
-                ))}
-              </select>
-            </div>
+                  onClick={() => setCamIds((ids) => (on ? ids.filter((x) => x !== d.deviceId) : [...ids, d.deviceId]))}
+                >
+                  <Video size={13} aria-hidden="true" />
+                  <span>{d.label || d.deviceId.slice(0, 8)}</span>
+                  {on && <Check size={12} aria-hidden="true" />}
+                </button>
+              );
+            })}
           </div>
-          <div className="field">
-            <label>{t('rec.mic')}</label>
-            <select className="input" value={micId ?? ''} disabled={recording} onChange={(e) => setMicId(e.target.value || null)}>
-              <option value="">{t('rec.noMic')}</option>
-              {mics.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || d.deviceId.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-            <div className="row">
-              <div className="meter" style={{ flex: 1 }}>
-                <div className="fill" style={{ width: `${level.level * 100}%` }} />
-              </div>
-              {level.clip && <span className="pill accent">{t('rec.clip')}</span>}
-            </div>
+          <SettingRow label={st('rec.resolution')}>
+            <Select ariaLabel={st('rec.resolution')} value={res} disabled={recording} options={RESOLUTIONS.map((r) => ({ value: r.id, label: r.id }))} onChange={setRes} />
+          </SettingRow>
+          <SettingRow label="fps">
+            <Select ariaLabel="fps" value={fps} disabled={recording} options={[24, 30, 60].map((f) => ({ value: f, label: `${f} fps` }))} onChange={setFps} />
+          </SettingRow>
+          <h3 className="recx__h">{t('rec.mic')}</h3>
+          <Select
+            ariaLabel={t('rec.mic')}
+            wide
+            value={micId ?? ''}
+            disabled={recording}
+            options={[{ value: '', label: t('rec.noMic') }, ...mics.map((d) => ({ value: d.deviceId, label: d.label || d.deviceId.slice(0, 8) }))]}
+            onChange={(v) => setMicId(v || null)}
+          />
+          <div className="recx__meter">
+            <LevelBars level={level.level} clip={level.clip} off={!micStream} wide />
+            {level.clip && <Badge tone="danger">{t('rec.clip')}</Badge>}
           </div>
-          {info?.os !== 'linux' && (
-            <label className="check">
-              <input type="checkbox" checked={systemAudio} disabled={recording} onChange={(e) => setSystemAudio(e.target.checked)} />
-              {t('rec.systemAudio')}
-            </label>
-          )}
-          <div className="row">
-            <div className="field" style={{ flex: 1 }}>
-              <label>{t('rec.countdown')}</label>
-              <select className="input" value={countdownSec} disabled={recording} onChange={(e) => setCountdownSec(Number(e.target.value))}>
-                {[0, 3, 5, 10].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button className="btn" style={{ alignSelf: 'flex-end' }} onClick={() => void api.invoke('record:teleprompter', project.dir)}>
-              <FileText size={14} /> {t('rec.teleprompter')}
-            </button>
-          </div>
-          <div className="dim" style={{ fontSize: 12 }}>
-            {t('rec.hotkeys', { ng: `${mod}N`, imp: `${mod}M` })}
-          </div>
-          <div style={{ flex: 1 }} />
-          {recording && (
-            <>
-              <div className="timer">{mmss(elapsed)}</div>
-              <div className="row" style={{ justifyContent: 'center' }}>
-                <span className="pill">{(status.bytes / 1e6).toFixed(1)} MB</span>
-                <span className="pill">
-                  {t('rec.markers')}: NG {status.markers.filter((m) => m.kind === 'ng').length} / ★ {status.markers.filter((m) => m.kind === 'important').length}
-                </span>
-              </div>
-            </>
-          )}
+          {info?.os !== 'linux' && <Switch label={t('rec.systemAudio')} checked={systemAudio} disabled={recording} onChange={setSystemAudio} />}
+          <h3 className="recx__h">{t('rec.markers')}</h3>
+          <p className="st-note">{t('rec.hotkeys', { ng: `${mod}N`, imp: `${mod}M` })}</p>
           {status.error && <div className="notice err">{status.error}</div>}
-          {recording ? (
-            <button className="recbtn stop" disabled={status.state === 'stopping'} onClick={() => void stop()}>
-              <Square size={16} fill="currentColor" /> {t('rec.stop')}
-            </button>
-          ) : (
-            <button className="recbtn" disabled={ingesting || count !== null || (!screenStream && camStreams.length === 0 && !micStream)} onClick={() => void start()}>
-              <Circle size={16} fill="currentColor" /> {ingesting ? t('rec.ingesting') : t('rec.start')}
-            </button>
-          )}
         </aside>
       </div>
-      {count !== null && <div className="countdown">{count}</div>}
+      {count !== null && (
+        <div className="recx__countdown" aria-live="assertive">
+          <span>{count}</span>
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Segmented level meter (green → yellow → red), like a hardware VU. `level` is 0..1 of a -60..0 dB scale. */
+function LevelBars({ level, clip, off, wide = false }: { level: number; clip: boolean; off: boolean; wide?: boolean }) {
+  const n = wide ? 24 : 12;
+  const lit = off ? 0 : Math.round(level * n);
+  return (
+    <span className={`levelbars${wide ? ' levelbars--wide' : ''}${clip ? ' is-clip' : ''}`} aria-hidden="true">
+      {Array.from({ length: n }, (_, i) => (
+        <span key={i} className={`levelbars__seg${i < lit ? ' is-on' : ''}${i >= n * 0.85 ? ' is-hot' : i >= n * 0.65 ? ' is-warm' : ''}`} />
+      ))}
+    </span>
   );
 }

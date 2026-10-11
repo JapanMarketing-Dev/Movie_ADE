@@ -107,3 +107,80 @@ export function parseFailover(raw: unknown): FailoverState | null {
   }
   return f;
 }
+
+// ---- the desktop worker's IPC shapes (shared/ipc-accounts.ts: usage:state, usage:meters, failover:status) ----
+
+function num(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function windowOf(label: string, w: unknown): UsageWindow | null {
+  if (!w || typeof w !== 'object') return null;
+  const o = w as Record<string, unknown>;
+  const used = num(o.usedPercent);
+  if (used === null) return null;
+  const win: UsageWindow = { label, usedPercent: clampPercent(used) };
+  const at = num(o.resetsAt);
+  if (at !== null) win.resetsAt = new Date(at).toISOString();
+  return win;
+}
+
+const STATUSES = ['idle', 'fetching', 'ok', 'unavailable', 'error'] as const;
+
+/**
+ * `usage:state` (Record<agent, ProviderRateLimits | null>) + `usage:meters` (UsageMeter[]) → one AgentUsage per agent:
+ * the 5-hour / weekly / per-model windows from the state, the account label and plan from the meter.
+ */
+export function usageFromDesktop(state: unknown, meters: unknown): AgentUsage[] {
+  const byAgent = new Map<string, AgentUsage>();
+  if (state && typeof state === 'object' && !Array.isArray(state)) {
+    for (const [agent, raw] of Object.entries(state as Record<string, unknown>)) {
+      const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+      const status = o && typeof o.status === 'string' && (STATUSES as readonly string[]).includes(o.status) ? (o.status as AgentUsage['status']) : 'idle';
+      const windows = o
+        ? [windowOf('5h', o.session), windowOf('week', o.weekly), windowOf('Fable', o.fableWeekly), windowOf('$', o.spendLimit)].filter((w): w is UsageWindow => w !== null)
+        : [];
+      const u: AgentUsage = { agent, status, windows };
+      if (o && typeof o.planType === 'string' && o.planType) u.plan = o.planType;
+      if (o && typeof o.error === 'string' && o.error) u.error = o.error;
+      byAgent.set(agent, u);
+    }
+  }
+  if (Array.isArray(meters)) {
+    for (const m of meters) {
+      if (!m || typeof m !== 'object') continue;
+      const o = m as Record<string, unknown>;
+      if (typeof o.agent !== 'string') continue;
+      const u = byAgent.get(o.agent) ?? { agent: o.agent, status: 'idle' as const, windows: [] };
+      if (typeof o.accountLabel === 'string' && o.accountLabel) u.account = o.accountLabel;
+      if (typeof o.plan === 'string' && o.plan) u.plan = o.plan;
+      if (!u.error && typeof o.statusLabel === 'string' && o.statusLabel) u.error = o.statusLabel;
+      if (u.windows.length === 0) {
+        const p = num(o.percent);
+        if (p !== null) {
+          const w: UsageWindow = { label: typeof o.windowLabel === 'string' ? o.windowLabel : '', usedPercent: clampPercent(p) };
+          const at = num(o.resetsAt);
+          if (at !== null) w.resetsAt = new Date(at).toISOString();
+          u.windows.push(w);
+        }
+      }
+      if (typeof o.status === 'string' && (STATUSES as readonly string[]).includes(o.status) && u.status === 'idle') u.status = o.status as AgentUsage['status'];
+      byAgent.set(o.agent, u);
+    }
+  }
+  return [...byAgent.values()];
+}
+
+/** `failover:status` (FailoverStatus) → FailoverState. */
+export function failoverFromStatus(raw: unknown): FailoverState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.enabled !== 'boolean') return null;
+  const f: FailoverState = { enabled: o.enabled };
+  const l = o.last && typeof o.last === 'object' ? (o.last as Record<string, unknown>) : null;
+  if (l && typeof l.fromAgent === 'string' && typeof l.toAgent === 'string' && num(l.at) !== null) {
+    f.last = { from: l.fromAgent, to: l.toAgent, at: new Date(num(l.at)!).toISOString(), ...(typeof l.message === 'string' ? { reason: l.message } : {}) };
+    f.current = l.toAgent;
+  }
+  return f;
+}

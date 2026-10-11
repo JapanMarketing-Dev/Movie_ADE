@@ -4,6 +4,7 @@ import { LangContext } from './i18n';
 import { api, errMsg } from './lib/api';
 import { recorder, type RecStatus } from './lib/recorder';
 import { sendToAgent } from './terminal/agentSend';
+import { onFailoverNotice } from './shell/agentUsage';
 import { Home } from './screens/Home';
 import { Workspace } from './screens/Workspace';
 import { Record } from './screens/Record';
@@ -18,12 +19,13 @@ import { StatusBar } from './shell/StatusBar';
 import { Sidebar } from './shell/Sidebar';
 import { PaneTabs } from './shell/PaneTabs';
 import { QuickOpen, type PaletteItem } from './shell/QuickOpen';
-import { layoutStore, useLayout } from './shell/layout';
+import { layoutStore, layoutToSettings, useLayout } from './shell/layout';
+import { setSetting, settingsStore, useStore } from './shell/stores';
 import { modeOf, needsProject, parseScreen, screenForMode, showsVariant, VARIANT_ORDER, type Mode, type Screen } from './shell/modes';
 import { setShortcutPlatform, shortcutFor, shortcutLabel } from './shell/shortcut';
 import { formatElapsed } from './shell/format';
 import { SettingsPage } from './settings/SettingsPage';
-import { SETTINGS_SECTIONS, type SettingsSectionId } from './settings/settingsSections';
+import { getPath, SETTINGS_SECTIONS, type SettingsSectionId } from './settings/settingsSections';
 import { OnboardingFlow } from './onboarding/OnboardingFlow';
 import { markOnboarding, shouldShowOnboarding } from './onboarding/flow';
 
@@ -118,17 +120,17 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
     setShortcutPlatform(i.os === 'mac');
   }, [onLang]);
 
+  const [recentLoaded, setRecentLoaded] = useState(false);
   const loadRecent = useCallback(async () => {
     const r = await api.invoke('project:recent').catch(() => [] as RecentProject[]);
     setRecent(r);
+    setRecentLoaded(true);
     return r;
   }, []);
 
   useEffect(() => {
     void loadInfo();
-    void loadRecent().then((r) => {
-      if (shouldShowOnboarding(globalThis.localStorage ?? null, r.length)) setOnboarding(true);
-    });
+    void loadRecent();
     api.send('renderer:ready');
     const off1 = api.on('settings:changed', () => void loadInfo());
     // main's menu / screenshot capture navigates; an explicit navigation also closes the first-run flow
@@ -146,6 +148,44 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
       off3();
     };
   }, [loadInfo, loadRecent, setScreen]);
+
+  useEffect(() => onFailoverNotice((message) => pushToast({ tone: 'info', message, duration: 8000 })), [pushToast]);
+
+  // first run: decide once both settings.json and the recent list are known
+  const settings = useStore(settingsStore);
+  const onboardingChecked = useRef(false);
+  useEffect(() => {
+    if (onboardingChecked.current || !settings.loaded || !recentLoaded) return;
+    onboardingChecked.current = true;
+    const completedAt = getPath(settings.json, 'onboarding.completedAt');
+    if (shouldShowOnboarding({ completedAt, storage: globalThis.localStorage ?? null, recentCount: recent.length })) setOnboarding(true);
+  }, [settings, recentLoaded, recent.length]);
+
+  // panels: settings.json ui.layout is the source of truth (hydrate on change, save user changes, debounced)
+  useEffect(() => {
+    let timer = 0;
+    let pending = false;
+    layoutStore.setPersist((s) => {
+      pending = true;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        pending = false;
+        void setSetting('ui.layout', layoutToSettings(s));
+      }, 400);
+    });
+    const apply = () => {
+      const st = settingsStore.get();
+      const v = st.loaded && st.json ? getPath(st.json, 'ui.layout') : undefined;
+      if (v !== undefined && !pending) layoutStore.hydrate(v);
+    };
+    apply();
+    const off = settingsStore.subscribe(apply);
+    return () => {
+      off();
+      window.clearTimeout(timer);
+      layoutStore.setPersist(null);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.lang = info?.language ?? 'ja';
@@ -424,6 +464,7 @@ function Shell({ onLang }: { onLang: (l: Lang) => void }) {
         <OnboardingFlow
           onClose={(how) => {
             markOnboarding(globalThis.localStorage ?? null, how);
+            void setSetting('onboarding.completedAt', new Date().toISOString());
             setOnboarding(false);
           }}
           onNewProject={newProject}

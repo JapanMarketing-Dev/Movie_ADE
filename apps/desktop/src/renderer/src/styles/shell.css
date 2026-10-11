@@ -1285,7 +1285,7 @@ body.is-resizing .sidebar-splitter::after {
   border-bottom: 1px solid var(--color-border) !important;
 }
 .ws.focus-review .ws-left > .player {
-  height: 50vh;
+  height: 40vh;
   max-height: none;
   flex: none;
   aspect-ratio: auto;

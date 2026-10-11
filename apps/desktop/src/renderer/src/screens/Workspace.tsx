@@ -1,13 +1,16 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Check, FolderOpen, Pause, Play, RefreshCw, Sparkles, Video, X } from 'lucide-react';
 import type { LaneName, ProjectInfo, ProjectSnapshot, PromptButton, ReviewItem, TimelineOverview, Variant } from '@shared/types';
-import { formatFrames, progressOf, stepMark, variantArgs } from '@shared/project';
+import { variantArgs } from '@shared/project';
 import { LangContext, useT, type TKey } from '../i18n';
 import { api, errMsg } from '../lib/api';
 import { TerminalPane } from '../components/TerminalPane';
 import { sendToAgent } from '../terminal/agentSend';
 import { FeedbackLayer } from '../components/Feedback';
 import { AnalysisBar } from '../components/AnalysisBar';
+import { TimelineView } from './parts/Timeline';
+import { FindingsPanel } from './parts/Findings';
+import { ReviewQueue, StepBar } from './parts/WorkspaceParts';
 
 const RIGHT_W_KEY = 'solocut.ws.rightWidth';
 
@@ -264,53 +267,30 @@ export function Workspace({
               ))}
             </div>
           )}
-          <Pipeline snap={snap} />
+          <StepBar snap={snap} />
           {variant === 'main' && <AnalysisBar dir={project.dir} toast={toast} />}
-          <div className="section">
-            <div className="section-title">
-              {t('ws.timeline')}
-              {ov?.lastCheck && (
-                <span className={`pill ${ov.lastCheck.failed > 0 ? 'accent' : 'okp'}`}>
-                  {t('ws.lastCheck')} ✓{ov.lastCheck.passed} ✕{ov.lastCheck.failed} ?{ov.lastCheck.needsHuman}
-                </span>
-              )}
-            </div>
-            {ov ? <Lanes ov={ov} selected={selected} onSelect={(id, start) => (setSelected(id), seek(start))} /> : <div className="dim">{t('ws.noTimeline')}</div>}
-          </div>
-          <div className="section review-sec" style={{ borderBottom: 0 }}>
-            <div className="section-title">
-              {t('ws.review')} {ov && ov.review.length > 0 && <span className="pill accent">{ov.review.length}</span>}
-            </div>
-            {!ov || ov.review.length === 0 ? (
-              <div className="dim">{t('ws.noReview')}</div>
+          <div className="section section--timeline">
+            {ov ? (
+              <TimelineView
+                ov={ov}
+                variant={variant}
+                selected={selected}
+                videoRef={videoRef}
+                onSelect={(id, start) => (setSelected(id), seek(start))}
+                onSeek={seek}
+              />
             ) : (
-              <div className="review-list">
-                {ov.review.map((r) => (
-                  <div key={`${r.lane}:${r.id}`} className={`review-item ${selected === r.id ? 'sel' : ''}`} onClick={() => (setSelected(r.id), r.start !== undefined && seek(r.start))}>
-                    <span className="pill mono">{r.start !== undefined ? formatFrames(r.start, ov.fpsNum, ov.fpsDen) : r.lane}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label || r.id}</div>
-                      <div className="why">
-                        {r.reason}
-                        {r.confidence !== undefined && ` · ${t('ws.confidence')} ${Math.round(r.confidence * 100)}%`}
-                        {r.by && ` · ${r.by}`}
-                      </div>
-                    </div>
-                    {r.lane !== 'open' && r.lane !== 'markers' && (
-                      <div className="row" style={{ gap: 4 }}>
-                        <button className="btn small" onClick={(e) => (e.stopPropagation(), void decide(r, 'accept'))}>
-                          <Check size={13} /> {t('ws.accept')}
-                        </button>
-                        <button className="btn small" onClick={(e) => (e.stopPropagation(), void decide(r, 'reject'))}>
-                          <X size={13} /> {t('ws.reject')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <div className="dim">{t('ws.noTimeline')}</div>
             )}
           </div>
+          <div className="section review-sec">
+            <ReviewQueue ov={ov} selected={selected} onSelect={(r) => (setSelected(r.id), r.start !== undefined && seek(r.start))} onDecide={(r, d) => void decide(r, d)} />
+          </div>
+          {focus === 'review' && (
+            <div className="section findings-sec">
+              <FindingsPanel dir={project.dir} variant={variant} onSeek={seek} />
+            </div>
+          )}
         </div>
         <div className="splitter" onMouseDown={startDrag} />
         <div className="ws-right">
@@ -327,73 +307,6 @@ export function Workspace({
             ))}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Pipeline({ snap }: { snap: ProjectSnapshot | null }) {
-  const t = useT();
-  const steps = snap?.steps ?? [];
-  return (
-    <div className="section">
-      <div className="section-title">
-        {t('ws.pipeline')}
-        {steps.length > 0 && <span className="dim">{Math.round(progressOf(steps) * 100)}%</span>}
-      </div>
-      {steps.length === 0 ? (
-        <div className="dim">—</div>
-      ) : (
-        <div className="pipeline">
-          {steps.map((s) => (
-            <div key={s.step} className={`step ${s.state}`} title={`${s.step}: ${s.state}${s.note ? ` — ${s.note}` : ''}`}>
-              <div className="bar" />
-              <div className="lbl">
-                {stepMark(s)} {s.step}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {snap?.next && (
-        <div className="next">
-          <span className={`pill ${snap.next.state === 'needs-human' ? 'accent' : snap.next.state === 'done' ? 'okp' : ''}`}>
-            {t('ws.next')}: {snap.next.step}
-          </span>
-          <span style={{ minWidth: 0 }}>{snap.next.do || snap.next.why}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const LANES: LaneName[] = ['segments', 'captions', 'scenes', 'sfx', 'markers'];
-
-function Lanes({ ov, selected, onSelect }: { ov: TimelineOverview; selected: string | null; onSelect: (id: string, start: number) => void }) {
-  const t = useT();
-  const total = Math.max(1, ov.durationFrames);
-  const pct = (f: number) => `${(f / total) * 100}%`;
-  return (
-    <div className="lanes">
-      {LANES.map((lane) => (
-        <div key={lane} className={`lane ${lane}`}>
-          <span className="name">{t(`ws.lane.${lane}` as TKey)}</span>
-          <div className="track">
-            {ov.lanes[lane].map((it) => (
-              <button
-                key={it.id}
-                className={`item ${it.needsReview ? 'review' : ''} ${selected === it.id ? 'sel' : ''}`}
-                style={{ left: pct(it.start), width: lane === 'markers' ? undefined : `max(2px, ${pct(it.end - it.start)})` }}
-                title={`${formatFrames(it.start, ov.fpsNum, ov.fpsDen)} ${it.label}`}
-                onClick={() => onSelect(it.id, it.start)}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
-      <div className="ruler">
-        <span>00:00:00</span>
-        <span>{formatFrames(total, ov.fpsNum, ov.fpsDen)}</span>
       </div>
     </div>
   );
