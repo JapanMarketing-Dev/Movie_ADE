@@ -147,12 +147,12 @@ export async function snapshot(dir: string, variant: Variant = 'main'): Promise<
   return snap;
 }
 
-export async function applyOps(dir: string, ops: unknown[], variant: Variant = 'main'): Promise<CliResult> {
+export async function applyOps(dir: string, ops: unknown[], variant: Variant = 'main', by: 'human' | 'agent' = 'human'): Promise<CliResult> {
   if (ops.length === 0) return { ok: false, code: null, stdout: '', stderr: '', error: 'nothing to change' };
   const file = join(tmpdir(), `solocut-ops-${process.pid}-${Date.now()}.json`);
   writeFileSync(file, JSON.stringify(ops));
   try {
-    return await runCli(['edit', '--ops', file, '--by', 'human', ...variantArgs(variant)], { cwd: dir });
+    return await runCli(['edit', '--ops', file, '--by', by, ...(by === 'agent' ? ['--agent', 'solocut-analysis'] : []), ...variantArgs(variant)], { cwd: dir });
   } finally {
     await fsp.rm(file, { force: true });
   }

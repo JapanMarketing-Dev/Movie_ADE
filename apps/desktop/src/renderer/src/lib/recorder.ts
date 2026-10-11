@@ -17,6 +17,7 @@ export interface CameraChoice {
 
 export interface Sources {
   screen: MediaStream | null;
+  screenSourceId: string | null; // desktopCapturer id, for the cursor log's display
   screenFps: number;
   cameras: { choice: CameraChoice; stream: MediaStream }[];
   mic: { deviceId: string; label: string; stream: MediaStream } | null;
@@ -89,6 +90,10 @@ class Recorder {
     this.writers = [];
     this.set({ state: 'recording', takeId, startedAtMs: now, markers: [], bytes: 0, error: undefined, lastTakeDir: takeDir });
     try {
+      if (src.screen) {
+        // cursor.jsonl at 30 Hz on the take clock (epoch of timeOrigin + startedAtMs)
+        this.meta.cursor = await api.invoke('record:cursorStart', takeId, src.screenSourceId, performance.timeOrigin + now);
+      }
       const { mime, ext } = pickVideoMime((m) => MediaRecorder.isTypeSupported(m));
       if (src.screen) {
         const v = src.screen.getVideoTracks()[0];

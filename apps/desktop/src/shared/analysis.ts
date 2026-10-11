@@ -93,12 +93,11 @@ export function padBox(b: NBox, pad: number): NBox {
  */
 export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
   const hits: PiiHit[] = [];
-  const seen = new Set<string>();
+  const overlaps = (a: NBox, b: NBox) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   const add = (kind: PiiKind, label: string, text: string, words: OcrWord[]) => {
     const box = padBox(unionBox(words.map((w) => w.box)), 0.004);
-    const key = `${kind}:${Math.round(box.x * 200)}:${Math.round(box.y * 200)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
+    // one hit per place: a word-window match that overlaps an earlier (narrower) match of the same kind is dropped
+    if (hits.some((h) => h.kind === kind && overlaps(h.box, box))) return;
     hits.push({ kind, label, text: redact(text), box });
   };
   for (const line of lines) {
@@ -113,6 +112,10 @@ export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
         }
       }
     }
+    for (const w of words) {
+      const m = PII_PATTERNS.find((p) => p.kind === 'phone')!.re.exec(w.text);
+      if (m && m[0].replace(/\D/g, '').length >= 10) add('phone', 'phone', m[0], [w]);
+    }
     // windows of 2..4 words for phone numbers / split tokens
     for (let i = 0; i < words.length; i++) {
       for (let n = 2; n <= 4 && i + n <= words.length; n++) {
@@ -121,10 +124,6 @@ export function findPii(lines: OcrWord[][], minConfidence = 40): PiiHit[] {
         const phone = PII_PATTERNS.find((p) => p.kind === 'phone')!.re.exec(spaced);
         if (phone && phone[0].replace(/\D/g, '').length >= 10) add('phone', 'phone', phone[0], win);
       }
-    }
-    for (const w of words) {
-      const m = PII_PATTERNS.find((p) => p.kind === 'phone')!.re.exec(w.text);
-      if (m && m[0].replace(/\D/g, '').length >= 10) add('phone', 'phone', m[0], [w]);
     }
   }
   return hits;

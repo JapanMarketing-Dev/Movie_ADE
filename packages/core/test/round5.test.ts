@@ -133,8 +133,9 @@ describe('multicam', () => {
     expect(m[0]).toMatchObject({ take: 'take_1', durationSec: 5, current: 'cam', speaking: true, words: 1, emphasisWords: ['大事'] });
     expect(m[0]!.speechRatio).toBeCloseTo(0.2, 3);
     expect(m[0]!.cameras.map((c) => c.id)).toEqual(['cam', 'imp', 'side']); // other take excluded, imported included
-    expect(m[0]!.cameras[0]).toEqual({ id: 'cam', role: 'front', faceVisible: 1, lookingAtCamera: 0.8, sharp: 0.9 });
-    expect(m[0]!.cameras[1]).toEqual({ id: 'imp', role: 'wide', faceVisible: null });
+    expect(m[0]!.cameras[0]).toEqual({ id: 'cam', role: 'front', faceVisible: 1, faceArea: 0.06, lookingAtCamera: 0.8, sharp: 0.9 });
+    expect(m[0]!.cameras[1]).toEqual({ id: 'imp', role: 'wide', faceVisible: null, faceArea: null });
+    expect(m[0]!.cameras[2]!.faceArea).toBeNull(); // side: no face in these frames
     expect(m[0]!.cameras[2]!.faceVisible).toBe(0);
     expect(m[2]!.speaking).toBe(true); // "結論" spans 9.8–10.4 s, seg_c is 10–11 s
     expect(m[3]!.speaking).toBe(false);
@@ -151,6 +152,9 @@ describe('multicam', () => {
     const taken = new Set(['seg_a_s1']);
     expect(splitForSwitch(t.segments[0]!, [50], { taken })[0]).toMatchObject({ newId: 'seg_a_s1_2' });
     expect(splitForSwitch(t.segments[0]!, [])).toEqual([]);
+    // by id, against the timeline's ids
+    expect(splitForSwitch(t, 'seg_a', [100, 40])).toEqual(ops);
+    expect(() => splitForSwitch(t, 'seg_nope', [10])).toThrow(/unknown segment/);
   });
   it('checkCameraSwitches: long runs and switches inside words fail; short shots need a human', () => {
     const r = checkCameraSwitches(t, { words, maxShotSec: 8, minShotSec: 1.5 });

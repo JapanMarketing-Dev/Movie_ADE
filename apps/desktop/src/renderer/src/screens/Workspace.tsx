@@ -7,6 +7,7 @@ import { api, errMsg } from '../lib/api';
 import { terminals } from '../lib/terminals';
 import { Terminals } from '../components/Terminals';
 import { FeedbackLayer } from '../components/Feedback';
+import { AnalysisBar } from '../components/AnalysisBar';
 
 const RIGHT_W_KEY = 'solocut.ws.rightWidth';
 
@@ -237,6 +238,7 @@ export function Workspace({
             </div>
           )}
           <Pipeline snap={snap} />
+          {variant === 'main' && <AnalysisBar dir={project.dir} toast={toast} />}
           <div className="section">
             <div className="section-title">
               {t('ws.timeline')}

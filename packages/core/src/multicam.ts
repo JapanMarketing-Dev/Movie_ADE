@@ -15,6 +15,8 @@ export interface CameraInfo {
   role: string;
   /** Share of sampled frames with a face (null without a face track). */
   faceVisible: number | null;
+  /** Mean area of the largest face (fraction of the frame) where one is visible; null without a track / face. */
+  faceArea: number | null;
   /** Mean gaze-at-lens score when the detector provides it. */
   lookingAtCamera?: number;
   /** Mean sharpness/exposure score when the detector provides it. */
@@ -58,7 +60,7 @@ export function cameraMaterial(t: Timeline, tracks: Tracks, words?: WordsInput):
     const cameras: CameraInfo[] = [];
     for (const [id, s] of cams) {
       if (s.kind !== 'camera' || (s.take && s.take !== seg.src.take)) continue;
-      const info: CameraInfo = { id, role: s.role, faceVisible: null };
+      const info: CameraInfo = { id, role: s.role, faceVisible: null, faceArea: null };
       const track = tracks.faces?.[id];
       if (track) {
         const la = sourceLocalSeconds(t, s, a);
@@ -67,6 +69,8 @@ export function cameraMaterial(t: Timeline, tracks: Tracks, words?: WordsInput):
         const frames = track.frames.filter((f) => f.f / fps >= la && f.f / fps < lb);
         if (frames.length) {
           info.faceVisible = round3(frames.filter((f) => f.faces.some((x) => x.score >= 0.3)).length / frames.length);
+          const areas = frames.map((f) => Math.max(0, ...f.faces.filter((x) => x.score >= 0.3).map((x) => x.w * x.h))).filter((a) => a > 0);
+          if (areas.length) info.faceArea = round3(areas.reduce((p, q) => p + q, 0) / areas.length);
           const gaze = frames.flatMap((f) => f.faces.map((x) => x.gaze).filter((g): g is number => g !== undefined));
           if (gaze.length) info.lookingAtCamera = round3(gaze.reduce((p, q) => p + q, 0) / gaze.length);
           const sharp = frames.map((f) => f.sharp).filter((g): g is number => g !== undefined);
@@ -97,7 +101,18 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
  * splitSegment ops that cut a segment at the given source frames (strictly inside; duplicates ignored), so each
  * piece can get its own camera with setCamera. New ids `${id}_s1`, `${id}_s2`, … (unique against `taken`).
  */
-export function splitForSwitch(segment: Segment, atSourceFrames: number[], o: { taken?: Set<string> } = {}): Op[] {
+export function splitForSwitch(t: Timeline, segmentId: string, atSourceFrames: number[]): Op[];
+export function splitForSwitch(segment: Segment, atSourceFrames: number[], o?: { taken?: Set<string> }): Op[];
+export function splitForSwitch(a: Timeline | Segment, b: string | number[], c?: number[] | { taken?: Set<string> }): Op[] {
+  if ('segments' in a) {
+    const seg = a.segments.find((s) => s.id === b);
+    if (!seg) throw new Error(`splitForSwitch: unknown segment ${String(b)}`);
+    return splitSegmentAt(seg, (c as number[]) ?? [], { taken: allIds(a) });
+  }
+  return splitSegmentAt(a, b as number[], (c as { taken?: Set<string> } | undefined) ?? {});
+}
+
+function splitSegmentAt(segment: Segment, atSourceFrames: number[], o: { taken?: Set<string> }): Op[] {
   const taken = new Set(o.taken ?? []);
   taken.add(segment.id);
   const points = [...new Set(atSourceFrames.map((f) => Math.round(f)))]

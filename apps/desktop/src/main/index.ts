@@ -1,7 +1,7 @@
 import './env-setup';
 import { app, BrowserWindow, desktopCapturer, dialog, globalShortcut, Menu, session, shell, type WebContents } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { AppInfo, CaptureSource, SettingsDoc } from '../shared/types';
 import { assertAllHandled, emit, handle, on, setTrustedOrigin } from './ipc';
 import { cliScript, preloadPath, rendererUrl } from './paths';
@@ -19,6 +19,8 @@ import * as thumbs from './services/thumbs';
 import * as secrets from './services/secrets';
 import * as publish from './publish/publish';
 import * as youtube from './publish/youtube';
+import { AnalysisRunner } from './services/analysis';
+import { startCursorLog, stopAllCursorLogs, stopCursorLog } from './services/cursor';
 import { intentUrl, libNameFor, parseProgress, UPLOAD_PAGES } from '../shared/publish';
 
 const log = (msg: string) => console.log(`[solocut] ${msg}`);
@@ -46,6 +48,20 @@ const ptys = new PtyManager({
   data: (id, d) => emit(mainWc(), 'pty:data', id, d),
   exit: (id, code) => emit(mainWc(), 'pty:exit', id, code),
   activity: (id, a) => emit(mainWc(), 'pty:activity', id, a),
+});
+const analysis = new AnalysisRunner({
+  emit: (st) => emit(mainWc(), 'analysis:state', st),
+  createWindow: () => {
+    // hidden worker window: MediaPipe faces + tesseract.js OCR (docs: analysis producers)
+    const w = new BrowserWindow({ show: false, width: 640, height: 360, webPreferences: secureWebPreferences() });
+    lockNavigation(w);
+    const r = rendererUrl();
+    if (r.url) void w.loadURL(new URL('analysis.html', r.url.endsWith('/') ? r.url : `${r.url}/`).toString());
+    else void w.loadFile(join(dirname(r.file!), 'analysis.html'));
+    return w;
+  },
+  rendererRoot: () => join(__dirname, '../renderer'),
+  log,
 });
 const watcher = new project.ProjectWatcher((dir, what) => emit(mainWc(), 'project:changed', dir, what));
 const updater = new Updater({
@@ -114,6 +130,7 @@ function createMainWindow(): void {
   });
   mainWindow.webContents.on('render-process-gone', (_e, d) => {
     log(`renderer gone: ${d.reason}`);
+    stopAllCursorLogs();
     recorder.endAll(); // keep what was written; files stay playable
     unregisterHotkeys();
   });
@@ -335,10 +352,23 @@ function registerIpc(): void {
   handle('record:closeTrack', (_e, takeId, file) => recorder.closeTrack(takeId, file));
   handle('record:writeMeta', (_e, takeId, meta) => recorder.writeTakeMeta(takeId, meta));
   handle('record:end', (_e, takeId) => {
+    stopCursorLog(takeId);
     recorder.endTake(takeId);
     if (recorder.activeTakes() === 0) unregisterHotkeys();
   });
   handle('record:teleprompter', (_e, dir) => openTeleprompter(dir));
+  handle('record:cursorStart', (_e, takeId, sourceId, epochStartMs) => startCursorLog(takeId, recorder.sessionDir(takeId), sourceId, epochStartMs));
+
+  handle('analysis:start', (_e, dir) => {
+    if (!project.isProjectDir(dir)) throw new Error('not a solocut project');
+    return analysis.start(dir);
+  });
+  handle('analysis:cancel', () => analysis.cancel());
+  handle('analysis:status', () => analysis.getStatus());
+  handle('analysis:nextJob', () => analysis.nextJob());
+  handle('analysis:result', (_e, jobId, result) => analysis.result(jobId, result));
+  handle('analysis:fail', (_e, jobId, error) => analysis.fail(jobId, error));
+  on('analysis:progress', (_e, jobId, f) => analysis.progress(jobId, f));
 
   handle('update:state', () => updater.getState());
   handle('update:check', () => updater.check());
@@ -517,7 +547,9 @@ app.on('will-quit', () => {
   ptys.killAll();
   watcher.close();
   settingsWatcher?.close();
+  stopAllCursorLogs();
   recorder.endAll();
+  analysis.cancel();
   updater.stop();
   updater.applyOnQuit();
 });

@@ -17,3 +17,4 @@ export * from './sfx.js';
 export * from './multicam.js';
 export * from './trackchecks.js';
 export * from './benchmark.js';
+export * from './exporters.js';

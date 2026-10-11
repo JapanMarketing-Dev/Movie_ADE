@@ -211,6 +211,14 @@ export interface TakeTrackMeta {
   firstFrameTimestampUs?: number; // raw VideoFrame.timestamp if available
   bytes?: number;
 }
+export interface TakeCursorInfo {
+  file: string;
+  hz: number;
+  displayId: string | null;
+  bounds: { x: number; y: number; width: number; height: number };
+  scaleFactor: number;
+  window: boolean;
+}
 export interface TakeMarker {
   kind: 'ng' | 'important';
   atMs: number; // performance.now() domain
@@ -225,6 +233,8 @@ export interface TakeMeta {
   stoppedAtMs?: number;
   tracks: TakeTrackMeta[];
   markers: TakeMarker[];
+  /** cursor.jsonl ({t_ms, x, y} at 30 Hz, normalized to the captured display) */
+  cursor?: TakeCursorInfo;
   app: { version: string; os: string };
   complete: boolean;
 }
@@ -343,4 +353,37 @@ export interface YouTubeProgress {
 export interface SecretInfo {
   set: boolean;
   hint?: string;
+}
+
+// ---------- analysis producers ----------
+export type AnalysisKind = 'faces' | 'ocr';
+export interface AnalysisJob {
+  id: string;
+  kind: AnalysisKind;
+  sourceId: string;
+  url: string; // solocut-media URL of the source video
+  sourceFps: number;
+  width: number;
+  height: number;
+  sampleFps: number; // faces 5, ocr 1
+  model?: Uint8Array; // face detector (.tflite)
+  langPath?: string; // tesseract language data dir (solocut-media URL)
+  langs?: string[];
+}
+export interface AnalysisJobState {
+  id: string;
+  kind: AnalysisKind;
+  sourceId: string;
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  progress: number;
+  error?: string;
+}
+export interface AnalysisStatus {
+  running: boolean;
+  dir?: string;
+  phase: 'idle' | 'models' | 'analyzing' | 'masks' | 'done' | 'cancelled' | 'error';
+  jobs: AnalysisJobState[];
+  modelProgress?: number;
+  masksAdded?: number;
+  message?: string;
 }

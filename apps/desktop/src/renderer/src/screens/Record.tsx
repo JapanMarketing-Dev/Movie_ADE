@@ -222,7 +222,7 @@ export function Record({
       setElapsed(0);
       await recorder.start(
         project.dir,
-        { screen: screenStream, screenFps: fps, cameras: camStreams, mic: micStream && micId ? { deviceId: micId, label: devices.find((d) => d.deviceId === micId)?.label ?? 'mic', stream: micStream } : null },
+        { screen: screenStream, screenSourceId: sourceId, screenFps: fps, cameras: camStreams, mic: micStream && micId ? { deviceId: micId, label: devices.find((d) => d.deviceId === micId)?.label ?? 'mic', stream: micStream } : null },
         systemAudio,
         info.version,
         info.os,
@@ -246,6 +246,8 @@ export function Record({
       return;
     }
     toast(t('rec.saved'));
+    // faces / on-screen PII / cursor logs for zoom, reframing and masks (cancellable from the workspace)
+    void api.invoke('analysis:start', project.dir).catch(() => undefined);
     onIngested();
   };
 

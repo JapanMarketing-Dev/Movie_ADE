@@ -15,7 +15,10 @@ export interface McpTool {
 
 const str = { type: 'string' };
 const bool = { type: 'boolean' };
-const project = { project: { type: 'string', description: 'Project folder (default: the server working directory)' } };
+const project = {
+  project: { type: 'string', description: 'Project folder (default: the server working directory)' },
+  variant: { type: 'string', enum: ['main', 'tiktok', 'youtube-shorts'], description: 'Which video: the main YouTube one (default) or a derived vertical variant (docs/18)' },
+};
 const obj = (properties: Record<string, unknown>, required: string[] = []): McpTool['inputSchema'] => ({ type: 'object', properties: { ...properties, ...project }, ...(required.length ? { required } : {}), additionalProperties: false });
 const s = (v: unknown) => String(v);
 const opt = (flag: string, v: unknown) => (v === undefined || v === null || v === '' ? [] : [flag, s(v)]);
@@ -40,8 +43,10 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'validate', description: 'Validate timeline.json (schema + semantics).', inputSchema: obj({}), argv: () => ['validate'] },
   { name: 'propose_cuts', description: 'Build segments from silence, fillers, retakes and NG markers.', inputSchema: obj({ replace: bool, dryRun: bool }), argv: (a) => ['propose', 'cuts', ...flag('--replace', a.replace), ...flag('--dry-run', a.dryRun)] },
   { name: 'captions_build', description: 'Build captions from the transcript.', inputSchema: obj({}), argv: () => ['captions', 'build'] },
-  { name: 'render', description: 'Render the preview, or the final video for a target.', inputSchema: obj({ quality: { type: 'string', enum: ['preview', 'final'] }, target: str }), argv: (a) => ['render', a.quality === 'final' ? '--final' : '--preview', ...opt('--target', a.target)] },
-  { name: 'check', description: 'Machine checks on the preview (black frames, freezes, loudness, spec); writes checks/<run>/report.md.', inputSchema: obj({}), argv: () => ['check'] },
+  { name: 'derive', description: 'Derive a vertical variant (TikTok / YouTube Shorts) from the main video: picks highlights, reframes to 9:16, rebuilds captions.', inputSchema: obj({ target: { type: 'string', enum: ['tiktok', 'youtube-shorts'] }, maxSec: { type: 'integer' }, selection: { type: 'array', items: str }, replace: bool }, ['target']), argv: (a) => ['derive', '--target', s(a.target), ...opt('--max-sec', a.maxSec), ...(Array.isArray(a.selection) ? ['--selection', a.selection.join(',')] : []), ...flag('--replace', a.replace)] },
+  { name: 'render', description: 'Render the preview, or the final video; all=true renders every video (main + variants).', inputSchema: obj({ quality: { type: 'string', enum: ['preview', 'final'] }, target: str, all: bool }), argv: (a) => ['render', a.quality === 'final' ? '--final' : '--preview', ...opt('--target', a.target), ...flag('--all', a.all)] },
+  { name: 'check', description: 'Machine checks on the preview (black frames, freezes, loudness, spec); writes checks/<run>/report.md. all=true checks every video.', inputSchema: obj({ all: bool }), argv: (a) => ['check', ...flag('--all', a.all)] },
+  { name: 'thumb_pick', description: 'Use an image in the project as the video\'s thumbnail.', inputSchema: obj({ image: str }, ['image']), argv: (a) => ['thumb', 'pick', s(a.image)] },
   { name: 'frame', description: 'A still of one timeline frame (frame number or timecode). Returns the image.', inputSchema: obj({ at: str, width: { type: 'integer' } }, ['at']), argv: (a) => ['frame', '--at', s(a.at), ...opt('--width', a.width ?? 960)], image: true },
   { name: 'past_list', description: 'Past videos in the archive, newest first.', inputSchema: obj({ kind: str, template: str, limit: { type: 'integer' } }), argv: (a) => ['past', 'list', ...opt('--kind', a.kind), ...opt('--template', a.template), ...opt('--limit', a.limit)] },
   { name: 'past_search', description: 'Full-text search over past videos (titles, chapters, captions).', inputSchema: obj({ query: str }, ['query']), argv: (a) => ['past', 'search', s(a.query)] },
@@ -101,7 +106,8 @@ export function createMcpServer(run: RunCli, o: { defaultProject?: string } = {}
         const bad = checkArgs(tool, a);
         if (bad) return ok(m.id, { content: [{ type: 'text', text: bad }], isError: true });
         const proj = (a.project as string | undefined) ?? o.defaultProject;
-        const argv = [...tool.argv(a), '--json', ...(proj ? ['--project', proj] : [])];
+        const variant = typeof a.variant === 'string' && a.variant !== 'main' ? a.variant : undefined;
+        const argv = [...tool.argv(a), '--json', ...(proj ? ['--project', proj] : []), ...(variant ? ['--variant', variant] : [])];
         const r = await run(argv);
         const content: object[] = [{ type: 'text', text: r.stdout.trim() || r.stderr.trim() }];
         if (tool.image && r.code === 0) {

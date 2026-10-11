@@ -2,6 +2,9 @@
 // the preload exposes only these names and main registers a handler for every invoke channel.
 import type {
   AgentActivity,
+  AnalysisJob,
+  AnalysisStatus,
+  TakeCursorInfo,
   AgentStatus,
   AppInfo,
   ArchiveDetail,
@@ -87,6 +90,14 @@ export interface InvokeMap {
   'record:writeMeta': { args: [takeId: string, meta: TakeMeta]; result: void };
   'record:end': { args: [takeId: string]; result: void };
   'record:teleprompter': { args: [dir: string | null]; result: void };
+  'record:cursorStart': { args: [takeId: string, sourceId: string | null, epochStartMs: number]; result: TakeCursorInfo };
+
+  'analysis:start': { args: [dir: string]; result: AnalysisStatus };
+  'analysis:cancel': { args: []; result: AnalysisStatus };
+  'analysis:status': { args: []; result: AnalysisStatus };
+  'analysis:nextJob': { args: []; result: AnalysisJob | null };
+  'analysis:result': { args: [jobId: string, result: unknown]; result: void };
+  'analysis:fail': { args: [jobId: string, error: string]; result: void };
 
   'update:state': { args: []; result: UpdateState };
   'update:check': { args: []; result: UpdateState };
@@ -128,6 +139,7 @@ export interface SendMap {
   'pty:paste': [id: string, text: string];
   'project:watch': [dir: string | null];
   'renderer:ready': [];
+  'analysis:progress': [jobId: string, fraction: number];
 }
 
 /** main -> renderer events (webContents.send / ipcRenderer.on) */
@@ -143,6 +155,7 @@ export interface EventMap {
   'app:navigate': [screen: string];
   'project:openRequest': [dir: string];
   'publish:progress': [p: YouTubeProgress];
+  'analysis:state': [s: AnalysisStatus];
 }
 
 export type InvokeChannel = keyof InvokeMap;
@@ -164,7 +177,8 @@ const invoke: Record<InvokeChannel, true> = {
   'prompts:readFile': true, 'prompts:validate': true, 'prompts:writeFile': true,
   'record:sources': true, 'record:selectSource': true, 'record:begin': true, 'record:openTrack': true,
   'record:append': true, 'record:closeTrack': true, 'record:writeMeta': true, 'record:end': true,
-  'record:teleprompter': true,
+  'record:teleprompter': true, 'record:cursorStart': true,
+  'analysis:start': true, 'analysis:cancel': true, 'analysis:status': true, 'analysis:nextJob': true, 'analysis:result': true, 'analysis:fail': true,
   'update:state': true, 'update:check': true, 'update:restart': true,
   'feedback:begin': true, 'feedback:finish': true, 'feedback:update': true,
   'thumbs:candidates': true, 'thumbs:existing': true, 'thumbs:generate': true, 'thumbs:favorite': true, 'thumbs:providers': true,
@@ -173,11 +187,11 @@ const invoke: Record<InvokeChannel, true> = {
   'secrets:status': true, 'secrets:set': true,
 };
 const send: Record<SendChannel, true> = {
-  'pty:write': true, 'pty:resize': true, 'pty:paste': true, 'project:watch': true, 'renderer:ready': true,
+  'pty:write': true, 'pty:resize': true, 'pty:paste': true, 'project:watch': true, 'renderer:ready': true, 'analysis:progress': true,
 };
 const events: Record<EventChannel, true> = {
   'pty:data': true, 'pty:exit': true, 'pty:activity': true, 'project:changed': true, 'settings:changed': true,
-  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true,
+  'tools:progress': true, 'record:hotkey': true, 'update:state': true, 'app:navigate': true, 'project:openRequest': true, 'publish:progress': true, 'analysis:state': true,
 };
 
 export const INVOKE_CHANNELS = Object.freeze(Object.keys(invoke) as InvokeChannel[]);

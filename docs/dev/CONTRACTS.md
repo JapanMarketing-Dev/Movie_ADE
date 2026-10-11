@@ -197,9 +197,9 @@ export function overlaysFromInputLogs(t, { cursor?, keys? }, { shortcutsOnly? = 
 //   per-60 s cap (existing sfx count) and spacing. With words, section/cut/scene sfx move ≤ 250 ms earlier to end before a speech
 //   onset, else −6 dB. Sfx trigger enum gains 'caption-in'. sfxEvents(t) lists the candidate moments.
 // Multicam (docs/04): cameraMaterial(t, tracks, words? /* take seconds, array or by take */) → per segment { segment, take,
-//   durationSec, current, speaking, speechRatio, words, emphasisWords, cameras: { id, role, faceVisible|null, lookingAtCamera?,
-//   sharp? }[] } (FaceTrack faces may carry gaze 0..1, frames sharp 0..1). splitForSwitch(segment, atSourceFrames, { taken? })
-//   → chained splitSegment ops (ids `${id}_s1…`); takenIds(t). checkCameraSwitches(t, { words?, maxShotSec = 8, minShotSec = 1 })
+//   durationSec, current, speaking, speechRatio, words, emphasisWords, cameras: { id, role, faceVisible|null, faceArea|null, lookingAtCamera?,
+//   sharp? }[] } (FaceTrack faces may carry gaze 0..1, frames sharp 0..1). splitForSwitch(t, segmentId, atSourceFrames) or
+//   splitForSwitch(segment, atSourceFrames, { taken? }) → chained splitSegment ops (ids `${id}_s1…`); takenIds(t). checkCameraSwitches(t, { words?, maxShotSec = 8, minShotSec = 1 })
 //   → CheckFinding: fail on a shot held too long or a switch inside a word; very short shots → needs-human.
 // CheckFinding gains `items?: { frame, note, ref? }[]`. Track checks: checkCaptionFaceOverlap(t, tracks, { minOverlap = 0.15 })
 //   (needs-human), checkCaptionSafeArea(t, target) using safeRect(target, outputSize) (fail), checkMosaicTracking(t, pii:
@@ -297,9 +297,11 @@ export function findRetakes(words: Word[], o?: { windowSec?: number /* 20 */; si
 ## @solocut/toolchain
 
 ```ts
-export type ToolName = 'ffmpeg'|'ffprobe'|'whisper-cli'|'whisper-model'|'whisper-model-small';
+export type ToolName = 'ffmpeg'|'ffprobe'|'whisper-cli'|'whisper-model'|'whisper-model-small'|'fonts';
 export interface ToolAsset { os: 'mac'|'win'|'linux'; arch: 'x64'|'arm64'; url: string; sha256: string;
-  kind: 'zip'|'tar.xz'|'tar.gz'|'file'; bin: Record<string, string>; size?: number }   // bin: tool name → path in archive
+  kind: 'zip'|'tar.xz'|'tar.gz'|'file'|'bundle'; bin: Record<string, string>; size?: number;   // bin: tool name → path in archive
+  parts?: { url; sha256; kind: 'zip'|'tar.xz'|'tar.gz'|'file'; size?; files: Record<string /* dest */, string /* path in archive */> }[] }
+  // 'bundle': every part is downloaded, sha-verified and its listed files copied flat into the install dir
 export interface ToolManifest { schema: 1; tools: Record<string, { version: string; license?: string; source?: string; assets: ToolAsset[] }> }
 export function solocutHome(): string;                 // $SOLOCUT_HOME or ~/.solocut
 export function toolsDir(): string;                    // <home>/tools; installs at tools/<toolKey>/<version>/ + .solocut-tool.json marker
@@ -316,7 +318,18 @@ export function ensureTool(name: ToolName, o?: { onProgress?: (p: { received: nu
 export function toolStatus(): Promise<Record<ToolName, { installed: boolean; path?: string; version?: string; source? }>>;
 export function findAsset(m: ToolManifest, name: ToolName, p: Platform): { toolKey; version; asset } | null;
   // ffprobe on win/linux comes from the ffmpeg archive (one download)
-export function currentPlatform(): Platform; export function whichSync(cmd: string): string | null;
+export function currentPlatform(): Platform;
+export function envPath(env?): string;                 // PATH read case-insensitively (Windows "Path")
+export function whichSync(cmd: string, env?, platform?): string | null;
+  // Windows: tries PATHEXT extensions only (a bare file without extension is not runnable), `;` separator, case-insensitive
+export function spawnSpec(file: string, args: string[], platform?, env?): { file; args; options: { windowsVerbatimArguments? } };
+  // .cmd/.bat on Windows → `%ComSpec% /d /s /c "<quoted cmd>"` (Node refuses to spawn them directly)
+export function fontsDir(o?): string | null;           // env SOLOCUT_FONTS (a directory) → managed tools/fonts/<ver>/ → null
+// fonts tool (version noto-sans-jp-2.004+jetbrains-mono-2.304, all platforms, one flat dir with the OFL licenses):
+//   NotoSansJP-{Regular,Medium,Bold,Black}.otf + LICENSE-NotoSansJP.txt from notofonts/noto-cjk Sans2.004 16_NotoSansJP.zip
+//   (sha256 2bbdd2c20f30670b39ca735c96d75f1fdabdb348103e43b820cf17701fd22b18);
+//   JetBrainsMono-{Regular,Bold}.ttf + OFL-JetBrainsMono.txt from JetBrains/JetBrainsMono v2.304 JetBrainsMono-2.304.zip
+//   (sha256 6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf). resolveTool('fonts') returns the directory.
 export const DEFAULT_MANIFEST: ToolManifest;           // pinned URLs + sha256, verified 2026-10-11 (see manifest.ts)
 ```
 
@@ -345,26 +358,37 @@ export const DEFAULT_PROMPTS: Prompt[];               // docs/13 + docs/17 (16 p
 ## @solocut/templates
 
 ```ts
-export interface Template { id; version: string; name: {ja,en}; description?; kind: 'tech'|'talk'; abstract: boolean;
+export interface Template { id; version: string; name: {ja,en}; description?; kind: 'tech'|'talk'; abstract: boolean; alias: boolean;
   targets: Target[]; canvas: { width; height; fps: Rational }; record; layouts: { default; allowed; wipe? }; cut; captions;
   audio; decisions; multicam?; features; checks: CheckKind[]; pipeline: StepId[];
+  outputs: Partial<Record<Target, { enabled: boolean /* default true */; derive?: 'vertical'; sameAs?: Target; maxSec?: number;
+    captions?: string; layout?: string; hook?: 'default'|'shorts' }>>;
   dir: string; rules: string /* base first */; prompts: Record<string, string>; promptFiles: Record<string, string /* abs path */>; chain: string[] }
 export const TemplateFileSchema;  export class TemplateError { file?; issues }
 export function builtinTemplatesDir(): string;        // $SOLOCUT_TEMPLATES_DIR → <bundle>/../templates → repo /templates
-export function listTemplates(o?: { extraDirs?: string[] }): Template[];   // extraDirs → ~/.solocut/templates → built-in; abstract bases hidden
+export function listTemplates(o?: { extraDirs?: string[] }): Template[];   // extraDirs → ~/.solocut/templates → built-in; abstract bases and aliases hidden
+// built-in families: `tech`, `talk` (youtube + tiktok + youtube-shorts derived). Old ids tech-tutorial, tech-short,
+// talk-youtube, talk-tiktok, shorts-from-long are `alias: true` templates that `extends` a family (loadable, not listed).
 export function loadTemplate(id: string, o?: { extraDirs?: string[] }): Template;  // `extends` (deep merge; arrays replace); id must equal folder name
 export function generateAgentsMd(t: Template, project: { dir: string; title: string; lang: 'ja'|'en' }): string;
 export const CLAUDE_MD = '@AGENTS.md\n';
 export type StepId = 'ingest'|'sync'|'transcribe'|'rough-cut'|'multicam'|'captions'|'sfx'|'layout'|'preview'|'check'|'review'|'final'|'thumbnail'|'metadata';
 export interface StepState { step: StepId; state: 'todo'|'running'|'done'|'needs-human'|'skipped'; note?: string; at?: string }
-export interface NextStep { step: StepId | 'done'; state: 'ready'|'needs-human'|'done'; why: string; do: string;
+export type PipelineStep = StepId | 'publish' | `derive:${Variant}` | `check:${Variant}` | `final:${Variant}`;   // Variant = 'tiktok'|'youtube-shorts'
+export function derivedTargets(t): Variant[];          // outputs with derive + enabled
+export function expandPipeline(t): PipelineStep[];      // after check: derive:<v>, check:<v>; after final: final:<v>; then publish
+export function splitStep(s): { step: StepId|'derive'|'publish'; variant?: Variant }; export function depsOf(t, s): PipelineStep[];
+export interface NextStep { step: PipelineStep | 'done'; variant?: Variant; state: 'ready'|'needs-human'|'done'; why: string; do: string;
   commands: string[]; prompt?: string; blocking?: string[]; meanwhile?: StepId }
 export function nextStep(template: Template, status: StepState[], ctx: { hasTakes: boolean; hasTranscript: boolean;
-  openItems: number; lastCheckFailed: number; openItemRefs?: string[]; autopilot?: boolean; stopBefore?: string[]; lang?: 'ja'|'en' }): NextStep;
+  openItems: number; lastCheckFailed: number; openItemRefs?: string[]; autopilot?: boolean; stopBefore?: string[]; lang?: 'ja'|'en';
+  variants?: Partial<Record<Variant, { exists: boolean; stale: boolean; lastCheckFailed: number }>> }): NextStep;
+  // derive:<v> passes only when the variant exists and is not stale (main changed → back to derive:<v>, prompt 'vertical');
+  // check:<v> needs that variant's lastCheckFailed = 0; publish always waits for a human, even on autopilot.
   // pass conditions: ingest needs takes; transcribe needs the transcript file; rough-cut done needs openItems = 0;
   // check done needs lastCheckFailed = 0; review always waits for a human (autopilot skips it); autopilot never skips
   // needs-human sync and stops before stopBefore steps. While waiting, `meanwhile` names a later step whose deps passed.
-export function initialStatus(t): StepState[]; export const STEP_DEPS; export function stepText(step, lang);
+export function initialStatus(t): StepState[] /* expanded pipeline */; export const STEP_DEPS; export function stepText(step, lang, variants?);
 ```
 
 ## @solocut/archive
@@ -427,7 +451,7 @@ export function parseAnswers(raw: unknown, q: Question[]): DecisionAnswer[];
 Project dir = nearest ancestor with `solocut.json` (or `--project`). Human output in the project language.
 `main(argv: string[], io?: { cwd; stdout; stderr; env; readStdin? }): Promise<number>`; bin: `packages/cli/src/bin.ts`.
 
-Commands (v0.1): `init [dir] | --dir <dir> --template --title --lang --no-git` (no folder → cwd), `status`, `next [--autopilot] [--with-prompt]`,
+Commands (v0.1; `--variant tiktok|youtube-shorts` is global, see the docs/18 section): `init [dir] | --dir <dir> --template --title --lang --no-git` (no folder → cwd), `status`, `next [--autopilot] [--with-prompt]`,
 `step <step> <state> [--note]`, `takes`, `ingest` (media/takes/*/take.json → sources with clock offsets + NG/important
 markers; VFR/webm → CFR proxy in derived/proxies), `import <file> [--take] [--kind] [--role] [--id]`, `sync [--take]`,
 `transcribe [--take] [--source] [--model]` (whisper-cli `-ml 1 -sow -ojf`; derived/transcripts/main.json, word times in
@@ -437,9 +461,16 @@ the take clock), `analyze`, `propose cuts [--replace] [--dry-run]`, `edit <op> -
 renders/<target>/<title>.mp4, sets outputs[].render, auto-registers in the archive), `frame --at <frame|timecode>`
 (extracted from the up-to-date preview), `check [--only failed]` (checks/<run>/report.{md,json}, review.lastCheck),
 `tl summary|show|range|query|why`, `past list|search|show|timeline|compare|reuse|register`, `config get|set|schema|path`,
-`prompts list|show [--var k=v]`, `templates`, `lib list|install ffmpeg|whisper|whisper-small|all`, `doctor`, `version`,
-`thumb candidates|gen`, `meta show|set|write`, `feedback import|list|show|done`, `mcp`.
-Progress goes to stderr: one redrawn line on a TTY, otherwise at most one line per 10 % (silent with `--json`).
+`prompts list|show [--var k=v]`, `templates`, `lib list|install ffmpeg|whisper|whisper-small|fonts|all` (all = ffmpeg, whisper,
+fonts), `doctor`, `version`, `derive`, `thumb candidates|gen|pick`, `meta [show]|set|write`, `feedback import|set|update|list|show|done`,
+`publish record`, `mcp`.
+Progress goes to stderr: one redrawn line (`\r`) on a TTY, otherwise at most one line per 10 %. With `--json` it is NDJSON on
+stderr, one line per whole percent: `{"progress":{"task":"ffmpeg"|"whisper"|"render"|…,"fraction":0.42,"label":"…", …extra}}`;
+the final result is still the single JSON object on stdout.
+API keys: env `SOLOCUT_<REF>_API_KEY` where REF is the settings key ref upper-cased (`SOLOCUT_OPENAI_API_KEY`,
+`SOLOCUT_GEMINI_API_KEY`, `SOLOCUT_DECIDE_API_KEY`, `SOLOCUT_TYPESAFE_API_KEY`), then the provider's own env (`OPENAI_API_KEY`, …).
+Fonts: render (when captions/scenes/telops/keystrokes exist) and thumb call `ensureTool('fonts')` (env `SOLOCUT_FONTS` dir →
+managed → download; `SOLOCUT_OFFLINE=1` skips the download with a warning) and pass the directory to libass.
 
 - `thumb candidates [--n 6] [--every 2]`: samples the (fresh) preview at segment middles and every N s, scores
   sharpness / exposure / contrast (+ the decision model's "eyes open, sharp, good expression" when configured), keeps the
@@ -453,8 +484,12 @@ Progress goes to stderr: one redrawn line on a TTY, otherwise at most one line p
   Solocut as its own layer: `renders/thumbnails/title-<format>.svg` is always written; it is composited directly when
   ffmpeg has an SVG decoder (librsvg), else the same layout is drawn with libass; neither → error `ffmpeg-features`.
   Output `renders/thumbnails/{youtube-N.jpg 1280×720, shorts-N.jpg 1080×1920}` (≤ 2 MB), bases `base-*.png`;
-  `outputs[].thumbnail` is set (youtube → youtube-1, vertical targets → shorts-1). Fonts: libass/fontconfig by name
-  ("Noto Sans JP"), or `SOLOCUT_FONTS_DIR`.
+  `outputs[].thumbnail` is set (youtube → youtube-1, vertical targets → shorts-1). Fonts: the managed `fonts` tool
+  (auto-installed) or env `SOLOCUT_FONTS`, then fontconfig by name ("Noto Sans JP").
+  With `--variant v` everything goes to `renders/thumbnails/<v>/` and only that variant's output is set; candidates
+  to `checks/thumbs/<v>/`. The thumbnail step is done once every video has a thumbnail.
+- `thumb pick <image>` (project-relative or absolute image inside the project): sets that image as the thumbnail of the
+  current video's targets (`--variant` for a derived one).
 - `meta set [--target t]… --title … [--description …|--description-file f] [--tags a,b] [--candidates …]… |
   --file meta.json` (object, or keyed by target) → `outputs[].metadata`, `renders/<target>/metadata.md` (description +
   YouTube chapters from the outline when valid: ≥ 3, first at 00:00, each ≥ 10 s + credits) and `credits.txt` (unique
@@ -483,13 +518,28 @@ Progress goes to stderr: one redrawn line on a TTY, otherwise at most one line p
   `feedback/<id>/{feedback.md, NN.png (frame with strokes via libass, else drawbox), items.json, session.json,
   voice.wav}`, `review.feedback[]` and a `feedback` open item. `--organize` asks the agent's print mode (claude -p /
   codex exec --output-schema) only for titles and requests; quotes always come from the transcript.
-  `feedback list [--open] | show <id> | done <id>`.
+  `feedback list [--open] | show <id> | done <id>`. `--variant v` imports against that variant's preview/timeline (the
+  variant is stored in items.json; show/done/set follow it).
+  The desktop app may instead write its event list (converted internally; boxes become closed strokes, text → notes):
+
+  ```jsonc
+  { "schema": 1, "id": "fb_…"?, "createdAt": "ISO"?, "fps": { "num": 30, "den": 1 }?, "video": { "path": "…" }?,
+    "micFile": "mic.wav"?, "micStartMs": 0?,
+    "events": [{ "t_ms": 1200, "kind": "play"|"pause"|"seek"|"stroke"|"box"|"text", "frame": 45,
+                 "data": { "points": [[x,y],…] } | { "x","y","w","h" } | { "text": "…" } }] }   // a given "id" is used as the fb id
+  ```
+- `feedback set|update <id> --items <file.json>`: the app's edited list (array or `{ items }`; each `{ n|index, title?, request?,
+  notes? }`, order = new order, missing = deleted) → renumbered 1..n, NN.png renamed along, items.json/feedback.md rewritten.
 - `mcp [--project dir]`: MCP server over stdio (newline-delimited JSON-RPC 2.0; protocol 2025-06-18 / 2025-03-26 /
   2024-11-05). Tools: status, next, step, tl_summary, tl_show, tl_range, tl_query, tl_why, edit, undo, redo, validate,
-  propose_cuts, captions_build, render, check, frame (also returns the PNG), past_list, past_search, past_show,
-  past_timeline, past_reuse, feedback_list, feedback_show, meta_set. Each runs the CLI command with `--json`; failures
-  are `isError: true` results.
-History: `.solocut/history.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
+  propose_cuts, captions_build, derive, render (`all`), check (`all`), thumb_pick, frame (also returns the PNG), past_list,
+  past_search, past_show, past_timeline, past_reuse, feedback_list, feedback_show, meta_set. Every tool also takes optional
+  `project` and `variant`. Each runs the CLI command in-process with `--json`; failures are `isError: true` results.
+- `publish record --target youtube|tiktok|youtube-shorts --status draft|scheduled|published|failed [--url <http(s)>]
+  [--at ISO] [--variant v]`: `--url` required for published/scheduled; sets `outputs[].publish = { status, url?, at }` on the
+  video that owns the target (tiktok/shorts → their variant when it exists). The `publish` step is done when every
+  video's targets are published or scheduled, else needs-human with the pending list.
+History: `.solocut/history.jsonl` (main) / `.solocut/history.<variant>.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.
 `sync` writes results with `updateSource` (offset, drift, sync); `transcribe` sets `timeline.transcript` with `setTranscript`.
@@ -520,7 +570,24 @@ Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls ar
 // past list | past search  → { entries: ArchiveEntry[] }      past show → { entry: ArchiveEntry; stats: ArchiveStats }
 // templates      → { templates: { id; version; name{ja,en}; kind; targets; canvas; dir; description? }[]; errors: string[] }
 // render         → { output: string /* project-relative */; quality; target?; reused; rendered; seconds; warnings: string[] }
-// check          → { run; passed; failed; needsHuman; report: string; findings: CheckFinding[] }
+// check          → { run; passed; failed; needsHuman; report: string; findings: CheckFinding[]; variant }   (run id gets "-<variant>")
+// render --all   → { results: (render shape + variant)[] }      check --all → { results: (check shape)[]; failed: number }
+// status adds    → { variant: 'main'|Variant; variants: { [v]: { exists; stale; lastCheckFailed } } }; steps are the expanded pipeline
+// derive         → { target; variant; path: "variants/<v>/timeline.json"; selection: string[]; segments: number; durationSec;
+//                    maxSec; captions: number; kept: string[] /* human edits carried over */; replaced: boolean; warnings: string[] }
+// feedback import / set → { id; dir; path; variant; count; items: { n; frame; timecode; image: "feedback/<id>/NN.png"; spoken; request;
+//                    title; notes: string[]; targets: { kind; id; label }[] }[]; organizedBy: string|null; warnings }   (set: no dir/variant/warnings)
+// feedback list  → { feedback: { id; status: 'open'|'done'; items: number; path; … }[] }
+// feedback show  → { id; variant; markdown; items /* raw items.json */; view /* same as import items */ }
+// thumb candidates → { variant; candidates: { frame; timecode; image /* project-relative */; score; heuristic; model? }[]; warnings }
+// thumb gen      → { variant; frame; timecode; title; typeset: 'svg'|'ass'|'none'; images: { path; provider; format: 'youtube'|'shorts';
+//                    size: "1280x720"|"1080x1920" }[]; thumbnails: { format; file; base; provider }[]; errors }
+// thumb pick     → { variant; target; thumbnail: { path; frame } }
+// meta | meta show → { outputs: { variant; target; title; titleCandidates; description; tags; chapters: { at: "00:00"; sec; title }[];
+//                    credits: string[]; render?: { path }; thumbnail?: { path; frame }; captions?: { srt }; publish? }[];
+//                    chapters; credits; assets }   (all videos; --variant / --target filter)
+// meta set       → { targets; files; metadata }
+// publish record → { variant; target; publish: { status; url?; at }; pending: string[] }
 // failure (any command, exit 1, or 2 for usage) → { ok: false, error: { code: string; message: string; details?: unknown } }
 ```
 
@@ -537,7 +604,7 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
 
 ```jsonc
 // solocut.json
-{ "schema": 1, "id": "prj_…", "title": "…", "template": { "id": "talk-youtube", "version": "1" }, "language": "ja",
+{ "schema": 1, "id": "prj_…", "title": "…", "template": { "id": "talk", "version": "2" }, "language": "ja",
   "created": "ISO", "tools": { "ffmpeg": "9.0.2" } }
 ```
 
@@ -568,7 +635,16 @@ As in docs/02: `solocut.json`, `timeline.json`, `AGENTS.md`, `CLAUDE.md` (`@AGEN
   the mapped range; sfx/markers re-timed (dropped when cut); anchored scenes stay anchored to the renamed segment;
   voice loudness/peak from the target preset; `outputs` = [the target]. Source paths stay project-relative, so compile
   a variant with `projectDir` = the project root.
-- cli (platform): `solocut derive --target tiktok|youtube-shorts [--max-sec N] [--selection id,id] [--json]`; global `--variant <target>`
+- Implemented (platform, 2026-10-11): `solocut derive --target t [--max-sec N] [--selection id,id] [--replace] [--no-captions]`.
+  Selection: explicit, else the `sameAs` variant's selection (Shorts reuses TikTok's, trimmed to its maxSec), else
+  pickHighlights with the decision-model scores when configured. An existing variant needs `--replace` (or is stale);
+  re-derive is one undoable edit on the variant history and keeps human-decided telop/image overlays, scenes, sfx, masks
+  and the output's metadata/thumbnail/publish. Captions are rebuilt with the target's style (`outputs.<t>.captions`).
+  Files per variant: `variants/<v>/timeline.json`, `.solocut/history.<v>.jsonl`, `renders/<v>/preview.mp4`,
+  `captions/<v>.{ass,srt}`, final `renders/<v>/<title>.mp4`. A command with `--variant v` before derive fails with
+  `no-variant` (hint: solocut derive). Status steps: `derive:<v>` done when it exists and is fresh (stale → back to todo),
+  `check:<v>` reset to todo after a re-derive, `final:<v>`, `publish`.
+- cli (plan): `solocut derive --target tiktok|youtube-shorts [--max-sec N] [--selection id,id] [--json]`; global `--variant <target>`
   on every timeline command (edit/undo/redo/history per variant: `.solocut/history.<variant>.jsonl`); `render --all`, `check --all`,
   `thumb ... --variant`, `meta --variant`; `status`/`next` include per-variant steps
   (`derive:tiktok`, `check:tiktok`, `derive:youtube-shorts`, `check:youtube-shorts`, `final:*`, `publish`). Templates: replace the five

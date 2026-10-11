@@ -44,7 +44,8 @@ export function handleMediaProtocol(): void {
     }
     const type = contentTypeFor(path);
     const r = parseRange(req.headers.get('range'), size);
-    const common = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' };
+    // CORS: the analysis window's workers (opaque origin) fetch wasm and language data through this scheme
+    const common = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' };
     if (r.kind === 'invalid') {
       return new Response(null, { status: 416, headers: { ...common, 'Content-Range': `bytes */${size}` } });
     }

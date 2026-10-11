@@ -1290,3 +1290,13 @@ textarea.input {
   bottom: 0;
   z-index: 3;
 }
+.an-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.an-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

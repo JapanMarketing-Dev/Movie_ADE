@@ -35,7 +35,7 @@ function devCsp(): Plugin {
     apply: 'serve',
     transformIndexHtml(html) {
       return html
-        .replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+        .replace("script-src 'self'", "script-src 'self' 'unsafe-inline' http://localhost:*")
         .replace("connect-src 'self'", "connect-src 'self' ws://localhost:* http://localhost:*");
     },
   };
@@ -71,7 +71,7 @@ export default defineConfig({
     resolve: { alias: { '@shared': resolve(__dirname, 'src/shared') } },
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/renderer/index.html') },
+        input: { index: resolve(__dirname, 'src/renderer/index.html'), analysis: resolve(__dirname, 'src/renderer/analysis.html') },
       },
     },
   },

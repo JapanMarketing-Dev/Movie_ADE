@@ -151,6 +151,12 @@ describe('mcp server', () => {
     expect(calls.at(-1)).toEqual(['render', '--final', '--target', 'youtube', '--json', '--project', '/other']);
     await server.handle({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'meta_set', arguments: { title: 'T', tags: ['a', 'b'] } } });
     expect(calls.at(-1)).toEqual(['meta', 'set', '--title', 'T', '--tags', 'a,b', '--json', '--project', '/p']);
+    await server.handle({ jsonrpc: '2.0', id: 61, method: 'tools/call', params: { name: 'derive', arguments: { target: 'tiktok', selection: ['seg_1', 'seg_2'], maxSec: 60 } } });
+    expect(calls.at(-1)).toEqual(['derive', '--target', 'tiktok', '--max-sec', '60', '--selection', 'seg_1,seg_2', '--json', '--project', '/p']);
+    await server.handle({ jsonrpc: '2.0', id: 62, method: 'tools/call', params: { name: 'tl_summary', arguments: { variant: 'tiktok' } } });
+    expect(calls.at(-1)).toEqual(['tl', 'summary', '--json', '--project', '/p', '--variant', 'tiktok']);
+    await server.handle({ jsonrpc: '2.0', id: 63, method: 'tools/call', params: { name: 'check', arguments: { all: true, variant: 'main' } } });
+    expect(calls.at(-1)).toEqual(['check', '--all', '--json', '--project', '/p']);
   });
 
   it('CLI failures become isError results; bad args are reported without running', async () => {
