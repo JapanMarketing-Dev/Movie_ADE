@@ -110,7 +110,7 @@ export const en = {
       ['ng', 'frame 01:02:11', 'email visible → mosaic'],
     ],
     bullets: [
-      'Runs locally with Ollama, or with your own API key (TypeSafe, OpenAI, Anthropic, Gemini, Workers AI)',
+      'Runs on your Claude Code / Codex / Gemini subscription by default (no API key), or locally with Ollama',
       'Spending limits per project and per day, with a log of every call',
       'Only frames and transcript text are sent, and only after you agree',
     ],
@@ -162,7 +162,7 @@ export const en = {
   faq: {
     h2: 'FAQ',
     items: [
-      ['Is it really free?', 'Yes. Solocut is MIT-licensed. The editing intelligence comes from the agent subscription you already have (Claude Code, Codex…), and the decision model can run locally.'],
+      ['Is it really free?', 'Yes. Solocut is MIT-licensed and has no AI server of its own. Editing, checks, feedback and thumbnails all run on the AI subscription you already have (Claude Code, Codex, Gemini CLI), and transcription runs on your machine. No API key is required.'],
       ['Can I use it today?', 'Not yet. Solocut is being designed and built in the open. Watch the GitHub repository to get the first release.'],
       ['Do I need to know how to edit?', 'No. You record and talk. The template and your agent do the editing; you review the result.'],
       ['Is Remotion required?', 'No. The render engine is FFmpeg. Remotion is an optional add-on for motion graphics, and Solocut shows its license terms before installing it. HyperFrames and Revideo are alternatives.'],
@@ -299,7 +299,7 @@ export const ja = {
       ['ng', 'フレーム 01:02:11', 'メールが見える → モザイク'],
     ],
     bullets: [
-      'Ollama で完全ローカル、または自分の API キーで（TypeSafe、OpenAI、Anthropic、Gemini、Workers AI）',
+      '既定はお使いの Claude Code / Codex / Gemini のサブスクで動作（API キー不要）。Ollama で完全ローカルにも',
       'プロジェクトごと・1日ごとの費用の上限と、すべての呼び出しの記録',
       '送るのはフレーム画像と文字起こしだけ。同意してからのみ',
     ],
@@ -351,7 +351,7 @@ export const ja = {
   faq: {
     h2: 'よくある質問',
     items: [
-      ['本当に無料ですか？', 'はい。Solocut は MIT ライセンスです。編集の頭脳には、すでにお持ちのエージェントのサブスクリプション（Claude Code、Codex など）を使い、判定モデルはローカルでも動かせます。'],
+      ['本当に無料ですか？', 'はい。Solocut は MIT ライセンスで、AI のサーバーを持ちません。編集・チェック・フィードバック・サムネイルはすべて、すでにお持ちの AI のサブスク（Claude Code、Codex、Gemini CLI）で動き、文字起こしは端末内で行います。API キーは不要です。'],
       ['今すぐ使えますか？', 'まだです。Solocut は公開の場で設計・開発を進めています。最初のリリースは GitHub のリポジトリを Watch してお待ちください。'],
       ['編集の知識は必要ですか？', 'いりません。撮って話すだけで、テンプレートとエージェントが編集します。あなたは結果を見て直してほしいところを伝えます。'],
       ['Remotion は必須ですか？', 'いいえ。書き出しエンジンは FFmpeg です。Remotion はモーショングラフィックス用の追加オプションで、インストール前に利用条件を表示します。代わりに HyperFrames や Revideo も使えます。'],

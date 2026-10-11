@@ -210,7 +210,7 @@
     <div class="wrap">
       <div class="section-head reveal"><p class="kicker">判定モデル</p><h2>大事なフレームは、すべて最終チェック。</h2><p>まず機械的なチェック（黒コマ、フリーズ、ラウドネス、仕様）。次に判定モデルが、すべてのカットの前後、字幕の切り替わり、モザイクのフレームを見て、型の決まった問いに確率で答えます。自信があるものは自動で反映、迷うものだけがあなたに届きます。</p></div>
       <div class="frames reveal"><div class="frame ok"><div class="img"></div><div class="meta"><b>カット 00:12:04</b>目は開いている · 合格 0.94</div></div><div class="frame ok"><div class="img"></div><div class="meta"><b>字幕 c18</b>セーフエリア内</div></div><div class="frame ask"><div class="img"></div><div class="meta"><b>カット 00:41:07</b>言葉の途中？ 0.58 → 確認へ</div></div><div class="frame ng"><div class="img"></div><div class="meta"><b>フレーム 01:02:11</b>メールが見える → モザイク</div></div></div>
-      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Ollama で完全ローカル、または自分の API キーで（TypeSafe、OpenAI、Anthropic、Gemini、Workers AI）</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>プロジェクトごと・1日ごとの費用の上限と、すべての呼び出しの記録</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>送るのはフレーム画像と文字起こしだけ。同意してからのみ</span></li></ul></div>
+      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>既定はお使いの Claude Code / Codex / Gemini のサブスクで動作（API キー不要）。Ollama で完全ローカルにも</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>プロジェクトごと・1日ごとの費用の上限と、すべての呼び出しの記録</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>送るのはフレーム画像と文字起こしだけ。同意してからのみ</span></li></ul></div>
     </div>
   </section>
 
@@ -288,7 +288,7 @@
     <div class="wrap">
       <div class="section-head"><h2>よくある質問</h2></div>
       <div class="faq">
-        <details><summary>本当に無料ですか？</summary><p>はい。Solocut は MIT ライセンスです。編集の頭脳には、すでにお持ちのエージェントのサブスクリプション（Claude Code、Codex など）を使い、判定モデルはローカルでも動かせます。</p></details>
+        <details><summary>本当に無料ですか？</summary><p>はい。Solocut は MIT ライセンスで、AI のサーバーを持ちません。編集・チェック・フィードバック・サムネイルはすべて、すでにお持ちの AI のサブスク（Claude Code、Codex、Gemini CLI）で動き、文字起こしは端末内で行います。API キーは不要です。</p></details>
         <details><summary>今すぐ使えますか？</summary><p>まだです。Solocut は公開の場で設計・開発を進めています。最初のリリースは GitHub のリポジトリを Watch してお待ちください。</p></details>
         <details><summary>編集の知識は必要ですか？</summary><p>いりません。撮って話すだけで、テンプレートとエージェントが編集します。あなたは結果を見て直してほしいところを伝えます。</p></details>
         <details><summary>Remotion は必須ですか？</summary><p>いいえ。書き出しエンジンは FFmpeg です。Remotion はモーショングラフィックス用の追加オプションで、インストール前に利用条件を表示します。代わりに HyperFrames や Revideo も使えます。</p></details>

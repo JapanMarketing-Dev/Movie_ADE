@@ -210,7 +210,7 @@
     <div class="wrap">
       <div class="section-head reveal"><p class="kicker">Decision model</p><h2>A final check on every frame that matters.</h2><p>Machine checks run first (black frames, freezes, loudness, specs). Then a decision model looks at the frames around every cut, every caption change and every mosaic, and answers typed questions with a probability. Confident answers are applied; uncertain ones come to you.</p></div>
       <div class="frames reveal"><div class="frame ok"><div class="img"></div><div class="meta"><b>cut 00:12:04</b>eyes open · pass 0.94</div></div><div class="frame ok"><div class="img"></div><div class="meta"><b>caption c18</b>in safe area</div></div><div class="frame ask"><div class="img"></div><div class="meta"><b>cut 00:41:07</b>mid-word? 0.58 → you</div></div><div class="frame ng"><div class="img"></div><div class="meta"><b>frame 01:02:11</b>email visible → mosaic</div></div></div>
-      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Runs locally with Ollama, or with your own API key (TypeSafe, OpenAI, Anthropic, Gemini, Workers AI)</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Spending limits per project and per day, with a log of every call</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Only frames and transcript text are sent, and only after you agree</span></li></ul></div>
+      <div class="reveal"><ul class="bullets"><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Runs on your Claude Code / Codex / Gemini subscription by default (no API key), or locally with Ollama</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Spending limits per project and per day, with a log of every call</span></li><li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg><span>Only frames and transcript text are sent, and only after you agree</span></li></ul></div>
     </div>
   </section>
 
@@ -288,7 +288,7 @@
     <div class="wrap">
       <div class="section-head"><h2>FAQ</h2></div>
       <div class="faq">
-        <details><summary>Is it really free?</summary><p>Yes. Solocut is MIT-licensed. The editing intelligence comes from the agent subscription you already have (Claude Code, Codex…), and the decision model can run locally.</p></details>
+        <details><summary>Is it really free?</summary><p>Yes. Solocut is MIT-licensed and has no AI server of its own. Editing, checks, feedback and thumbnails all run on the AI subscription you already have (Claude Code, Codex, Gemini CLI), and transcription runs on your machine. No API key is required.</p></details>
         <details><summary>Can I use it today?</summary><p>Not yet. Solocut is being designed and built in the open. Watch the GitHub repository to get the first release.</p></details>
         <details><summary>Do I need to know how to edit?</summary><p>No. You record and talk. The template and your agent do the editing; you review the result.</p></details>
         <details><summary>Is Remotion required?</summary><p>No. The render engine is FFmpeg. Remotion is an optional add-on for motion graphics, and Solocut shows its license terms before installing it. HyperFrames and Revideo are alternatives.</p></details>
