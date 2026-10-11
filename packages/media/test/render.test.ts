@@ -122,6 +122,23 @@ describe.skipIf(!HAVE_FFMPEG)('executeRenderPlan', () => {
     expect(pr.durationSec).toBeCloseTo(110 / 30, 1);
   });
 
+  it('renders a drifting camera as voice (resampled) and wipe ring/shadow styles', async () => {
+    let t = applyOp(base, { op: 'updateSource', id: 'cam', patch: { drift: 1.01 } }).timeline;
+    const { mic: _m, ...noMic } = t.sources;
+    t = { ...t, sources: noMic };
+    t = applyOp(t, { op: 'setVideo', id: 'seg_b', video: { layout: 'screen-with-wipe', screen: 'scr', camera: 'cam', wipe: { shape: 'circle', corner: 'br', style: 'ring-gradient', size: 0.4 } }, decided: D }).timeline;
+    const r = await render(t, 'out/drift.mp4');
+    expect(countFrames(r.output)).toBe(60);
+    const pr = await probe(r.output);
+    expect(pr.streams.find((s) => s.type === 'audio')!.durationSec!).toBeCloseTo(2, 1);
+    // ring: orange/red pixels just outside the wipe circle (d = 96 at 320x240, bottom-right)
+    const { d, x, y } = { d: 96, x: 320 - 96 - 10, y: 240 - 96 - 10 };
+    const ringTop = regionLuma(r.output, 45, x + d / 2 - 4, y - 2, 8, 2);
+    expect(ringTop).toBeGreaterThan(60);
+    const shadow = applyOp(t, { op: 'setVideo', id: 'seg_b', video: { layout: 'screen-with-wipe', screen: 'scr', camera: 'cam', wipe: { shape: 'rounded', corner: 'tl', style: 'shadow' } }, decided: D }).timeline;
+    expect(countFrames((await render(shadow, 'out/shadow.mp4')).output)).toBe(60);
+  });
+
   it('fill mask lands where the source coordinates say', async () => {
     const t = applyOp(base, { op: 'addMask', mask: { id: 'mask_f', kind: 'fill', source: 'cam', reason: 'face', decided: D, track: [
       { frame: 0, box: { x: 0, y: 0, w: 160, h: 120 }, confidence: 1 }, { frame: 120, box: { x: 0, y: 0, w: 160, h: 120 }, confidence: 1 }] } }).timeline;

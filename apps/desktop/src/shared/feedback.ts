@@ -62,27 +62,77 @@ function parseTarget(t: unknown): FeedbackTarget | null {
   return out;
 }
 
-export function parseFeedbackItem(raw: unknown, i: number): FeedbackItem | null {
+/** One CLI items.json entry -> app item. `timecode` comes from the caller (it knows the fps). */
+export function parseFeedbackItem(raw: unknown, i: number, dir: string, timecode: (frame: number) => string = String): FeedbackItem | null {
   if (!isObj(raw)) return null;
+  const n = typeof raw.index === 'number' ? raw.index : typeof raw.n === 'number' ? raw.n : i + 1;
   const frame = typeof raw.frame === 'number' ? raw.frame : 0;
   const item: FeedbackItem = {
-    n: typeof raw.n === 'number' ? raw.n : i + 1,
+    n,
     frame,
-    timecode: typeof raw.timecode === 'string' ? raw.timecode : '',
-    spoken: typeof raw.spoken === 'string' ? raw.spoken : '',
-    request: typeof raw.request === 'string' ? raw.request : typeof raw.text === 'string' ? raw.text : '',
+    timecode: timecode(frame),
+    spoken: typeof raw.speech === 'string' ? raw.speech : typeof raw.spoken === 'string' ? raw.spoken : '',
+    request: typeof raw.request === 'string' ? raw.request : typeof raw.title === 'string' ? raw.title : '',
+    notes: Array.isArray(raw.notes) ? raw.notes.filter((x): x is string => typeof x === 'string') : [],
     targets: Array.isArray(raw.targets) ? raw.targets.map(parseTarget).filter((x): x is FeedbackTarget => x !== null) : [],
+    image: typeof raw.image === 'string' ? raw.image : `${dir}/${String(n).padStart(2, '0')}.png`,
   };
-  if (typeof raw.image === 'string') item.image = raw.image;
+  if (typeof raw.title === 'string') item.title = raw.title;
   return item;
 }
 
-/** `feedback import --json` / `feedback update --json` output -> FeedbackImport (null if unusable). */
-export function parseFeedbackImport(input: unknown): FeedbackImport | null {
+/** `feedback show <id> --json` ({ id, markdown, items }) -> FeedbackImport (null if unusable). */
+export function parseFeedbackShow(input: unknown, timecode?: (frame: number) => string): FeedbackImport | null {
   const o = isObj(input) && isObj(input.feedback) ? input.feedback : input;
   if (!isObj(o) || typeof o.id !== 'string') return null;
-  const items = Array.isArray(o.items) ? o.items.map(parseFeedbackItem).filter((x): x is FeedbackItem => x !== null) : [];
-  return { id: o.id, dir: typeof o.dir === 'string' ? o.dir : `feedback/${o.id}`, items };
+  const dir = `feedback/${o.id}`;
+  const items = Array.isArray(o.items)
+    ? o.items.map((x, i) => parseFeedbackItem(x, i, dir, timecode)).filter((x): x is FeedbackItem => x !== null)
+    : [];
+  return { id: o.id, dir, items };
+}
+
+/**
+ * Applies the user's edits to the raw items.json entries: keeps only the given items (by index), sets their
+ * request, and renumbers. Unknown fields of the CLI entries are preserved.
+ */
+export function applyItemEdits(raw: unknown[], edited: FeedbackItem[]): Record<string, unknown>[] {
+  const byIndex = new Map<number, Record<string, unknown>>();
+  for (const r of raw) if (isObj(r) && typeof r.index === 'number') byIndex.set(r.index, r);
+  return edited
+    .map((e) => {
+      const r = byIndex.get(e.n);
+      return r ? { ...r, request: e.request } : null;
+    })
+    .filter((x): x is Record<string, unknown> => x !== null)
+    .map((r, i) => ({ ...r, index: i + 1 }));
+}
+
+/** Minimal feedback.md (docs/04 format), used only when the CLI cannot rewrite it. */
+export function feedbackMarkdown(id: string, items: FeedbackItem[], lang: 'ja' | 'en'): string {
+  const L = lang === 'ja' ? { req: '要望', said: '発話（原文）', note: 'メモ', img: '画像', tgt: '対象' } : { req: 'Request', said: 'Said', note: 'Note', img: 'Image', tgt: 'Targets' };
+  const out = [`# Feedback ${id}`, ''];
+  for (const it of items) {
+    out.push(`## ${it.n}. [${it.timecode}] ${it.title ?? it.request.slice(0, 30)}`);
+    if (it.request) out.push(`- ${L.req}: ${it.request}`);
+    if (it.spoken) out.push(`- ${L.said}: 「${it.spoken}」`);
+    for (const n of it.notes) out.push(`- ${L.note}: ${n}`);
+    out.push(`- ${L.img}: ./${String(it.n).padStart(2, '0')}.png`);
+    if (it.targets.length) out.push(`- ${L.tgt}: ${it.targets.map((t) => `${t.kind} ${t.id}${t.label ? `（${t.label}）` : ''}`).join('、')}`);
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+/** Rectangle outline as a closed stroke (the CLI only knows strokes). */
+export function boxPoints(b: { x: number; y: number; w: number; h: number }): [number, number][] {
+  return [
+    [b.x, b.y],
+    [b.x + b.w, b.y],
+    [b.x + b.w, b.y + b.h],
+    [b.x, b.y + b.h],
+    [b.x, b.y],
+  ];
 }
 
 /** Renumbers items 1..n after deletions. */

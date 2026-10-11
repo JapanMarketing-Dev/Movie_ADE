@@ -2,6 +2,9 @@
 // (which never touches Node) type-checks on its own. Shapes mirror docs/dev/CONTRACTS.md loosely.
 
 export type Lang = 'ja' | 'en';
+/** docs/18: the main video (YouTube 16:9) and the two vertical variants derived from it. */
+export type Variant = 'main' | 'tiktok' | 'youtube-shorts';
+export const VARIANTS: Variant[] = ['main', 'tiktok', 'youtube-shorts'];
 export type OsName = 'mac' | 'win' | 'linux';
 
 export interface AppInfo {
@@ -36,6 +39,10 @@ export interface TemplateInfo {
   name: { ja: string; en: string };
   kind: 'tech' | 'talk';
   targets: string[];
+  /** targets in the template's `outputs` map (docs/18), e.g. youtube, tiktok, youtube-shorts */
+  outputs: string[];
+  description?: string;
+  alias?: boolean; // old id kept as an alias of a family template
 }
 
 export type StepId = string;
@@ -94,6 +101,10 @@ export interface TimelineOverview {
 
 export interface ProjectSnapshot {
   project: ProjectInfo;
+  variant: Variant;
+  /** variants that have a timeline (main always) */
+  variants: Variant[];
+  stale?: boolean; // the variant was derived from an older main timeline
   steps: StepState[];
   next?: NextStep;
   overview?: TimelineOverview;
@@ -239,12 +250,14 @@ export interface FeedbackTarget {
   label?: string;
 }
 export interface FeedbackItem {
-  n: number;
+  n: number; // CLI items.json `index`
   frame: number;
   timecode: string;
-  image?: string; // project-relative
-  spoken: string;
+  image?: string; // project-relative (feedback/<id>/NN.png)
+  spoken: string; // CLI `speech`
+  title?: string;
   request: string;
+  notes: string[];
   targets: FeedbackTarget[];
 }
 export interface FeedbackImport {
@@ -252,23 +265,16 @@ export interface FeedbackImport {
   dir: string; // project-relative, e.g. feedback/<id>
   items: FeedbackItem[];
 }
-export type FeedbackEventKind = 'play' | 'pause' | 'seek' | 'stroke' | 'box' | 'text';
-export interface FeedbackEvent {
-  t_ms: number; // since the mic started
-  kind: FeedbackEventKind;
-  frame: number; // timeline frame shown when the event happened
-  videoTime: number;
-  data?: { points?: [number, number][]; x?: number; y?: number; w?: number; h?: number; text?: string };
-}
+/** session.json read by `solocut feedback import` (CONTRACTS.md). Times are ms on the session clock (mic start = 0). */
 export interface FeedbackSession {
   schema: 1;
-  id: string;
   createdAt: string;
-  fps: { num: number; den: number };
-  video: { path: string; durationSec: number };
-  micFile: string | null;
-  micStartMs: number;
-  events: FeedbackEvent[];
+  audio?: string;
+  audioStartMs?: number;
+  playback: { atMs: number; state: 'playing' | 'paused'; frame: number }[];
+  strokes: { startMs: number; endMs: number; frame: number; color: string; width: number; points: [number, number][] }[];
+  notes: { atMs: number; text: string; frame: number }[];
+  variant?: string;
 }
 
 // ---------- thumbnails / publish ----------

@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  concatLine, crossCorrelateOffset, fft, inputsOf, loudnessFinding, measuredLoudnorm, nextPow2, onsetEnvelope, parseBlackLog, parseFreezeLog,
+  concatLine, crossCorrelateOffset, defaultFontsDir, killTree, withFontsDir, fft, inputsOf, loudnessFinding, measuredLoudnorm, nextPow2, onsetEnvelope, parseBlackLog, parseFreezeLog,
   parseLoudnormLog, parseProbe, parseProgressLine, parseRational, parseSilenceLog, robustLine, specFinding, xcorr,
 } from '../src/index.js';
 import type { ProbeResult } from '../src/index.js';
@@ -278,5 +281,50 @@ describe('render helpers', () => {
     expect(inputsOf(['-ss', '1', '-i', 'a.mp4', '-loop', '1', '-i', 'b.png', '-map', '[v]'])).toEqual(['a.mp4', 'b.png']);
     expect(inputsOf(['-i'])).toEqual([]);
     expect(concatLine("/tmp/it's here.mp4")).toBe("file '/tmp/it'\\''s here.mp4'");
+  });
+});
+
+describe('process and font helpers', () => {
+  it('killTree falls back when there is no pid or taskkill is unavailable', async () => {
+    let calls = 0;
+    killTree(undefined, () => calls++);
+    expect(calls).toBe(1);
+    if (process.platform !== 'win32') {
+      await new Promise<void>((resolve) => killTree(999999, () => { calls++; resolve(); }, 'win32')); // no taskkill here → fallback
+      expect(calls).toBe(2);
+    }
+  });
+  it('withFontsDir adds fontsdir only where missing', () => {
+    const args = ['-i', 'a.mp4', '-filter_complex', '[0:v]setpts=PTS+1/TB,subtitles=filename=a.ass:original_size=1920x1080,subtitles=filename=b.ass:fontsdir=/x:original_size=1920x1080,setpts=PTS-STARTPTS[v]', '-map', '[v]'];
+    const out = withFontsDir(args, '/fonts dir');
+    expect(out[3]).toBe('[0:v]setpts=PTS+1/TB,subtitles=filename=a.ass:fontsdir=/fonts dir:original_size=1920x1080,subtitles=filename=b.ass:fontsdir=/x:original_size=1920x1080,setpts=PTS-STARTPTS[v]');
+    expect(args[3]).not.toContain('/fonts dir'); // not mutated
+    expect(withFontsDir(['-i', 'a'], '/f')).toEqual(['-i', 'a']);
+    const noSubs = ['-filter_complex', '[0:v]null[v]'];
+    expect(withFontsDir(noSubs, '/f')).toBe(noSubs);
+  });
+  it('defaultFontsDir finds the folder with the font files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'solocut-fonts-'));
+    const saved = { fonts: process.env.SOLOCUT_FONTS, home: process.env.SOLOCUT_HOME };
+    try {
+      mkdirSync(join(root, 'home', 'tools', 'fonts', 'noto', 'ttf'), { recursive: true });
+      writeFileSync(join(root, 'home', 'tools', 'fonts', 'noto', 'ttf', 'NotoSansJP-Bold.ttf'), '');
+      writeFileSync(join(root, 'home', 'tools', 'fonts', 'noto', 'ttf', 'NotoSansJP-Black.otf'), '');
+      writeFileSync(join(root, 'home', 'tools', 'fonts', 'OFL.txt'), '');
+      delete process.env.SOLOCUT_FONTS;
+      process.env.SOLOCUT_HOME = join(root, 'home');
+      expect(defaultFontsDir()).toBe(join(root, 'home', 'tools', 'fonts', 'noto', 'ttf'));
+      process.env.SOLOCUT_FONTS = join(root, 'nope');
+      expect(defaultFontsDir()).toBeNull();
+      process.env.SOLOCUT_FONTS = join(root, 'home', 'tools', 'fonts', 'noto');
+      expect(defaultFontsDir()).toBe(join(root, 'home', 'tools', 'fonts', 'noto', 'ttf'));
+      delete process.env.SOLOCUT_FONTS;
+      process.env.SOLOCUT_HOME = join(root, 'empty');
+      expect(defaultFontsDir()).toBeNull();
+    } finally {
+      if (saved.fonts === undefined) delete process.env.SOLOCUT_FONTS; else process.env.SOLOCUT_FONTS = saved.fonts;
+      if (saved.home === undefined) delete process.env.SOLOCUT_HOME; else process.env.SOLOCUT_HOME = saved.home;
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -32,6 +32,7 @@ import type {
   TrackOpen,
   UpdateState,
   ValidationResult,
+  Variant,
 } from './types';
 
 /** renderer -> main, request/response (ipcRenderer.invoke / ipcMain.handle) */
@@ -47,8 +48,8 @@ export interface InvokeMap {
   'project:recent': { args: []; result: RecentProject[] };
   'project:create': { args: [opts: { parentDir: string; title: string; template: string; language: 'ja' | 'en' }]; result: CliResult<ProjectInfo> };
   'project:open': { args: [dir: string]; result: ProjectInfo };
-  'project:snapshot': { args: [dir: string]; result: ProjectSnapshot };
-  'project:review': { args: [dir: string, item: ReviewItem, decision: 'accept' | 'reject']; result: CliResult };
+  'project:snapshot': { args: [dir: string, variant?: Variant]; result: ProjectSnapshot };
+  'project:review': { args: [dir: string, item: ReviewItem, decision: 'accept' | 'reject', variant?: Variant]; result: CliResult };
   'project:readScript': { args: [dir: string]; result: string | null };
   'project:cli': { args: [dir: string, args: string[]]; result: CliResult };
 
@@ -92,12 +93,12 @@ export interface InvokeMap {
   'update:restart': { args: []; result: void };
 
   'feedback:begin': { args: [dir: string]; result: { id: string; dir: string } };
-  'feedback:finish': { args: [dir: string, id: string, session: FeedbackSession]; result: CliResult<FeedbackImport> };
-  'feedback:update': { args: [dir: string, id: string, items: FeedbackItem[]]; result: CliResult<FeedbackImport> };
+  'feedback:finish': { args: [dir: string, id: string, session: FeedbackSession, variant?: Variant]; result: CliResult<FeedbackImport> };
+  'feedback:update': { args: [dir: string, id: string, items: FeedbackItem[], variant?: Variant]; result: CliResult<FeedbackImport> };
 
-  'thumbs:candidates': { args: [dir: string]; result: CliResult<ThumbCandidate[]> };
+  'thumbs:candidates': { args: [dir: string, variant?: Variant]; result: CliResult<ThumbCandidate[]> };
   'thumbs:existing': { args: [dir: string]; result: ThumbImage[] };
-  'thumbs:generate': { args: [dir: string, o: { frame: number; n: number; provider?: string; title?: string }]; result: CliResult<ThumbImage[]> };
+  'thumbs:generate': { args: [dir: string, o: { frame: number; n: number; provider?: string; title?: string; variant?: Variant }]; result: CliResult<ThumbImage[]> };
   'thumbs:favorite': { args: [dir: string, path: string, on: boolean]; result: string[] };
   'thumbs:providers': { args: []; result: string[] };
 

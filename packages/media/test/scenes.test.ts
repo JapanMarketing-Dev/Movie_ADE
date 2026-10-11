@@ -1,26 +1,31 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Decided, Timeline } from '@solocut/core';
-import { applyOps, compile, emptyTimeline } from '@solocut/core';
+import { applyOps, compile, emptyTimeline, layoutAt } from '@solocut/core';
 import { executeRenderPlan } from '../src/index.js';
 import { SAMPLE_SLOTS } from '../../core/test/pattern-samples.js';
-import { countFrames, ff, frameLuma, HAVE_LIBASS, maxLuma, regionLuma, tempDir } from './helpers.js';
+import { countFrames, ff, FFMPEG_MAJOR, frameLuma, HAVE_LIBASS, maxLuma, regionLuma, tempDir } from './helpers.js';
 
 const D: Decided = { by: 'agent', reason: 'test' };
 const IDS = Object.keys(SAMPLE_SLOTS);
 const SCENE = 60; // frames per scene (2 s)
 
-describe.skipIf(!HAVE_LIBASS)('scene patterns render with libass', () => {
+// Pixel checks are relative to the measured background and the video underneath, so they hold across fonts and
+// ffmpeg/libass versions. Very old ffmpeg (< 6) differs in filter behaviour (geq/overlay alpha): skipped.
+const OLD_FFMPEG = FFMPEG_MAJOR > 0 && FFMPEG_MAJOR < 6;
+
+describe.skipIf(!HAVE_LIBASS || OLD_FFMPEG)('scene patterns render with libass', () => {
   const { dir, cleanup } = tempDir('scenes');
   const p = (n: string) => join(dir, n);
   let out = '';
+  let t: Timeline;
   beforeAll(async () => {
     ff(['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=24', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', p('scr.mp4')]);
     ff(['-f', 'lavfi', '-i', 'color=0x30C060:s=320x240:r=30:d=24', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', p('cam.mp4')]);
     ff(['-f', 'lavfi', '-i', "color=black:s=200x250,format=rgba,geq=r=255:g=255:b=255:a='255*lt(abs(hypot(X-100,Y-90)-50),4)'", '-frames:v', '1', p('ill.png')]);
     ff(['-f', 'lavfi', '-i', "aevalsrc='0.1*sin(2*PI*300*t)':s=48000:d=24", p('mic.wav')]);
     const e = emptyTimeline({ title: 's', kind: 'tech', template: { id: 't', version: '1' }, canvas: { width: 640, height: 360, fps: { num: 30, den: 1 } }, language: 'ja', targets: [] });
-    const t: Timeline = applyOps({
+    t = applyOps({
       ...e,
       sources: {
         scr: { kind: 'screen', path: 'scr.mp4', take: 'take_1', display: 'm', fps: { num: 30, den: 1 }, size: { width: 640, height: 360 }, offset: 0, audio: false },
@@ -46,25 +51,34 @@ describe.skipIf(!HAVE_LIBASS)('scene patterns render with libass', () => {
       expect(maxLuma(out, i * SCENE + 40)).toBeGreaterThan(200);
     });
   }
-  it('dark-background patterns cover the screen video', () => {
+  /** Mean luma of the screen video under the scenes at the same frame. */
+  const under = (f: number) => frameLuma(p('scr.mp4'), f);
+  /** Background luma of a dark pattern: darkest of the four corners (thin waves may cross one). */
+  const bg = (f: number) => Math.min(regionLuma(out, f, 0, 0, 8, 8), regionLuma(out, f, 632, 0, 8, 8), regionLuma(out, f, 0, 352, 8, 8), regionLuma(out, f, 632, 352, 8, 8));
+  const inner = (r: { x: number; y: number; w: number; h: number }, fx: number, fy: number, fw: number, fh: number) =>
+    [Math.round(r.x + r.w * fx), Math.round(r.y + r.h * fy), Math.max(2, Math.round(r.w * fw)), Math.max(2, Math.round(r.h * fh))] as const;
+
+  it('dark-background patterns cover the screen video; cta keeps it visible', () => {
     for (const id of ['title-card', 'quote', 'code-focus']) {
-      const i = IDS.indexOf(id);
-      expect(frameLuma(out, i * SCENE + 40), id).toBeLessThan(45); // testsrc2 underneath averages far brighter
+      const f = IDS.indexOf(id) * SCENE + 40;
+      expect(frameLuma(out, f), id).toBeLessThan(under(f) * 0.6);
     }
-    // cta-subscribe has no background: the screen video stays visible
-    expect(frameLuma(out, IDS.indexOf('cta-subscribe') * SCENE + 40)).toBeGreaterThan(60);
+    const f = IDS.indexOf('cta-subscribe') * SCENE + 40;
+    expect(frameLuma(out, f)).toBeGreaterThan(under(f) * 0.6);
   });
-  it('explain-illust-bubbles: white bubble, camera in the round wipe, illustration in the centre', () => {
+  it('explain-illust-bubbles: white bubbles, camera in the round wipe, illustration in the centre', () => {
     const f = IDS.indexOf('explain-illust-bubbles') * SCENE + 40;
-    // left bubble (centre 0.19W,0.33H; 0.27W × 0.22H): a strip near its top edge is white
-    expect(regionLuma(out, f, 90, 88, 60, 6)).toBeGreaterThan(200);
-    // wipe circle centre ≈ (99, 263): the green camera
-    const wipe = regionLuma(out, f, 92, 256, 14, 14);
-    expect(wipe).toBeGreaterThan(80);
-    expect(wipe).toBeLessThan(200);
-    // illustration ring (white line art) somewhere in the centre column
-    expect(maxLuma(out, f)).toBeGreaterThan(230);
-    // background between frame and bubbles stays dark
-    expect(regionLuma(out, f, 300, 330, 40, 10)).toBeLessThan(60);
+    const items = layoutAt(t, f);
+    const back = bg(f);
+    for (const slot of ['bubbleLeft', 'bubbleRight']) {
+      const r = items.find((i) => i.slot === slot)!.rect;
+      // a strip near the top of the pill, left of centre (away from the text)
+      expect(regionLuma(out, f, ...inner(r, 0.3, 0.12, 0.15, 0.06)), slot).toBeGreaterThan(back + 120);
+    }
+    const w = items.find((i) => i.slot === 'wipe')!.rect;
+    expect(Math.abs(regionLuma(out, f, ...inner(w, 0.4, 0.4, 0.2, 0.2)) - back)).toBeGreaterThan(40); // the green camera
+    const ill = items.find((i) => i.slot === 'illustration')!.rect;
+    expect(ill.x + ill.w / 2).toBeCloseTo(320, -1);
+    expect(maxLuma(out, f)).toBeGreaterThan(back + 150); // white line art and bubbles
   });
 });

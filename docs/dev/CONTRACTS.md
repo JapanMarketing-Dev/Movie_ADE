@@ -12,7 +12,7 @@ signature here, change this file in the same commit.
 - Tests: vitest, `packages/<p>/test/*.test.ts`. **No E2E.** Many fast unit/integration tests with boundaries and
   failure cases. Media tests generate synthetic media with ffmpeg `lavfi` at test time (skip with a clear message if
   ffmpeg is not found; CI installs ffmpeg). Never commit large media.
-- Dependencies: keep them minimal. Allowed now: `zod` (core, settings), `budoux` (captions), `yaml` (templates).
+- Dependencies: keep them minimal. Allowed now: `zod` (core, settings), `budoux` (core, captions), `yaml` (templates).
   Ask before adding others. Do not run `pnpm install` at the repo root concurrently with other workers; the
   orchestrator installs. If you need a dependency, add it to your package.json and say so in your report.
 - No secrets in code. Paths: user data lives in `~/.solocut/` (override with env `SOLOCUT_HOME`, used by tests).
@@ -55,7 +55,11 @@ Schema details fixed by the implementation (docs/15 left them open):
 - `segment.zoom` = `{ at: Frame relative to the segment start; value: { scale 1..8; focus: 'face'|'cursor'|Point(canvas px) };
   ease?: 'linear'|'hold' }[]`. `caption.position.y` is a fraction of the canvas height (0..1). Mask `track[].box` is a Rect in
   source pixels at source frames; a mask is active from its first to its last keyframe, boxes interpolated linearly.
-  `Marker` kinds `ng` and `important` are separate union members. `bgm.duckDb ≤ 0`. Voice `loudness`/`truePeak` are the
+  `Marker` kinds `ng` and `important` are separate union members. `scene.anchor?: { segment: seg id; offset: Frame }` keeps a
+  scene at `segment.start + offset` (length kept): applyOp re-places anchored scenes after every segment change; a missing
+  anchor segment leaves the last range (warning). `wipe.size?` = 0.15–0.5 of the short side (default 0.3); `wipe.style`:
+  'ring-gradient' (orange→red ring) | 'shadow' | 'plain' (other values = plain). Camera `drift` ≠ 1: video re-timed with
+  setpts, voice resampled (aresample 192 kHz → asetrate·drift → 48 kHz). `bgm.duckDb ≤ 0`. Voice `loudness`/`truePeak` are the
   render targets.
 
 ```ts
@@ -159,14 +163,20 @@ export function renderScene(scene: Scene, t, custom?): { back: string[]; front: 
 export function renderScenes(t, custom?): { back: string | null; front: string | null; media: MediaPlacement[]; unknown: string[] };
   // Scenes are a full-frame layer over the timeline during scene.range (cta-subscribe has no background). Text slots
   // wrap by character width (no BudouX in core); put "\n" in a slot to force a break.
-// helpers: sha256Hex (pure), ffFilterValue (filtergraph escaping), voiceSource, assTime, assEscape, assColor, assTagColor,
+  // Text: Noto Sans JP (\b400/700/900), code: JetBrains Mono (bundled OFL fonts; pass fontsDir). Japanese slot text breaks
+  // only between BudouX phrases (jaPhrases, wrapText, fitText exported).
+// helpers: wipeGeometry, reanchor, sha256Hex (pure), ffFilterValue (filtergraph escaping), voiceSource, assTime, assEscape, assColor, assTagColor,
 // assHeader, assStyleLine, assDialogue, overlaysToAss
 ```
 
 ## @solocut/media  (ffmpeg/ffprobe via child_process)
 
 Tool paths: env `SOLOCUT_FFMPEG` / `SOLOCUT_FFPROBE` → `@solocut/toolchain` `resolveTool` → PATH; otherwise `MediaError`.
-Tests use the same order (toolchain-managed builds include libass; libass-only tests skip on builds without it).
+Tests use the same order (toolchain-managed builds include libass; libass-only tests skip on builds without it, and the
+scene pixel tests skip on ffmpeg < 6). Fonts: `executeRenderPlan`/`renderFrame` add `fontsdir` to every libass pass that
+has none, from `o.fontsDir` (false = never) or `defaultFontsDir()` = env `SOLOCUT_FONTS`, else
+`$SOLOCUT_HOME|~/.solocut/tools/fonts` (the subfolder with the most .ttf/.otf/.ttc). Cancel: aborting kills the process
+tree (`taskkill /T /F` on Windows, SIGKILL elsewhere) and rejects immediately (`killTree` exported).
 Errors: `MediaError` (clear message), `FfmpegError extends MediaError` (`code`, `stderrTail`). Aborts reject with `name: 'AbortError'`.
 
 ```ts
@@ -224,7 +234,7 @@ export function layoutLines(text: string, maxChars: number, language: 'ja'|'en')
 export function toAss(captions: Caption[], style: CaptionStyle, canvas: Canvas, fps: Rational): string;
   // escapes { } \ and newlines; \an + \pos from position; karaoke \k per word (when words match the lines); emphasis color/scale/box
 export function toSrt(captions: Caption[], fps: Rational): string;
-export interface CaptionStyle { id; label: { ja; en }; font; size /* × canvas short side */; bold; color; highlight; outline;
+export interface CaptionStyle { id; label: { ja; en }; font; size /* × canvas short side */; bold; weight? /* \b<weight>: tiktok-bold 900, youtube-clean 700 */; color; highlight; outline;
   outlineWidth /* × size */; shadow; box?; karaoke: boolean; emphasis: { color; scale; box }; position;
   maxCharsPerLine: { ja; en }; maxLines; spacing? }
 export const CAPTION_STYLES: Record<string, CaptionStyle>;   // 'tiktok-bold', 'youtube-clean', 'boxed'
@@ -377,8 +387,59 @@ the take clock), `analyze`, `propose cuts [--replace] [--dry-run]`, `edit <op> -
 `validate`, `captions build`, `render --preview|--final [--target] [--out]` (preview → renders/preview.mp4; final →
 renders/<target>/<title>.mp4, sets outputs[].render, auto-registers in the archive), `frame --at <frame|timecode>`
 (extracted from the up-to-date preview), `check [--only failed]` (checks/<run>/report.{md,json}, review.lastCheck),
-`tl summary|show|range|query|why`, `past list|search|show|timeline|compare|register`, `config get|set|schema|path`,
-`prompts list|show [--var k=v]`, `templates`, `lib list|install ffmpeg|whisper|whisper-small|all`, `doctor`, `version`.
+`tl summary|show|range|query|why`, `past list|search|show|timeline|compare|reuse|register`, `config get|set|schema|path`,
+`prompts list|show [--var k=v]`, `templates`, `lib list|install ffmpeg|whisper|whisper-small|all`, `doctor`, `version`,
+`thumb candidates|gen`, `meta show|set|write`, `feedback import|list|show|done`, `mcp`.
+Progress goes to stderr: one redrawn line on a TTY, otherwise at most one line per 10 % (silent with `--json`).
+
+- `thumb candidates [--n 6] [--every 2]`: samples the (fresh) preview at segment middles and every N s, scores
+  sharpness / exposure / contrast (+ the decision model's "eyes open, sharp, good expression" when configured), keeps the
+  best ≥ 3 s apart → `checks/thumbs/cand-<frame>.jpg` + `candidates.json`.
+- `thumb gen [--frame <frame|tc>] [--n 3] [--provider codex|openai|gemini|frame]… [--title "…"|--no-title]
+  [--formats youtube,shorts] [--prompt …] [--reference img]`: the reference frame is extracted at full resolution from the
+  original source; bases come from the providers in `settings.imageGen.order` (fail over in order; none → the frame
+  itself): codex = `codex exec -i <frame> '$imagegen …'` + newest files in `$CODEX_HOME/generated_images`; openai =
+  Images API edits (gpt-image-2, key `SOLOCUT_OPENAI_API_KEY`/`OPENAI_API_KEY`); gemini = generateContent with
+  inline image (key `SOLOCUT_GEMINI_API_KEY`, model from `imageGen.providers.gemini.model`). The title is typeset by
+  Solocut as its own layer: `renders/thumbnails/title-<format>.svg` is always written; it is composited directly when
+  ffmpeg has an SVG decoder (librsvg), else the same layout is drawn with libass; neither → error `ffmpeg-features`.
+  Output `renders/thumbnails/{youtube-N.jpg 1280×720, shorts-N.jpg 1080×1920}` (≤ 2 MB), bases `base-*.png`;
+  `outputs[].thumbnail` is set (youtube → youtube-1, vertical targets → shorts-1). Fonts: libass/fontconfig by name
+  ("Noto Sans JP"), or `SOLOCUT_FONTS_DIR`.
+- `meta set [--target t]… --title … [--description …|--description-file f] [--tags a,b] [--candidates …]… |
+  --file meta.json` (object, or keyed by target) → `outputs[].metadata`, `renders/<target>/metadata.md` (description +
+  YouTube chapters from the outline when valid: ≥ 3, first at 00:00, each ≥ 10 s + credits) and `credits.txt` (unique
+  `license.credit` of the asset sources used by bgm/sfx/overlays/scene images). `meta show`, `meta write`.
+- `past reuse <id> --what pacing,scenes,captions,sfx,thumbnail-style [--apply] [--out ops.json]` → `{ ops,
+  templatePatch, notes, skipped }`: scenes at the same relative positions, sfx per trigger (section → chapter starts,
+  scene-in → scene starts, cut → segment starts) at the past rate, caption style, copied asset sources, and
+  `meta.references`; added elements carry `decided.needsReview`. `--apply` applies the ops and merges `templatePatch`
+  (e.g. `cut.silence.minMs`, `captions.style`) into `<project>/templates/<id>/template.yaml` (`extends` the same id).
+- `feedback import <session-dir> [--organize claude|codex|auto] [--id fb_…]` reads the app's session folder:
+
+  ```jsonc
+  // session.json (written by the desktop app)
+  { "schema": 1, "createdAt": "ISO",
+    "audio": "mic.wav", "audioStartMs": 0,                  // voice, and its start on the session clock
+    "playback": [{ "atMs": 0, "state": "playing" | "paused", "frame": 120 }],   // state changes and seeks
+    "strokes": [{ "startMs": 2000, "endMs": 2600, "frame": 45, "color": "#FF3B30", "width": 0.005,
+                  "points": [[0.31, 0.82], [0.5, 0.9]] }],  // normalized 0..1 to the video picture, origin top-left
+    "notes": [{ "atMs": 9000, "text": "…", "frame": 200 }],
+    "words": [{ "w": "…", "start": 1.6, "end": 2.0 }] }      // optional: already transcribed (s since audioStartMs)
+  ```
+
+  Speech is transcribed with whisper (unless `words`), split into remarks at pauses > 0.8 s / sentence ends; strokes and
+  notes join the remark within 4 s (else their own item). Frame = stroke.frame ?? playback position. Targets = segment
+  and scenes at the frame + captions/overlays whose (approximate) box intersects the strokes. Writes
+  `feedback/<id>/{feedback.md, NN.png (frame with strokes via libass, else drawbox), items.json, session.json,
+  voice.wav}`, `review.feedback[]` and a `feedback` open item. `--organize` asks the agent's print mode (claude -p /
+  codex exec --output-schema) only for titles and requests; quotes always come from the transcript.
+  `feedback list [--open] | show <id> | done <id>`.
+- `mcp [--project dir]`: MCP server over stdio (newline-delimited JSON-RPC 2.0; protocol 2025-06-18 / 2025-03-26 /
+  2024-11-05). Tools: status, next, step, tl_summary, tl_show, tl_range, tl_query, tl_why, edit, undo, redo, validate,
+  propose_cuts, captions_build, render, check, frame (also returns the PNG), past_list, past_search, past_show,
+  past_timeline, past_reuse, feedback_list, feedback_show, meta_set. Each runs the CLI command with `--json`; failures
+  are `isError: true` results.
 History: `.solocut/history.jsonl` lines `{ at, by, agent?, kind: 'edit'|'undo'|'redo', ref?, ops, inverse, note? }`
 (append-only; undo/redo stacks are replayed from the log). Status: `.solocut/status.json` (StepState[]).
 Timeline writes take `.solocut/lock` (stale after 60 s). Decision-model calls are logged to `.solocut/decisions.jsonl`.
